@@ -1,0 +1,58 @@
+# Binaries
+foxhound
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Coverage
+*.out
+*.coverprofile
+coverage.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build artifacts
+dist/
+build/
+bin/
+
+# Dependencies
+vendor/
+go.sum.bak
+
+# Config & secrets
+.env
+.env.local
+config.local.yaml
+secrets.yaml
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+temp/
+cache/
+
+# Documentation build
+docs/_build/
+docs/site/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Project specific
+foxhound-architecture.md
+foxhound-ecosystem.md
