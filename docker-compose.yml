@@ -1,0 +1,166 @@
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# Foxhound full-stack compose file
+#
+# Default services (always started):
+#   foxhound  — scraping worker(s)
+#   redis     — job queue, dedup store, response cache
+#   postgres  — persistent job queue and export target
+#
+# Monitoring profile (opt-in):
+#   prometheus — metrics scraper
+#   grafana    — dashboard (pre-loaded Foxhound dashboard)
+#
+# Usage:
+#   Single worker:
+#     docker compose up
+#
+#   Scale to 4 workers:
+#     docker compose up --scale foxhound=4
+#
+#   With monitoring:
+#     docker compose --profile monitoring up
+# ---------------------------------------------------------------------------
+
+x-foxhound-env: &foxhound-env
+  FOXHOUND_MODE: ${FOXHOUND_MODE:-auto}
+  REDIS_URL: redis://redis:6379/0
+  DATABASE_URL: postgres://foxhound:${POSTGRES_PASSWORD:-foxhound}@postgres:5432/foxhound?sslmode=disable
+  FOXHOUND_LOG_LEVEL: ${FOXHOUND_LOG_LEVEL:-info}
+  FOXHOUND_RUN_ID: ${FOXHOUND_RUN_ID:-default}
+
+services:
+  # -------------------------------------------------------------------------
+  # Foxhound worker
+  # -------------------------------------------------------------------------
+  foxhound:
+    image: foxhound:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: run --config /app/config/config.yaml
+    env_file:
+      - .env
+    environment:
+      <<: *foxhound-env
+    volumes:
+      - ./config:/app/config:ro
+      - foxhound-output:/app/output
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: on-failure:3
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+    networks:
+      - foxhound-net
+    ports:
+      - "9090:9090"  # metrics / health check
+
+  # -------------------------------------------------------------------------
+  # Redis — job queue, dedup store, response cache
+  # -------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - foxhound-net
+
+  # -------------------------------------------------------------------------
+  # PostgreSQL — persistent queue and export target
+  # -------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: foxhound
+      POSTGRES_USER: foxhound
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-foxhound}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foxhound -d foxhound"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - foxhound-net
+
+  # -------------------------------------------------------------------------
+  # Prometheus — metrics (monitoring profile)
+  # -------------------------------------------------------------------------
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v2.51.2
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - foxhound
+    restart: unless-stopped
+    networks:
+      - foxhound-net
+    ports:
+      - "9091:9090"
+
+  # -------------------------------------------------------------------------
+  # Grafana — dashboard (monitoring profile)
+  # -------------------------------------------------------------------------
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:10.4.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - foxhound-net
+    ports:
+      - "3000:3000"
+
+# ---------------------------------------------------------------------------
+# Volumes
+# ---------------------------------------------------------------------------
+volumes:
+  redis-data:
+  postgres-data:
+  foxhound-output:
+  prometheus-data:
+  grafana-data:
+
+# ---------------------------------------------------------------------------
+# Networks
+# ---------------------------------------------------------------------------
+networks:
+  foxhound-net:
+    driver: bridge

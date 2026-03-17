@@ -1,0 +1,27 @@
+{
+  "order": [
+    "Host",
+    "User-Agent",
+    "Accept",
+    "Accept-Language",
+    "Accept-Encoding",
+    "Connection",
+    "Upgrade-Insecure-Requests",
+    "Sec-Fetch-Dest",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-User",
+    "Priority",
+    "Pragma",
+    "Cache-Control"
+  ],
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "accept_encoding": "gzip, deflate, br, zstd",
+  "accept_language_template": "{locale},en;q=0.5",
+  "sec_fetch_dest": "document",
+  "sec_fetch_mode": "navigate",
+  "sec_fetch_site": "none",
+  "sec_fetch_user": "?1",
+  "connection": "keep-alive",
+  "upgrade_insecure_requests": "1"
+}

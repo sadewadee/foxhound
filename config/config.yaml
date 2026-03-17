@@ -1,0 +1,123 @@
+# Foxhound example configuration
+# Environment variables are expanded automatically (e.g. ${REDIS_URL}).
+# Copy this file and adjust for your hunt.
+
+hunt:
+  # Target domain (used for rate-limiting and identity geo-matching).
+  domain: example.com
+  # Number of concurrent virtual users (walkers). Start low, scale up gradually.
+  walkers: 3
+
+# ---------------------------------------------------------------------------
+# Identity — anti-detection fingerprint generation
+# ---------------------------------------------------------------------------
+identity:
+  # Browser to impersonate. "firefox" is recommended (Juggler > CDP for stealth).
+  browser: firefox
+  # Operating systems to include in identity rotation.
+  os: [windows, macos, linux]
+  # Fingerprint profile database. "embedded" uses the bundled 500+ device profiles.
+  fingerprint_db: embedded
+
+# ---------------------------------------------------------------------------
+# Proxy management
+# ---------------------------------------------------------------------------
+proxy:
+  providers:
+    # Static list from environment variable — one proxy per line (user:pass@host:port).
+    - type: static
+      list: []
+    # Example Bright Data provider (uncomment and set BRIGHTDATA_API_KEY):
+    # - type: brightdata
+    #   api_key: ${BRIGHTDATA_API_KEY}
+    #   product: residential
+    #   country: US
+
+  # Proxy rotation strategy: per_session | per_domain | per_request | on_block
+  rotation: per_session
+  # How long to cool down a proxy after a block before retrying it.
+  cooldown: 30m
+  # Maximum requests per proxy before forced rotation.
+  max_requests_per_proxy: 100
+  # How often to health-check proxies.
+  health_check_interval: 60s
+
+# ---------------------------------------------------------------------------
+# Fetch layer
+# ---------------------------------------------------------------------------
+fetch:
+  static:
+    # Timeout for the TLS-impersonating HTTP client.
+    timeout: 30s
+    # Maximum idle connections in the pool.
+    max_idle_conns: 100
+    # Enable JA3/JA4 TLS fingerprint matching. Must be true for stealth.
+    tls_impersonate: true
+
+  browser:
+    # Timeout for Camoufox browser page loads.
+    timeout: 60s
+    # "new" for headless; "false" for headed (debugging).
+    headless: "new"
+    # Number of Camoufox instances to keep alive.
+    instances: 2
+    # Block image loading for faster page loads (reduces bandwidth).
+    block_images: true
+    # Disable WebRTC to prevent IP leaks.
+    block_webrtc: true
+
+# ---------------------------------------------------------------------------
+# Middleware
+# ---------------------------------------------------------------------------
+middleware:
+  ratelimit:
+    # Enable per-domain adaptive rate limiting.
+    enabled: true
+    # Target request rate per second per domain.
+    requests_per_sec: 2.0
+    # Burst allowance above the steady-state rate.
+    burst_size: 5
+
+  dedup:
+    # Deduplication strategy: url | url_canonical | content_hash
+    strategy: url_canonical
+    # Storage backend: memory | redis | sqlite | bloom
+    store: memory
+
+  depth_limit:
+    # Maximum crawl depth from seed URLs. 0 = unlimited.
+    max: 5
+
+# ---------------------------------------------------------------------------
+# Pipeline — item processing stages (executed in order)
+# ---------------------------------------------------------------------------
+pipeline:
+  - validate:
+      required: [title, url]
+
+  - export:
+      # JSON Lines — one JSON object per line, easy to stream.
+      - type: jsonl
+        path: output/${FOXHOUND_RUN_ID:-run}.jsonl
+      # CSV — flat tabular export.
+      - type: csv
+        path: output/${FOXHOUND_RUN_ID:-run}.csv
+
+# ---------------------------------------------------------------------------
+# Queue
+# ---------------------------------------------------------------------------
+queue:
+  # Backend: memory | redis | postgres | sqlite
+  # Use "memory" for single-process runs; "redis" for distributed / resumable.
+  backend: memory
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging:
+  # Log level: debug | info | warn | error
+  level: info
+  # Output format: json | text
+  format: json
+  # Destination: stderr | stdout | /path/to/file.log
+  output: stderr
