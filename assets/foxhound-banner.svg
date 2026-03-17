@@ -1,0 +1,147 @@
+<svg viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Steel plate gradient -->
+    <linearGradient id="steelGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#e8e8e8;stop-opacity:1" />
+      <stop offset="30%" style="stop-color:#d0d0d0;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#b8b8b8;stop-opacity:1" />
+      <stop offset="70%" style="stop-color:#a0a0a0;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#808080;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Foxhound fur gradient (reddish-brown) -->
+    <linearGradient id="furGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#d4501f;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#a83815;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7a2610;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Ear gradient -->
+    <linearGradient id="earGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff8c42;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#ff6b1a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#cc5500;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Eye shine -->
+    <radialGradient id="eyeShine" cx="35%" cy="35%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.8" />
+      <stop offset="100%" style="stop-color:#ffffff;stop-opacity:0" />
+    </radialGradient>
+
+    <!-- Metal rivets -->
+    <radialGradient id="rivetGradient" cx="35%" cy="35%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.6" />
+      <stop offset="60%" style="stop-color:#808080;stop-opacity:0.8" />
+      <stop offset="100%" style="stop-color:#404040;stop-opacity:1" />
+    </radialGradient>
+
+    <!-- Shadow filter -->
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background - steel plate with rivets -->
+  <rect width="800" height="600" fill="url(#steelGradient)"/>
+
+  <!-- Rivets around border -->
+  <circle cx="20" cy="20" r="4" fill="url(#rivetGradient)" filter="url(#shadow)"/>
+  <circle cx="780" cy="20" r="4" fill="url(#rivetGradient)" filter="url(#shadow)"/>
+  <circle cx="20" cy="580" r="4" fill="url(#rivetGradient)" filter="url(#shadow)"/>
+  <circle cx="780" cy="580" r="4" fill="url(#rivetGradient)" filter="url(#shadow)"/>
+
+  <!-- Corner rivets (decorative grid) -->
+  <g fill="url(#rivetGradient)" filter="url(#shadow)">
+    <circle cx="50" cy="50" r="3" opacity="0.6"/>
+    <circle cx="750" cy="50" r="3" opacity="0.6"/>
+    <circle cx="50" cy="550" r="3" opacity="0.6"/>
+    <circle cx="750" cy="550" r="3" opacity="0.6"/>
+  </g>
+
+  <!-- Steel plate border lines -->
+  <line x1="10" y1="10" x2="790" y2="10" stroke="#606060" stroke-width="3"/>
+  <line x1="10" y1="10" x2="10" y2="590" stroke="#606060" stroke-width="3"/>
+  <line x1="10" y1="590" x2="790" y2="590" stroke="#404040" stroke-width="3"/>
+  <line x1="790" y1="10" x2="790" y2="590" stroke="#404040" stroke-width="3"/>
+
+  <!-- Center plate group (main foxhound area) -->
+  <g filter="url(#shadow)">
+    <!-- Head outline - main shape -->
+    <ellipse cx="400" cy="300" rx="200" ry="220" fill="url(#furGradient)"/>
+
+    <!-- Left ear -->
+    <ellipse cx="280" cy="120" rx="70" ry="110" fill="url(#earGradient)" transform="rotate(-35 280 120)"/>
+    <ellipse cx="285" cy="125" rx="40" ry="70" fill="#ffc9a3" transform="rotate(-35 285 125)"/>
+
+    <!-- Right ear -->
+    <ellipse cx="520" cy="120" rx="70" ry="110" fill="url(#earGradient)" transform="rotate(35 520 120)"/>
+    <ellipse cx="515" cy="125" rx="40" ry="70" fill="#ffc9a3" transform="rotate(35 515 125)"/>
+
+    <!-- Snout/Muzzle -->
+    <ellipse cx="400" cy="380" rx="140" ry="110" fill="#c4845a"/>
+    <ellipse cx="400" cy="380" rx="120" ry="95" fill="#d4956a"/>
+
+    <!-- Nose -->
+    <ellipse cx="400" cy="360" rx="45" ry="40" fill="#2a1810"/>
+    <ellipse cx="390" cy="355" rx="15" ry="18" fill="#1a0f08"/>
+    <ellipse cx="410" cy="355" rx="15" ry="18" fill="#1a0f08"/>
+
+    <!-- Mouth line -->
+    <path d="M 400 360 Q 380 380 360 385" stroke="#3a2520" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M 400 360 Q 420 380 440 385" stroke="#3a2520" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+    <!-- Left eye -->
+    <circle cx="320" cy="260" r="35" fill="#1a1a1a"/>
+    <circle cx="320" cy="260" r="32" fill="#000000"/>
+    <circle cx="320" cy="260" r="28" fill="#2a4a1a"/>
+    <circle cx="318" cy="255" r="12" fill="#4aaa2a"/>
+    <circle cx="322" cy="255" r="12" fill="#3a8a1a"/>
+    <ellipse cx="320" cy="258" rx="8" ry="10" fill="#000000"/>
+    <ellipse cx="322" cy="253" rx="6" ry="8" fill="#ffffff"/>
+    <circle cx="323" cy="250" r="4" fill="url(#eyeShine)"/>
+
+    <!-- Right eye -->
+    <circle cx="480" cy="260" r="35" fill="#1a1a1a"/>
+    <circle cx="480" cy="260" r="32" fill="#000000"/>
+    <circle cx="480" cy="260" r="28" fill="#2a4a1a"/>
+    <circle cx="478" cy="255" r="12" fill="#4aaa2a"/>
+    <circle cx="482" cy="255" r="12" fill="#3a8a1a"/>
+    <ellipse cx="480" cy="258" rx="8" ry="10" fill="#000000"/>
+    <ellipse cx="482" cy="253" rx="6" ry="8" fill="#ffffff"/>
+    <circle cx="483" cy="250" r="4" fill="url(#eyeShine)"/>
+
+    <!-- Left cheek mark -->
+    <ellipse cx="250" cy="300" rx="50" ry="60" fill="#8a3a1a" opacity="0.6"/>
+
+    <!-- Right cheek mark -->
+    <ellipse cx="550" cy="300" rx="50" ry="60" fill="#8a3a1a" opacity="0.6"/>
+
+    <!-- Fur texture lines (subtle) -->
+    <path d="M 300 200 Q 320 180 340 200" stroke="#703010" stroke-width="2" fill="none" opacity="0.5"/>
+    <path d="M 460 200 Q 480 180 500 200" stroke="#703010" stroke-width="2" fill="none" opacity="0.5"/>
+    <path d="M 350 500 Q 380 520 410 500" stroke="#704010" stroke-width="2" fill="none" opacity="0.4"/>
+    <path d="M 410 500 Q 440 520 470 500" stroke="#704010" stroke-width="2" fill="none" opacity="0.4"/>
+  </g>
+
+  <!-- Foreground rivets and metallic elements -->
+  <g fill="url(#rivetGradient)" filter="url(#shadow)">
+    <!-- Corner rivets on foxhound area -->
+    <circle cx="150" cy="150" r="5" opacity="0.7"/>
+    <circle cx="650" cy="150" r="5" opacity="0.7"/>
+    <circle cx="150" cy="450" r="5" opacity="0.7"/>
+    <circle cx="650" cy="450" r="5" opacity="0.7"/>
+  </g>
+
+  <!-- Plate edge/bevel effect -->
+  <line x1="15" y1="15" x2="785" y2="15" stroke="#ffffff" stroke-width="1" opacity="0.3"/>
+  <line x1="15" y1="15" x2="15" y2="585" stroke="#ffffff" stroke-width="1" opacity="0.3"/>
+
+  <!-- Text at bottom -->
+  <text x="400" y="560" font-family="Arial, sans-serif" font-size="32" font-weight="bold" text-anchor="middle" fill="#404040" letter-spacing="2">
+    FOXHOUND
+  </text>
+  <text x="400" y="585" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#606060" letter-spacing="1">
+    GO SCRAPING FRAMEWORK
+  </text>
+</svg>
