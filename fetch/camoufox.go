@@ -109,6 +109,7 @@ type CamoufoxFetcher struct {
 	headless       string
 	timeout        time.Duration
 	proxyURL       string // SOCKS5 or HTTP proxy URL
+	extensionPath  string // path to Firefox extension dir (e.g. NopeCHA)
 	maxRequests    int    // restart browser after this many requests (0 = disabled)
 	persistSession bool   // reuse BrowserContext across requests when true
 }
@@ -118,6 +119,15 @@ type CamoufoxFetcher struct {
 func WithBrowserProxy(proxyURL string) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.proxyURL = proxyURL
+	}
+}
+
+// WithExtensionPath sets the path to a Firefox extension directory to load.
+// In the stub build this stores the value but has no effect — the extension
+// is only loaded when compiled with the playwright build tag.
+func WithExtensionPath(path string) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.extensionPath = path
 	}
 }
 

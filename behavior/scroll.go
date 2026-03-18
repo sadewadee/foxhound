@@ -17,6 +17,16 @@ const (
 	ScrollScan
 )
 
+// ScrollAxis determines the scroll direction.
+type ScrollAxis int
+
+const (
+	// ScrollVertical scrolls the viewport up/down (default).
+	ScrollVertical ScrollAxis = iota
+	// ScrollHorizontal scrolls the viewport left/right.
+	ScrollHorizontal
+)
+
 // ScrollConfig configures scroll behaviour generation.
 type ScrollConfig struct {
 	// ReadMinPx is the minimum scroll distance per gesture in reading mode.
@@ -27,14 +37,23 @@ type ScrollConfig struct {
 	ScanMinPx int
 	// ScanMaxPx is the maximum scroll distance per gesture in scan mode.
 	ScanMaxPx int
-	// ReadPause is the *base* pause for reading mode (not a single value;
-	// actual pauses are sampled from [1s, 5s]).
+	// ReadPause is the midpoint pause for reading mode. Actual pauses are
+	// sampled from [ReadPause*0.5, ReadPause*2.5] to simulate natural variance.
 	ReadPause time.Duration
-	// ScanPause is the *base* pause for scan mode (actual: [300ms, 1s]).
+	// ScanPause is the midpoint pause for scan mode. Actual pauses are
+	// sampled from [ScanPause*0.6, ScanPause*2.0].
 	ScanPause time.Duration
 	// ScrollUpProb is the probability that any given gesture scrolls upward
 	// (re-reading behaviour).
 	ScrollUpProb float64
+	// HorizMinPx is the minimum horizontal scroll distance per gesture in reading mode.
+	HorizMinPx int
+	// HorizMaxPx is the maximum horizontal scroll distance per gesture in reading mode.
+	HorizMaxPx int
+	// HorizScanMinPx is the minimum horizontal scroll distance per gesture in scan mode.
+	HorizScanMinPx int
+	// HorizScanMaxPx is the maximum horizontal scroll distance per gesture in scan mode.
+	HorizScanMaxPx int
 }
 
 // DefaultScrollConfig returns the architecture-recommended defaults.
@@ -46,7 +65,11 @@ func DefaultScrollConfig() ScrollConfig {
 		ScanMaxPx:    3000,
 		ReadPause:    2 * time.Second, // midpoint reference — actual range [1s,5s]
 		ScanPause:    500 * time.Millisecond,
-		ScrollUpProb: 0.15,
+		ScrollUpProb:    0.15,
+		HorizMinPx:     200,
+		HorizMaxPx:     600,
+		HorizScanMinPx: 400,
+		HorizScanMaxPx: 1200,
 	}
 }
 
@@ -59,6 +82,8 @@ type ScrollAction struct {
 	Pause time.Duration
 	// Up is true if the scroll gesture moves the viewport upward.
 	Up bool
+	// Axis is the scroll direction (vertical or horizontal).
+	Axis ScrollAxis
 }
 
 // Scroll generates human-like scroll behaviour.
@@ -81,10 +106,10 @@ func (s *Scroll) ScrollGesture(mode ScrollMode) (distance int, pause time.Durati
 	switch mode {
 	case ScrollScan:
 		distance = s.config.ScanMinPx + rand.IntN(s.config.ScanMaxPx-s.config.ScanMinPx+1)
-		pause = uniformDurationMs(300, 1000)
+		pause = pauseFromMidpoint(s.config.ScanPause, 0.6, 2.0)
 	default: // ScrollReading
 		distance = s.config.ReadMinPx + rand.IntN(s.config.ReadMaxPx-s.config.ReadMinPx+1)
-		pause = uniformDurationMs(1000, 5000)
+		pause = pauseFromMidpoint(s.config.ReadPause, 0.5, 2.5)
 	}
 	return
 }
@@ -119,8 +144,59 @@ func (s *Scroll) ScrollSequence(pageHeight int, mode ScrollMode) []ScrollAction 
 	return actions
 }
 
-// uniformDurationMs returns a uniformly-distributed duration in [minMs, maxMs].
-func uniformDurationMs(minMs, maxMs float64) time.Duration {
-	ms := minMs + rand.Float64()*(maxMs-minMs)
-	return time.Duration(ms * float64(time.Millisecond))
+// ScrollGestureAxis returns the attributes of a single scroll action for the
+// given axis. For vertical, this delegates to ScrollGesture. For horizontal,
+// distances are drawn from the horizontal config ranges.
+func (s *Scroll) ScrollGestureAxis(mode ScrollMode, axis ScrollAxis) (distance int, pause time.Duration, reverse bool) {
+	if axis == ScrollVertical {
+		return s.ScrollGesture(mode)
+	}
+
+	reverse = rand.Float64() < s.config.ScrollUpProb
+
+	switch mode {
+	case ScrollScan:
+		distance = s.config.HorizScanMinPx + rand.IntN(s.config.HorizScanMaxPx-s.config.HorizScanMinPx+1)
+		pause = pauseFromMidpoint(s.config.ScanPause, 0.6, 2.0)
+	default: // ScrollReading
+		distance = s.config.HorizMinPx + rand.IntN(s.config.HorizMaxPx-s.config.HorizMinPx+1)
+		pause = pauseFromMidpoint(s.config.ReadPause, 0.5, 2.5)
+	}
+	return
+}
+
+// ScrollSequenceAxis generates a complete scroll sequence for a page with the
+// given pixel extent along the specified axis.
+func (s *Scroll) ScrollSequenceAxis(extent int, mode ScrollMode, axis ScrollAxis) []ScrollAction {
+	if extent <= 0 {
+		d, p, r := s.ScrollGestureAxis(mode, axis)
+		return []ScrollAction{{Distance: d, Pause: p, Up: r, Axis: axis}}
+	}
+
+	var actions []ScrollAction
+	netForward := 0
+
+	for netForward < extent {
+		dist, pause, reverse := s.ScrollGestureAxis(mode, axis)
+		actions = append(actions, ScrollAction{Distance: dist, Pause: pause, Up: reverse, Axis: axis})
+		if reverse {
+			netForward -= dist
+			if netForward < 0 {
+				netForward = 0
+			}
+		} else {
+			netForward += dist
+		}
+	}
+
+	return actions
+}
+
+// pauseFromMidpoint returns a uniformly-distributed duration in
+// [midpoint*loFactor, midpoint*hiFactor]. This allows per-profile tuning of
+// scroll pauses via the ReadPause/ScanPause config fields.
+func pauseFromMidpoint(midpoint time.Duration, loFactor, hiFactor float64) time.Duration {
+	lo := float64(midpoint) * loFactor
+	hi := float64(midpoint) * hiFactor
+	return time.Duration(lo + rand.Float64()*(hi-lo))
 }

@@ -28,6 +28,7 @@ package fetch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
@@ -42,6 +43,7 @@ import (
 	"time"
 
 	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/behavior"
 	"github.com/sadewadee/foxhound/identity"
 	"github.com/playwright-community/playwright-go"
 )
@@ -136,12 +138,14 @@ type CamoufoxFetcher struct {
 	headless       string
 	timeout        time.Duration
 	proxyURL       string       // SOCKS5 or HTTP proxy URL
+	extensionPath  string       // path to Firefox extension dir (e.g. NopeCHA)
 	maxRequests    int          // restart after this many fetches (0 = disabled)
 	requestCount   atomic.Int64 // total fetches served by the current browser instance
 	mu             sync.Mutex   // serialises browser restart
 	persistSession bool
 	sessionCtx     playwright.BrowserContext // reused when persistSession=true
 	sessionMu      sync.Mutex               // guards sessionCtx lifecycle
+	hasExtension   bool                      // true when solver extension is loaded
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -149,6 +153,16 @@ type CamoufoxFetcher struct {
 func WithBrowserProxy(proxyURL string) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.proxyURL = proxyURL
+	}
+}
+
+// WithExtensionPath sets the path to a Firefox extension directory to load.
+// The extension is installed as a temporary addon when the browser launches.
+// This is used to load NopeCHA or similar solver extensions that auto-solve
+// CAPTCHA challenges the browser encounters.
+func WithExtensionPath(path string) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.extensionPath = path
 	}
 }
 
@@ -206,6 +220,42 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 		proxyOpt := parsePlaywrightProxy(f.proxyURL)
 		launchOpts.Proxy = proxyOpt
 		slog.Info("fetch/camoufox: proxy configured", "server", proxyOpt.Server)
+	}
+
+	// When an extension path is set AND Camoufox binary is available, inject
+	// the addon via CAMOU_CONFIG env var. Camoufox natively loads unpacked
+	// addons listed in CAMOU_CONFIG_* environment variables — no persistent
+	// context or profile hacking needed.
+	if f.extensionPath != "" && execPath != "" {
+		// Resolve to absolute path.
+		absExt, _ := filepath.Abs(f.extensionPath)
+		// If .xpi, it must be extracted first — Camoufox expects directories.
+		if strings.HasSuffix(absExt, ".xpi") {
+			extractDir, tmpErr := os.MkdirTemp("", "foxhound-addon-*")
+			if tmpErr == nil {
+				unzipCmd := exec.Command("unzip", "-o", absExt, "-d", extractDir)
+				if uzErr := unzipCmd.Run(); uzErr != nil {
+					slog.Warn("fetch/camoufox: failed to extract .xpi", "err", uzErr)
+				} else {
+					absExt = extractDir
+					slog.Info("fetch/camoufox: extracted .xpi", "dir", extractDir)
+				}
+			}
+		}
+
+		// Build CAMOU_CONFIG JSON with addons array.
+		camoConfig := map[string]any{
+			"addons": []string{absExt},
+		}
+		configJSON, _ := json.Marshal(camoConfig)
+		if launchOpts.Env == nil {
+			launchOpts.Env = map[string]string{}
+		}
+		launchOpts.Env["CAMOU_CONFIG_1"] = string(configJSON)
+		f.hasExtension = true
+
+		slog.Info("fetch/camoufox: addon injected via CAMOU_CONFIG",
+			"path", absExt)
 	}
 
 	browser, err := pw.Firefox.Launch(launchOpts)
@@ -396,6 +446,7 @@ func (f *CamoufoxFetcher) Fetch(ctx context.Context, job *foxhound.Job) (*foxhou
 // on first call and reused; the caller must NOT close it.
 // Returns (ctx, shouldClose, err).
 func (f *CamoufoxFetcher) getOrCreateContext() (playwright.BrowserContext, bool, error) {
+
 	if !f.persistSession {
 		bctx, err := f.browser.NewContext(f.buildContextOptions())
 		return bctx, true, err // caller should close
@@ -441,19 +492,21 @@ func (f *CamoufoxFetcher) simulateHumanBehavior(page playwright.Page) {
 	}
 
 	// 3. Scroll down — shows the user is reading past the fold.
-	scrollY := float64(200 + rand.IntN(400))
-	if err := page.Mouse().Wheel(0, scrollY); err != nil {
+	scroller := behavior.NewScroll(behavior.DefaultScrollConfig())
+	dist, pause, _ := scroller.ScrollGesture(behavior.ScrollReading)
+	if err := page.Mouse().Wheel(0, float64(dist)); err != nil {
 		slog.Debug("fetch/camoufox: simulateHuman: scroll down failed", "err", err)
 	}
-	time.Sleep(time.Duration(500+rand.IntN(1000)) * time.Millisecond)
+	time.Sleep(pause)
 
 	// 4. Occasionally scroll back up — natural reading / re-reading behaviour.
 	if rand.Float64() < 0.3 {
-		scrollUp := float64(100 + rand.IntN(200))
-		if err := page.Mouse().Wheel(0, -scrollUp); err != nil {
+		upDist, upPause, _ := scroller.ScrollGesture(behavior.ScrollReading)
+		// Use half the distance for a partial re-read.
+		if err := page.Mouse().Wheel(0, -float64(upDist/2)); err != nil {
 			slog.Debug("fetch/camoufox: simulateHuman: scroll up failed", "err", err)
 		}
-		time.Sleep(time.Duration(300+rand.IntN(500)) * time.Millisecond)
+		time.Sleep(upPause)
 	}
 
 	// 5. Move mouse to a second random viewport position.
@@ -464,6 +517,74 @@ func (f *CamoufoxFetcher) simulateHumanBehavior(page playwright.Page) {
 			slog.Debug("fetch/camoufox: simulateHuman: mouse move 2 failed", "err", err)
 		}
 	}
+}
+
+// executeStep performs a single Trail step on the loaded page. It handles
+// Click, Wait, and Scroll actions. Extract steps are skipped (handled later
+// by the Walker's Processor).
+func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobStep) error {
+	switch step.Action {
+	case foxhound.JobStepClick:
+		el, err := page.QuerySelector(step.Selector)
+		if err != nil {
+			return fmt.Errorf("query selector %q: %w", step.Selector, err)
+		}
+		if el == nil {
+			return fmt.Errorf("selector %q not found", step.Selector)
+		}
+		if err := el.Click(); err != nil {
+			return fmt.Errorf("click %q: %w", step.Selector, err)
+		}
+		// Brief pause after click to let any JS handlers fire.
+		time.Sleep(time.Duration(200+rand.IntN(300)) * time.Millisecond)
+
+	case foxhound.JobStepWait:
+		timeout := step.Duration
+		if timeout <= 0 {
+			timeout = 10 * time.Second
+		}
+		_, err := page.WaitForSelector(step.Selector, playwright.PageWaitForSelectorOptions{
+			Timeout: playwright.Float(float64(timeout.Milliseconds())),
+		})
+		if err != nil {
+			return fmt.Errorf("wait for %q (timeout %v): %w", step.Selector, timeout, err)
+		}
+
+	case foxhound.JobStepScroll:
+		scroller := behavior.NewScroll(behavior.DefaultScrollConfig())
+		axis := behavior.ScrollAxis(step.ScrollAxis)
+		extent := step.ScrollExtent
+		if extent <= 0 {
+			extent = 3000
+		}
+		mode := behavior.ScrollMode(step.ScrollMode)
+		actions := scroller.ScrollSequenceAxis(extent, mode, axis)
+		for _, a := range actions {
+			var dx, dy float64
+			if a.Axis == behavior.ScrollHorizontal {
+				dx = float64(a.Distance)
+				if a.Up {
+					dx = -dx
+				}
+			} else {
+				dy = float64(a.Distance)
+				if a.Up {
+					dy = -dy
+				}
+			}
+			if err := page.Mouse().Wheel(dx, dy); err != nil {
+				slog.Debug("fetch/camoufox: scroll step failed", "err", err)
+			}
+			time.Sleep(a.Pause)
+		}
+
+	case foxhound.JobStepExtract:
+		// Handled by Walker after fetch — no-op here.
+
+	default:
+		slog.Debug("fetch/camoufox: unknown step action", "action", step.Action)
+	}
+	return nil
 }
 
 // handleCookieConsent attempts to click common cookie-consent accept buttons.
@@ -631,8 +752,22 @@ func (f *CamoufoxFetcher) handleRecaptcha(page playwright.Page) {
 				return
 			}
 
-			slog.Info("fetch/camoufox: reCAPTCHA checkbox clicked but not solved (may need image challenge)")
-			// Even if not solved, we tried — image challenges need external solvers
+			slog.Info("fetch/camoufox: reCAPTCHA checkbox clicked but not solved, waiting for solver extension...")
+			// Wait for solver extension (NopeCHA) to handle image challenge.
+			for wait := 0; wait < 30; wait++ {
+				time.Sleep(1 * time.Second)
+				checked2, _ := cb.GetAttribute("aria-checked")
+				if checked2 == "true" {
+					slog.Info("fetch/camoufox: reCAPTCHA SOLVED by extension!")
+					f.submitAfterCaptcha(page)
+					time.Sleep(2 * time.Second)
+					page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+						State: playwright.LoadStateNetworkidle,
+					})
+					return
+				}
+			}
+			slog.Warn("fetch/camoufox: reCAPTCHA image challenge not solved in time")
 			return
 		}
 	}
@@ -661,6 +796,214 @@ func (f *CamoufoxFetcher) handleRecaptcha(page playwright.Page) {
 	slog.Warn("fetch/camoufox: reCAPTCHA found but could not locate clickable checkbox")
 }
 
+// handleHCaptcha detects and attempts to solve hCaptcha checkbox challenges.
+// hCaptcha renders inside an iframe similar to reCAPTCHA — we locate the
+// iframe, find the checkbox, move the mouse naturally, and click.
+func (f *CamoufoxFetcher) handleHCaptcha(page playwright.Page) {
+	// Check if page contains hCaptcha indicators.
+	hasHCaptcha := false
+	indicators := []string{
+		"iframe[src*='hcaptcha.com']",
+		"iframe[data-hcaptcha-widget-id]",
+		".h-captcha",
+		"div[class*='h-captcha']",
+	}
+	for _, sel := range indicators {
+		el, err := page.QuerySelector(sel)
+		if err == nil && el != nil {
+			hasHCaptcha = true
+			break
+		}
+	}
+	if !hasHCaptcha {
+		return
+	}
+
+	slog.Info("fetch/camoufox: hCaptcha detected, attempting to solve...")
+	time.Sleep(time.Duration(1500+rand.IntN(2000)) * time.Millisecond)
+
+	// hCaptcha checkbox lives inside an iframe.
+	iframeSelectors := []string{
+		"iframe[src*='hcaptcha.com/captcha/checkbox']",
+		"iframe[src*='assets.hcaptcha.com']",
+		"iframe[src*='hcaptcha.com']",
+		"iframe[data-hcaptcha-widget-id]",
+	}
+
+	for _, iframeSel := range iframeSelectors {
+		iframeEl, err := page.QuerySelector(iframeSel)
+		if err != nil || iframeEl == nil {
+			continue
+		}
+
+		frame, err := iframeEl.ContentFrame()
+		if err != nil || frame == nil {
+			continue
+		}
+
+		checkboxSelectors := []string{
+			"#checkbox",
+			"div[id='checkbox']",
+			"div[class*='check']",
+		}
+
+		for _, cbSel := range checkboxSelectors {
+			cb, err := frame.QuerySelector(cbSel)
+			if err != nil || cb == nil {
+				continue
+			}
+			visible, _ := cb.IsVisible()
+			if !visible {
+				continue
+			}
+
+			// Human-like mouse movement toward the checkbox.
+			box, err := cb.BoundingBox()
+			if err == nil && box != nil {
+				targetX := box.X + box.Width*0.3 + float64(rand.IntN(int(box.Width*0.4)))
+				targetY := box.Y + box.Height*0.3 + float64(rand.IntN(int(box.Height*0.4)))
+				currentX := float64(200 + rand.IntN(400))
+				currentY := float64(200 + rand.IntN(200))
+				steps := 8 + rand.IntN(8)
+				for step := 1; step <= steps; step++ {
+					t := float64(step) / float64(steps)
+					t = t * t * (3 - 2*t)
+					mx := currentX + (targetX-currentX)*t + float64(rand.IntN(3)-1)
+					my := currentY + (targetY-currentY)*t + float64(rand.IntN(3)-1)
+					page.Mouse().Move(mx, my)
+					time.Sleep(time.Duration(20+rand.IntN(40)) * time.Millisecond)
+				}
+				time.Sleep(time.Duration(200+rand.IntN(300)) * time.Millisecond)
+			}
+
+			if err := cb.Click(); err != nil {
+				slog.Debug("fetch/camoufox: hCaptcha checkbox click failed", "err", err)
+				continue
+			}
+
+			slog.Info("fetch/camoufox: hCaptcha checkbox clicked, waiting for verification...")
+			time.Sleep(time.Duration(3000+rand.IntN(3000)) * time.Millisecond)
+
+			// Check if solved.
+			checked, _ := cb.GetAttribute("aria-checked")
+			if checked == "true" {
+				slog.Info("fetch/camoufox: hCaptcha SOLVED via checkbox click!")
+				f.submitAfterCaptcha(page)
+				time.Sleep(time.Duration(2000+rand.IntN(2000)) * time.Millisecond)
+				page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+					State: playwright.LoadStateNetworkidle,
+				})
+				return
+			}
+
+			slog.Info("fetch/camoufox: hCaptcha checkbox clicked but not solved, waiting for solver extension...")
+			for wait := 0; wait < 30; wait++ {
+				time.Sleep(1 * time.Second)
+				checked2, _ := cb.GetAttribute("aria-checked")
+				if checked2 == "true" {
+					slog.Info("fetch/camoufox: hCaptcha SOLVED by extension!")
+					f.submitAfterCaptcha(page)
+					time.Sleep(2 * time.Second)
+					page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+						State: playwright.LoadStateNetworkidle,
+					})
+					return
+				}
+			}
+			slog.Warn("fetch/camoufox: hCaptcha image challenge not solved in time")
+			return
+		}
+	}
+
+	slog.Warn("fetch/camoufox: hCaptcha found but could not locate clickable checkbox")
+}
+
+// waitForExtensionSolve detects captcha type on the page and waits for the
+// solver extension (NopeCHA) to solve it. Used when extension is loaded —
+// no manual clicking needed, the extension handles everything.
+func (f *CamoufoxFetcher) waitForExtensionSolve(page playwright.Page) {
+	// Give page JS + extension time to init and start solving.
+	time.Sleep(5 * time.Second)
+
+	content, _ := page.Content()
+	lower := strings.ToLower(content)
+
+	// Detect what captcha type is on the page.
+	var captchaType string
+	switch {
+	case strings.Contains(lower, "challenges.cloudflare.com/turnstile") || strings.Contains(lower, "cf-turnstile"):
+		captchaType = "turnstile"
+	case strings.Contains(lower, "hcaptcha.com") || strings.Contains(lower, "h-captcha"):
+		captchaType = "hcaptcha"
+	case strings.Contains(lower, "google.com/recaptcha") || strings.Contains(lower, "g-recaptcha"):
+		captchaType = "recaptcha"
+	case strings.Contains(lower, "geetest.com") || strings.Contains(lower, "gt_captcha"):
+		captchaType = "geetest"
+	}
+
+	if captchaType == "" {
+		return
+	}
+
+	slog.Info("fetch/camoufox: captcha detected, waiting for extension to solve",
+		"type", captchaType)
+
+	// Poll for solve completion — check every second for up to 45s.
+	for i := 0; i < 45; i++ {
+		time.Sleep(1 * time.Second)
+
+		solved := false
+		switch captchaType {
+		case "turnstile":
+			// Turnstile solved when hidden input has a token value.
+			val, _ := page.Evaluate(`() => {
+				const inp = document.querySelector('input[name="cf-turnstile-response"]');
+				return inp && inp.value && inp.value.length > 10;
+			}`)
+			if b, ok := val.(bool); ok && b {
+				solved = true
+			}
+		case "recaptcha":
+			// reCAPTCHA solved when textarea#g-recaptcha-response has value.
+			val, _ := page.Evaluate(`() => {
+				const ta = document.querySelector('textarea[name="g-recaptcha-response"]');
+				return ta && ta.value && ta.value.length > 10;
+			}`)
+			if b, ok := val.(bool); ok && b {
+				solved = true
+			}
+		case "hcaptcha":
+			// hCaptcha solved when textarea[name="h-captcha-response"] has value.
+			val, _ := page.Evaluate(`() => {
+				const ta = document.querySelector('textarea[name="h-captcha-response"]');
+				return ta && ta.value && ta.value.length > 10;
+			}`)
+			if b, ok := val.(bool); ok && b {
+				solved = true
+			}
+		case "geetest":
+			// GeeTest solved when validate field is populated.
+			val, _ := page.Evaluate(`() => {
+				const inp = document.querySelector('input[name="geetest_validate"], .geetest_success');
+				return inp != null;
+			}`)
+			if b, ok := val.(bool); ok && b {
+				solved = true
+			}
+		}
+
+		if solved {
+			slog.Info("fetch/camoufox: extension solved captcha!",
+				"type", captchaType, "seconds", i+1)
+			f.submitAfterCaptcha(page)
+			time.Sleep(1 * time.Second)
+			return
+		}
+	}
+	slog.Warn("fetch/camoufox: extension did not solve captcha in time",
+		"type", captchaType)
+}
+
 // detectCloudflare inspects the fully-loaded page content and returns the type
 // of Cloudflare challenge present, or "" if none is detected.
 //
@@ -680,9 +1023,21 @@ func (f *CamoufoxFetcher) detectCloudflare(page playwright.Page) string {
 		return "js_challenge"
 	}
 
-	// Turnstile widget
+	// Turnstile widget — but only if it hasn't been solved yet.
+	// When solved, the hidden input cf-turnstile-response gets a token value.
 	if strings.Contains(lower, "challenges.cloudflare.com/turnstile") ||
 		strings.Contains(lower, "cf-turnstile") {
+		// Check if any cf-turnstile-response input already has a token value.
+		solved, _ := page.Evaluate(`() => {
+			const inputs = document.querySelectorAll('input[name="cf-turnstile-response"]');
+			for (const input of inputs) {
+				if (input.value && input.value.length > 10) return true;
+			}
+			return false;
+		}`)
+		if val, ok := solved.(bool); ok && val {
+			return "" // already solved
+		}
 		return "turnstile"
 	}
 
@@ -733,48 +1088,148 @@ func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page) bool {
 	case "turnstile":
 		slog.Info("fetch/camoufox: attempting Turnstile challenge...")
 
-		// Turnstile renders inside an iframe.  Try each known iframe selector.
+		// Turnstile can render as:
+		//  (a) an iframe with src*='challenges.cloudflare.com' (Cloudflare-hosted interstitial)
+		//  (b) a div container with JS-injected widget (embedded via api.js — no iframe)
+		// We try both strategies: iframe first, then container div.
+
+		// Strategy 1: Turnstile iframe (Cloudflare interstitial pages).
 		iframeSelectors := []string{
 			"iframe[src*='challenges.cloudflare.com/turnstile']",
 			"iframe[src*='challenges.cloudflare.com/cdn-cgi']",
+			"iframe[src*='challenges.cloudflare.com']",
+			"div.cf-turnstile iframe",
 		}
-		for _, sel := range iframeSelectors {
-			iframe, err := page.QuerySelector(sel)
-			if err != nil || iframe == nil {
-				continue
-			}
-			frame, err := iframe.ContentFrame()
-			if err != nil || frame == nil {
-				continue
-			}
 
-			// Locate and click the challenge checkbox inside the iframe.
-			checkbox, _ := frame.QuerySelector("input[type='checkbox'], div[class*='checkbox']")
-			if checkbox != nil {
-				time.Sleep(time.Duration(1000+rand.IntN(2000)) * time.Millisecond)
-				checkbox.Click()
-				time.Sleep(3 * time.Second)
-				page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-					State: playwright.LoadStateNetworkidle,
-				})
-				if f.detectCloudflare(page) == "" {
-					slog.Info("fetch/camoufox: Turnstile challenge resolved via checkbox click!")
-					return true
+		var widget playwright.ElementHandle
+		for _, sel := range iframeSelectors {
+			el, err := page.QuerySelector(sel)
+			if err == nil && el != nil {
+				if box, _ := el.BoundingBox(); box != nil && box.Width >= 30 && box.Height >= 30 {
+					widget = el
+					slog.Info("fetch/camoufox: Turnstile iframe found", "selector", sel)
+					break
 				}
 			}
 		}
 
-		// Managed / invisible Turnstile may auto-resolve when the browser's
-		// behavioral score is good enough.
-		slog.Info("fetch/camoufox: waiting for Turnstile auto-resolution...")
-		time.Sleep(5 * time.Second)
-		page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-			State: playwright.LoadStateNetworkidle,
-		})
-		if f.detectCloudflare(page) == "" {
-			slog.Info("fetch/camoufox: Turnstile auto-resolved!")
-			return true
+		// Strategy 2: find widget by hidden input name="cf-turnstile-response".
+		// The hidden input is always present — its parent div IS the widget container.
+		if widget == nil {
+			inputs, err := page.QuerySelectorAll("input[name='cf-turnstile-response']")
+			if err == nil {
+				for _, input := range inputs {
+					// The widget container is the closest ancestor with visible dimensions.
+					parent, _ := page.EvaluateHandle(
+						"el => { let p = el.parentElement; while (p && (p.offsetWidth < 200 || p.offsetHeight < 30)) p = p.parentElement; return p; }",
+						input)
+					if parent == nil {
+						continue
+					}
+					el, ok := parent.(playwright.ElementHandle)
+					if !ok {
+						continue
+					}
+					box, _ := el.BoundingBox()
+					// Turnstile widget is ~300x65. Skip anything too wide (parent wrapper).
+					if box != nil && box.Width >= 200 && box.Width <= 500 && box.Height >= 30 {
+						widget = el
+						slog.Info("fetch/camoufox: Turnstile widget found via hidden input",
+							"w", box.Width, "h", box.Height)
+						break
+					}
+				}
+			}
 		}
+
+		// Strategy 3: Turnstile container div by class (fallback).
+		if widget == nil {
+			containerSelectors := []string{
+				"div.cf-turnstile",
+				"div[class*='cf-turnstile']",
+			}
+			for _, sel := range containerSelectors {
+				els, err := page.QuerySelectorAll(sel)
+				if err != nil || len(els) == 0 {
+					continue
+				}
+				for _, el := range els {
+					box, _ := el.BoundingBox()
+					if box != nil && box.Width >= 200 && box.Width <= 500 && box.Height >= 30 {
+						widget = el
+						slog.Info("fetch/camoufox: Turnstile container found",
+							"selector", sel, "w", box.Width, "h", box.Height)
+						break
+					}
+				}
+				if widget != nil {
+					break
+				}
+			}
+		}
+
+		clicked := false
+		if widget != nil {
+			// Wait for widget to fully render.
+			time.Sleep(time.Duration(1500+rand.IntN(1500)) * time.Millisecond)
+
+			box, err := widget.BoundingBox()
+			if err == nil && box != nil {
+				slog.Info("fetch/camoufox: clicking Turnstile checkbox",
+					"x", box.X, "y", box.Y, "w", box.Width, "h", box.Height)
+
+				// Checkbox is in the left-center area of the widget (~28px from left).
+				targetX := box.X + 26 + float64(rand.IntN(10))
+				targetY := box.Y + box.Height/2 + float64(rand.IntN(6)-3)
+
+				// Human-like mouse movement.
+				startX := float64(200 + rand.IntN(300))
+				startY := float64(150 + rand.IntN(200))
+				steps := 6 + rand.IntN(6)
+				for step := 1; step <= steps; step++ {
+					t := float64(step) / float64(steps)
+					t = t * t * (3 - 2*t) // ease-in-out
+					mx := startX + (targetX-startX)*t + float64(rand.IntN(3)-1)
+					my := startY + (targetY-startY)*t + float64(rand.IntN(3)-1)
+					_ = page.Mouse().Move(mx, my)
+					time.Sleep(time.Duration(15+rand.IntN(30)) * time.Millisecond)
+				}
+
+				time.Sleep(time.Duration(200+rand.IntN(400)) * time.Millisecond)
+				_ = page.Mouse().Click(targetX, targetY)
+				clicked = true
+				slog.Info("fetch/camoufox: clicked Turnstile", "x", targetX, "y", targetY)
+			}
+		} else {
+			slog.Warn("fetch/camoufox: no Turnstile widget found in DOM")
+		}
+
+		// Poll for resolution.
+		waitSecs := 20
+		if !clicked {
+			slog.Info("fetch/camoufox: waiting for Turnstile auto-resolution...")
+			waitSecs = 10
+		}
+		for i := 0; i < waitSecs; i++ {
+			time.Sleep(1 * time.Second)
+			if f.detectCloudflare(page) == "" {
+				slog.Info("fetch/camoufox: Turnstile challenge resolved!")
+				page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+					State: playwright.LoadStateNetworkidle,
+				})
+				return true
+			}
+			// Retry click every 5s if first click didn't resolve.
+			if clicked && i > 0 && i%5 == 0 && widget != nil {
+				if box, err := widget.BoundingBox(); err == nil && box != nil {
+					tx := box.X + 26 + float64(rand.IntN(10))
+					ty := box.Y + box.Height/2 + float64(rand.IntN(6)-3)
+					_ = page.Mouse().Click(tx, ty)
+					slog.Info("fetch/camoufox: retried Turnstile click")
+				}
+			}
+		}
+		slog.Warn("fetch/camoufox: Turnstile challenge did not resolve in time")
 
 	case "under_attack":
 		// Extended JS challenge — may require up to 10–15 s.
@@ -895,9 +1350,17 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 		"timeout_ms", timeoutMs,
 	)
 
+	// Use "load" instead of "networkidle" when an extension is loaded —
+	// solver extensions (NopeCHA) make ongoing API requests that prevent
+	// the network from ever becoming idle.
+	waitUntil := playwright.WaitUntilStateNetworkidle
+	if f.hasExtension {
+		waitUntil = playwright.WaitUntilStateLoad
+	}
+
 	start := time.Now()
 	navResp, err := page.Goto(job.URL, playwright.PageGotoOptions{
-		WaitUntil: playwright.WaitUntilStateNetworkidle,
+		WaitUntil: waitUntil,
 		Timeout:   playwright.Float(timeoutMs),
 	})
 	duration := time.Since(start)
@@ -907,25 +1370,47 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 	}
 
 	// Handle Cloudflare challenges (JS check, Turnstile, Under Attack Mode).
-	// Must run before human behaviour simulation so that the challenge is
-	// cleared and the real page content is available for extraction.
 	if f.handleCloudflare(page) {
 		slog.Debug("fetch/camoufox: page updated after Cloudflare challenge")
 	}
 
 	// Human behaviour simulation — makes page interaction look natural to
-	// anti-bot behavioural analysis (Layer 4 defence). These actions run after
-	// the network becomes idle so they do not interfere with page rendering.
+	// anti-bot behavioural analysis (Layer 4 defence).
 	f.simulateHumanBehavior(page)
 
-	// Dismiss cookie consent banners if present. A real user accepts these
-	// prompts; leaving them open can obscure content and signal automation.
+	// Dismiss cookie consent banners if present.
 	f.handleCookieConsent(page)
 
-	// Attempt to solve reCAPTCHA v2 checkbox ("I'm not a robot").
-	// Must happen AFTER human simulation so Google's behavioral score
-	// considers the mouse movements and delays before the click.
-	f.handleRecaptcha(page)
+	if f.hasExtension {
+		// Extension (NopeCHA) handles clicking + image solving autonomously.
+		// Just wait for it to finish.
+		f.waitForExtensionSolve(page)
+	} else {
+		// Manual checkbox click when no extension is loaded.
+		f.handleRecaptcha(page)
+		f.handleHCaptcha(page)
+	}
+
+	// Execute Trail-attached steps (Click, Wait, Scroll). These are the
+	// browser actions defined by Trail.Navigate().Click().Wait() etc.
+	// Execute Trail-attached steps. Click and Wait are "hard" steps — their
+	// failure means the page content will be wrong, so we abort the fetch.
+	// Scroll is best-effort (warn and continue).
+	for i, step := range job.Steps {
+		if stepErr := f.executeStep(page, step); stepErr != nil {
+			// Hard steps: Click, Wait — abort on failure.
+			if step.Action == foxhound.JobStepClick || step.Action == foxhound.JobStepWait {
+				return nil, fmt.Errorf("fetch/camoufox: step %d (%d) failed for %s: %w",
+					i, step.Action, job.URL, stepErr)
+			}
+			slog.Warn("fetch/camoufox: step execution failed (non-fatal)",
+				"step_index", i,
+				"action", step.Action,
+				"selector", step.Selector,
+				"err", stepErr,
+			)
+		}
+	}
 
 	// Extract the fully-rendered HTML. page.Content() returns the live DOM
 	// after all JS has executed, which is the primary reason to use a browser.
@@ -1017,16 +1502,6 @@ func (f *CamoufoxFetcher) buildContextOptions() playwright.BrowserNewContextOpti
 	return opts
 }
 
-// camoufoxEnvFromProfile is kept for backward compatibility but is no longer
-// used in the launch path. Camoufox handles fingerprint injection internally
-// via BrowserForge when launched with its own binary.
-func camoufoxEnvFromProfile(p *identity.Profile) map[string]string {
-	if p == nil || len(p.CamoufoxEnv) == 0 {
-		return map[string]string{}
-	}
-	return p.CamoufoxEnv
-}
-
 // parsePlaywrightProxy converts a proxy URL like
 // "socks5://user:pass@host:port" into a playwright.Proxy struct
 // with Server, Username, and Password separated (required by Playwright).
@@ -1075,6 +1550,20 @@ func (f *CamoufoxFetcher) restart() error {
 		"max_requests", f.maxRequests,
 	)
 
+	// Close the persistent session context first — it references the old
+	// browser and will be invalid after the browser is torn down.
+	f.sessionMu.Lock()
+	if f.sessionCtx != nil {
+		if closeErr := f.sessionCtx.Close(); closeErr != nil {
+			if !strings.Contains(closeErr.Error(), "Target closed") &&
+				!strings.Contains(closeErr.Error(), "Browser has been closed") {
+				slog.Warn("fetch/camoufox: error closing session context during restart", "err", closeErr)
+			}
+		}
+		f.sessionCtx = nil
+	}
+	f.sessionMu.Unlock()
+
 	// Close the existing browser (best-effort; errors are logged only).
 	if f.browser != nil {
 		if err := f.browser.Close(); err != nil {
@@ -1086,13 +1575,37 @@ func (f *CamoufoxFetcher) restart() error {
 		f.browser = nil
 	}
 
-	// Launch a fresh browser with the same configuration.
-	env := camoufoxEnvFromProfile(f.identity)
+	// Launch a fresh browser with the same configuration — replicate the
+	// full launch options from NewCamoufox so Camoufox binary, proxy, and
+	// extension settings are preserved across restarts.
 	headlessBool := f.headless != "false"
-	browser, err := f.pw.Firefox.Launch(playwright.BrowserTypeLaunchOptions{
+	launchOpts := playwright.BrowserTypeLaunchOptions{
 		Headless: playwright.Bool(headlessBool),
-		Env:      env,
-	})
+	}
+
+	// Restore Camoufox binary path.
+	execPath, _ := findOrInstallCamoufox()
+	if execPath != "" {
+		launchOpts.ExecutablePath = playwright.String(execPath)
+	}
+
+	// Restore proxy settings.
+	if f.proxyURL != "" {
+		launchOpts.Proxy = parsePlaywrightProxy(f.proxyURL)
+	}
+
+	// Restore extension (CAMOU_CONFIG) if originally loaded.
+	if f.hasExtension && f.extensionPath != "" && execPath != "" {
+		absExt, _ := filepath.Abs(f.extensionPath)
+		camoConfig := map[string]any{"addons": []string{absExt}}
+		configJSON, _ := json.Marshal(camoConfig)
+		if launchOpts.Env == nil {
+			launchOpts.Env = map[string]string{}
+		}
+		launchOpts.Env["CAMOU_CONFIG_1"] = string(configJSON)
+	}
+
+	browser, err := f.pw.Firefox.Launch(launchOpts)
 	if err != nil {
 		return fmt.Errorf("fetch/camoufox: launching replacement browser: %w", err)
 	}
@@ -1111,7 +1624,7 @@ func (f *CamoufoxFetcher) restart() error {
 func (f *CamoufoxFetcher) Close() error {
 	var firstErr error
 
-	// Close the persistent session context first so its resources are freed
+	// Close the persistent session context so its resources are freed
 	// before the browser itself is torn down.
 	f.sessionMu.Lock()
 	if f.sessionCtx != nil {
@@ -1119,7 +1632,9 @@ func (f *CamoufoxFetcher) Close() error {
 			if !strings.Contains(closeErr.Error(), "Target closed") &&
 				!strings.Contains(closeErr.Error(), "Browser has been closed") {
 				slog.Warn("fetch/camoufox: error closing persistent session context", "err", closeErr)
-				firstErr = fmt.Errorf("fetch/camoufox: closing session context: %w", closeErr)
+				if firstErr == nil {
+					firstErr = fmt.Errorf("fetch/camoufox: closing session context: %w", closeErr)
+				}
 			}
 		}
 		f.sessionCtx = nil

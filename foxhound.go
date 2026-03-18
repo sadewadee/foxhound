@@ -56,6 +56,38 @@ const (
 	PriorityHigh   Priority = 10
 )
 
+// Step action constants for JobStep. These are package-level int constants
+// (not engine.StepAction) to avoid an import cycle between foxhound ↔ engine.
+const (
+	JobStepNavigate = 0
+	JobStepClick    = 1
+	JobStepWait     = 2
+	JobStepExtract  = 3
+	JobStepScroll   = 4
+)
+
+// JobStep is a single browser-side action that should be executed after the
+// page loads. Steps are attached to a Job by Trail.ToJobs() and executed by
+// the CamoufoxFetcher before content extraction.
+type JobStep struct {
+	// Action identifies the step type (JobStepClick, JobStepWait, etc.).
+	// Zero value (JobStepNavigate) is intentionally NOT omitempty so it
+	// always serializes.
+	Action int `json:"action"`
+	// Selector is the CSS selector for Click, Wait, and Extract steps.
+	Selector string `json:"selector,omitempty"`
+	// Duration is the timeout for Wait steps.
+	Duration time.Duration `json:"duration,omitempty"`
+	// ScrollAxis is 0 for vertical, 1 for horizontal (only for Scroll steps).
+	ScrollAxis int `json:"scroll_axis,omitempty"`
+	// ScrollExtent is the target scroll distance in pixels. Defaults to 3000
+	// when zero.
+	ScrollExtent int `json:"scroll_extent,omitempty"`
+	// ScrollMode is 0 for ScrollReading, 1 for ScrollScan. Zero value
+	// (omitted in JSON) defaults to ScrollReading.
+	ScrollMode int `json:"scroll_mode,omitempty"`
+}
+
 // Job represents a unit of work to be processed by the engine.
 type Job struct {
 	// ID is a unique identifier for this job.
@@ -82,6 +114,10 @@ type Job struct {
 	Domain string
 	// CreatedAt is when the job was created.
 	CreatedAt time.Time
+	// Steps are browser-side actions to execute after page load (optional).
+	// When non-empty, the job requires a browser fetcher. The omitempty tag
+	// ensures backward compatibility with existing queue serialization.
+	Steps []JobStep `json:"steps,omitempty"`
 }
 
 // Response wraps an HTTP response with additional metadata.

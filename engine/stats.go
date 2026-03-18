@@ -16,8 +16,12 @@ type DomainStats struct {
 	Requests   int64
 	Errors     int64
 	Blocked    int64
-	totalNanos int64 // accumulated latency in nanoseconds
+	totalNanos int64 // accumulated fetch latency in nanoseconds
 	AvgLatency time.Duration
+
+	processNanos      int64 // accumulated end-to-end job latency in nanoseconds
+	processCount      int64
+	AvgProcessLatency time.Duration
 }
 
 // Stats holds runtime metrics for a Hunt. All top-level counters use
@@ -93,6 +97,35 @@ func (s *Stats) RecordBytes(n int64) {
 	s.BytesReceived.Add(n)
 }
 
+// RecordProcessDuration records the end-to-end processing time for a job
+// (fetch + process + pipeline + write) for the given domain.
+func (s *Stats) RecordProcessDuration(domain string, duration time.Duration) {
+	s.mu.Lock()
+	ds, ok := s.domainStats[domain]
+	if !ok {
+		ds = &DomainStats{}
+		s.domainStats[domain] = ds
+	}
+	ds.processNanos += duration.Nanoseconds()
+	ds.processCount++
+	ds.AvgProcessLatency = time.Duration(ds.processNanos / ds.processCount)
+	s.mu.Unlock()
+}
+
+// DomainStatsFor returns the DomainStats for the given domain, or nil if no
+// requests have been recorded for it.
+func (s *Stats) DomainStatsFor(domain string) *DomainStats {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ds, ok := s.domainStats[domain]
+	if !ok {
+		return nil
+	}
+	// Return a copy to avoid races on the caller side.
+	copy := *ds
+	return &copy
+}
+
 // Summary returns a human-readable snapshot of current statistics.
 func (s *Stats) Summary() string {
 	elapsed := time.Since(s.StartedAt).Truncate(time.Second)
@@ -111,8 +144,10 @@ func (s *Stats) Summary() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for domain, ds := range s.domainStats {
-		fmt.Fprintf(&b, " [%s: req=%d err=%d blocked=%d avg=%v]",
-			domain, ds.Requests, ds.Errors, ds.Blocked, ds.AvgLatency.Truncate(time.Millisecond))
+		fmt.Fprintf(&b, " [%s: req=%d err=%d blocked=%d avg=%v proc_avg=%v]",
+			domain, ds.Requests, ds.Errors, ds.Blocked,
+			ds.AvgLatency.Truncate(time.Millisecond),
+			ds.AvgProcessLatency.Truncate(time.Millisecond))
 	}
 	return b.String()
 }

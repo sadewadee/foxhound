@@ -48,7 +48,7 @@ func newWalker(id string, hunt *Hunt) *Walker {
 		pipelines: hunt.config.Pipelines,
 		writers:   hunt.config.Writers,
 		retry:     DefaultRetryPolicy(),
-		logger:    slog.With("component", "walker", "walker_id", id),
+		logger:    hunt.logger.With("component", "walker", "walker_id", id),
 		timing:    behavior.NewTiming(profile.Timing),
 		rhythm:    profile.Rhythm,
 	}
@@ -71,6 +71,7 @@ func (w *Walker) Run(ctx context.Context) error {
 // processJob executes a single job: fetch → process → pipeline → write →
 // enqueue discovered jobs. Retries are handled inline.
 func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
+	jobStart := time.Now()
 	// Track this walker as in-flight so drainQueue does not cancel the context
 	// before discovered jobs are enqueued.
 	w.hunt.activeWalkers.Add(1)
@@ -145,20 +146,28 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 		return
 	}
 
+	fetchDuration := time.Since(start)
+
 	w.logger.Debug("fetch complete",
 		"url", job.URL, "status", resp.StatusCode, "bytes", len(resp.Body),
 		"duration", time.Since(start), "fetch_mode", resp.FetchMode)
 
 	// CAPTCHA detection — if the response contains a CAPTCHA challenge,
-	// log it and count as blocked. This is Layer 6 defense from the architecture.
-	if detection := captcha.Detect(resp); detection.Type != captcha.CaptchaNone {
-		w.logger.Warn("CAPTCHA detected in response",
-			"url", job.URL,
-			"captcha_type", detection.Type,
-			"site_key", detection.SiteKey,
-		)
-		w.hunt.stats.RecordRequest(job.Domain, time.Since(start), nil, true)
-		return
+	// log it and count as blocked. Skip when the response came through the
+	// browser fetcher: SmartFetcher already ran captcha.Detect() to decide
+	// escalation, and the browser result should not be re-judged by the same
+	// heuristic (avoids false positives on legitimate content and stats
+	// double-counting).
+	if resp.FetchMode != foxhound.FetchBrowser {
+		if detection := captcha.Detect(resp); detection.Type != captcha.CaptchaNone {
+			w.logger.Warn("CAPTCHA detected in response",
+				"url", job.URL,
+				"captcha_type", detection.Type,
+				"site_key", detection.SiteKey,
+			)
+			w.hunt.stats.RecordRequest(job.Domain, time.Since(start), nil, true)
+			return
+		}
 	}
 
 	result, procErr := w.processor.Process(ctx, resp)
@@ -194,6 +203,16 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 			w.logger.Error("enqueue failed", "url", next.URL, "err", err)
 		}
 	}
+
+	processDuration := time.Since(jobStart)
+	w.hunt.stats.RecordProcessDuration(job.Domain, processDuration)
+	w.logger.Info("job complete",
+		"url", job.URL,
+		"status", resp.StatusCode,
+		"fetch_duration", fetchDuration.Truncate(time.Millisecond),
+		"process_duration", processDuration.Truncate(time.Millisecond),
+		"items", len(result.Items),
+	)
 }
 
 // runPipelines threads item through each pipeline stage in order. Returns nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -893,6 +894,132 @@ func (w *flushCountWriter) Flush(_ context.Context) error {
 func (w *flushCountWriter) Close() error { return nil }
 
 // ---------------------------------------------------------------------------
+// Duration tracking tests
+// ---------------------------------------------------------------------------
+
+// logCapture is a slog.Handler that records all log records.
+type logCapture struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *logCapture) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+func (h *logCapture) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r)
+	return nil
+}
+
+func (h *logCapture) WithAttrs(attrs []slog.Attr) slog.Handler { return h }
+func (h *logCapture) WithGroup(name string) slog.Handler       { return h }
+
+func (h *logCapture) findAttr(key string) (slog.Value, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.records {
+		var found slog.Value
+		var ok bool
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == key {
+				found = a.Value
+				ok = true
+				return false
+			}
+			return true
+		})
+		if ok {
+			return found, true
+		}
+	}
+	return slog.Value{}, false
+}
+
+func (h *logCapture) hasInfoMsg(msg string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.records {
+		if r.Level == slog.LevelInfo && r.Message == msg {
+			return true
+		}
+	}
+	return false
+}
+
+func TestStats_RecordProcessDuration_TrackedPerDomain(t *testing.T) {
+	s := engine.NewStats()
+	s.RecordProcessDuration("example.com", 100*time.Millisecond)
+	s.RecordProcessDuration("example.com", 200*time.Millisecond)
+
+	ds := s.DomainStatsFor("example.com")
+	if ds == nil {
+		t.Fatal("DomainStatsFor returned nil for recorded domain")
+	}
+	if ds.AvgProcessLatency == 0 {
+		t.Error("AvgProcessLatency: want > 0, got 0")
+	}
+	// Average of 100ms and 200ms = 150ms
+	want := 150 * time.Millisecond
+	if ds.AvgProcessLatency != want {
+		t.Errorf("AvgProcessLatency: want %v, got %v", want, ds.AvgProcessLatency)
+	}
+}
+
+func TestStats_Summary_IncludesProcessLatency(t *testing.T) {
+	s := engine.NewStats()
+	s.RecordProcessDuration("foo.com", 50*time.Millisecond)
+	summary := s.Summary()
+	if !strings.Contains(summary, "proc_avg") {
+		t.Errorf("Summary should include proc_avg; got: %s", summary)
+	}
+}
+
+func TestWalker_LogsInfoWithFetchAndProcessDuration(t *testing.T) {
+	q := newMemQueue(8)
+
+	item := foxhound.NewItem()
+	item.Set("k", "v")
+
+	fetcher := &stubFetcher{resp: &foxhound.Response{StatusCode: 200, Body: []byte("<html><body>ok</body></html>")}}
+	processor := &stubProcessor{result: &foxhound.Result{Items: []*foxhound.Item{item}}}
+
+	h := engine.NewHunt(engine.HuntConfig{
+		Name:      "log-duration-test",
+		Walkers:   1,
+		Seeds:     []*foxhound.Job{seedJob("https://example.com/page1")},
+		Queue:     q,
+		Fetcher:   fetcher,
+		Processor: processor,
+	})
+
+	// Inject a capturing log handler so we can inspect what gets logged.
+	capture := &logCapture{}
+	logger := slog.New(capture)
+	h.SetLogger(logger)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := h.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !capture.hasInfoMsg("job complete") {
+		t.Error("expected Info log with message 'job complete'")
+	}
+	if _, ok := capture.findAttr("fetch_duration"); !ok {
+		t.Error("expected 'fetch_duration' attribute in log")
+	}
+	if _, ok := capture.findAttr("process_duration"); !ok {
+		t.Error("expected 'process_duration' attribute in log")
+	}
+	if _, ok := capture.findAttr("items"); !ok {
+		t.Error("expected 'items' attribute in log")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // H1: drainQueue premature-cancellation regression test
 // ---------------------------------------------------------------------------
 
@@ -957,5 +1084,192 @@ func TestHunt_DrainQueue_WaitsForInFlightWalkers(t *testing.T) {
 	// Both the seed URL and the discovered URL must have been fetched.
 	if got := fetcher.CallCount(); got != 2 {
 		t.Errorf("fetcher calls: want 2 (seed + discovered), got %d — hunt cancelled too early", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Trail.ToJobs step attachment tests
+// ---------------------------------------------------------------------------
+
+// TestTrail_ToJobs_AttachesSteps verifies that non-navigate steps after a
+// Navigate are attached as Job.Steps.
+func TestTrail_ToJobs_AttachesSteps(t *testing.T) {
+	tr := engine.NewTrail("t").
+		Navigate("https://example.com").
+		Click("#submit").
+		Wait(".result", 5*time.Second)
+
+	jobs := tr.ToJobs()
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	if len(jobs[0].Steps) != 2 {
+		t.Fatalf("expected 2 steps, got %d", len(jobs[0].Steps))
+	}
+	if jobs[0].Steps[0].Action != foxhound.JobStepClick {
+		t.Errorf("step[0].Action: want JobStepClick (%d), got %d",
+			foxhound.JobStepClick, jobs[0].Steps[0].Action)
+	}
+	if jobs[0].Steps[0].Selector != "#submit" {
+		t.Errorf("step[0].Selector: want %q, got %q", "#submit", jobs[0].Steps[0].Selector)
+	}
+	if jobs[0].Steps[1].Action != foxhound.JobStepWait {
+		t.Errorf("step[1].Action: want JobStepWait (%d), got %d",
+			foxhound.JobStepWait, jobs[0].Steps[1].Action)
+	}
+	if jobs[0].Steps[1].Duration != 5*time.Second {
+		t.Errorf("step[1].Duration: want 5s, got %v", jobs[0].Steps[1].Duration)
+	}
+}
+
+// TestTrail_ToJobs_SetsBrowserMode verifies that jobs with browser-only steps
+// (Click, Wait, Scroll) have FetchMode = FetchBrowser.
+func TestTrail_ToJobs_SetsBrowserMode(t *testing.T) {
+	tr := engine.NewTrail("t").
+		Navigate("https://example.com").
+		Click("#btn")
+
+	jobs := tr.ToJobs()
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	if jobs[0].FetchMode != foxhound.FetchBrowser {
+		t.Errorf("FetchMode: want FetchBrowser, got %v", jobs[0].FetchMode)
+	}
+}
+
+// TestTrail_ToJobs_MultipleSegments verifies that multiple Navigate steps
+// produce multiple Jobs, each with their own attached steps.
+func TestTrail_ToJobs_MultipleSegments(t *testing.T) {
+	tr := engine.NewTrail("t").
+		Navigate("https://a.com").
+		Click("#btn-a").
+		Navigate("https://b.com").
+		Wait(".loaded", 3*time.Second).
+		Scroll()
+
+	jobs := tr.ToJobs()
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs, got %d", len(jobs))
+	}
+
+	// First job: navigate + click
+	if jobs[0].URL != "https://a.com" {
+		t.Errorf("jobs[0].URL: want https://a.com, got %s", jobs[0].URL)
+	}
+	if len(jobs[0].Steps) != 1 {
+		t.Fatalf("jobs[0] steps: want 1, got %d", len(jobs[0].Steps))
+	}
+	if jobs[0].Steps[0].Action != foxhound.JobStepClick {
+		t.Errorf("jobs[0].Steps[0].Action: want Click, got %d", jobs[0].Steps[0].Action)
+	}
+
+	// Second job: navigate + wait + scroll
+	if jobs[1].URL != "https://b.com" {
+		t.Errorf("jobs[1].URL: want https://b.com, got %s", jobs[1].URL)
+	}
+	if len(jobs[1].Steps) != 2 {
+		t.Fatalf("jobs[1] steps: want 2, got %d", len(jobs[1].Steps))
+	}
+	if jobs[1].Steps[0].Action != foxhound.JobStepWait {
+		t.Errorf("jobs[1].Steps[0].Action: want Wait, got %d", jobs[1].Steps[0].Action)
+	}
+	if jobs[1].Steps[1].Action != foxhound.JobStepScroll {
+		t.Errorf("jobs[1].Steps[1].Action: want Scroll, got %d", jobs[1].Steps[1].Action)
+	}
+	if jobs[1].FetchMode != foxhound.FetchBrowser {
+		t.Errorf("jobs[1].FetchMode: want FetchBrowser, got %v", jobs[1].FetchMode)
+	}
+}
+
+// TestTrail_ToJobs_NavigateOnly_BackwardCompatible verifies that a trail with
+// only Navigate steps (no Click/Wait/Scroll) produces Jobs identical to the
+// original behavior — no Steps, default FetchMode.
+func TestTrail_ToJobs_NavigateOnly_BackwardCompatible(t *testing.T) {
+	tr := engine.NewTrail("t").
+		Navigate("https://a.com").
+		Navigate("https://b.com")
+
+	jobs := tr.ToJobs()
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs, got %d", len(jobs))
+	}
+	for i, j := range jobs {
+		if len(j.Steps) != 0 {
+			t.Errorf("jobs[%d].Steps: want empty, got %d steps", i, len(j.Steps))
+		}
+		if j.FetchMode != foxhound.FetchAuto {
+			t.Errorf("jobs[%d].FetchMode: want FetchAuto (default), got %v", i, j.FetchMode)
+		}
+	}
+}
+
+// TestTrail_ToJobs_OrphanStepsBeforeNavigate verifies that steps before the
+// first Navigate are silently skipped.
+func TestTrail_ToJobs_OrphanStepsBeforeNavigate(t *testing.T) {
+	tr := engine.NewTrail("t").
+		Click("#orphan").
+		Navigate("https://example.com").
+		Click("#real")
+
+	jobs := tr.ToJobs()
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	if len(jobs[0].Steps) != 1 {
+		t.Fatalf("expected 1 step (orphan skipped), got %d", len(jobs[0].Steps))
+	}
+	if jobs[0].Steps[0].Selector != "#real" {
+		t.Errorf("step selector: want #real, got %s", jobs[0].Steps[0].Selector)
+	}
+}
+
+// TestTrail_ToJobs_ExtractStepsSkipped verifies that Extract steps are NOT
+// converted to JobSteps (the Processor cannot survive JSON serialization).
+func TestTrail_ToJobs_ExtractStepsSkipped(t *testing.T) {
+	proc := foxhound.ProcessorFunc(func(_ context.Context, _ *foxhound.Response) (*foxhound.Result, error) {
+		return &foxhound.Result{}, nil
+	})
+	tr := engine.NewTrail("t").
+		Navigate("https://example.com").
+		Click("#load").
+		Extract(proc).
+		Wait(".data", 3*time.Second)
+
+	jobs := tr.ToJobs()
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	// Extract should be skipped: only Click + Wait = 2 steps
+	if len(jobs[0].Steps) != 2 {
+		t.Fatalf("expected 2 steps (Extract skipped), got %d", len(jobs[0].Steps))
+	}
+	if jobs[0].Steps[0].Action != foxhound.JobStepClick {
+		t.Errorf("step[0]: want Click, got %d", jobs[0].Steps[0].Action)
+	}
+	if jobs[0].Steps[1].Action != foxhound.JobStepWait {
+		t.Errorf("step[1]: want Wait, got %d", jobs[0].Steps[1].Action)
+	}
+}
+
+// TestTrail_ToJobs_ExtractOnly_NoFetchBrowser verifies that a trail with
+// only Navigate + Extract does NOT set FetchBrowser.
+func TestTrail_ToJobs_ExtractOnly_NoFetchBrowser(t *testing.T) {
+	proc := foxhound.ProcessorFunc(func(_ context.Context, _ *foxhound.Response) (*foxhound.Result, error) {
+		return &foxhound.Result{}, nil
+	})
+	tr := engine.NewTrail("t").
+		Navigate("https://example.com").
+		Extract(proc)
+
+	jobs := tr.ToJobs()
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	if len(jobs[0].Steps) != 0 {
+		t.Errorf("expected 0 steps (Extract skipped), got %d", len(jobs[0].Steps))
+	}
+	if jobs[0].FetchMode != foxhound.FetchAuto {
+		t.Errorf("FetchMode: want FetchAuto, got %v", jobs[0].FetchMode)
 	}
 }

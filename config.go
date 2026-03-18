@@ -194,6 +194,7 @@ type ValidateConfig struct {
 type CleanConfig struct {
 	TrimWhitespace bool `yaml:"trim_whitespace"`
 	NormalizePrice bool `yaml:"normalize_price"`
+	NormalizeDate  bool `yaml:"normalize_date"`
 }
 
 // ExportConfig defines an export destination.

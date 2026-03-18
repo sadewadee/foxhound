@@ -611,6 +611,121 @@ func TestSmartFetcher_WithBrowserFetcherOption(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// ContentBlockDetector tests
+// ---------------------------------------------------------------------------
+
+// TestContentBlockDetector_CaptchaPage200_IsBlocked verifies that a 200 OK
+// response containing CAPTCHA markers is detected as blocked.
+func TestContentBlockDetector_CaptchaPage200_IsBlocked(t *testing.T) {
+	d := &fetch.ContentBlockDetector{}
+
+	captchaPages := []struct {
+		name string
+		body string
+	}{
+		{"cloudflare-turnstile", `<html><body><div class="cf-turnstile"></div></body></html>`},
+		{"recaptcha", `<html><body><div class="g-recaptcha" data-sitekey="abc"></div></body></html>`},
+		{"hcaptcha", `<html><body><script src="https://hcaptcha.com/1/api.js"></script></body></html>`},
+	}
+
+	for _, tc := range captchaPages {
+		resp := &foxhound.Response{StatusCode: 200, Body: []byte(tc.body)}
+		if !d.IsBlocked(resp) {
+			t.Errorf("%s: expected IsBlocked=true for CAPTCHA page with 200 OK", tc.name)
+		}
+	}
+}
+
+// TestContentBlockDetector_SoftBlock200_IsBlocked verifies that a 200 OK
+// response with "access denied" text in a small body is detected as blocked.
+func TestContentBlockDetector_SoftBlock200_IsBlocked(t *testing.T) {
+	d := &fetch.ContentBlockDetector{}
+
+	resp := &foxhound.Response{
+		StatusCode: 200,
+		Body:       []byte(`<body>Access Denied - please try again later</body>`),
+	}
+	if !d.IsBlocked(resp) {
+		t.Error("expected IsBlocked=true for soft-block 200 page")
+	}
+}
+
+// TestContentBlockDetector_Normal200_NotBlocked verifies that a normal 200 OK
+// response with real content is not flagged as blocked.
+func TestContentBlockDetector_Normal200_NotBlocked(t *testing.T) {
+	d := &fetch.ContentBlockDetector{}
+
+	resp := &foxhound.Response{
+		StatusCode: 200,
+		Body:       []byte(`<html><head><title>Products</title></head><body><h1>Welcome to our store</h1><p>Browse our collection of fine products.</p></body></html>`),
+	}
+	if d.IsBlocked(resp) {
+		t.Error("expected IsBlocked=false for normal 200 page")
+	}
+}
+
+// TestContentBlockDetector_403_StillBlocked verifies that the status-code path
+// still works (backward compatible with DefaultBlockDetector).
+func TestContentBlockDetector_403_StillBlocked(t *testing.T) {
+	d := &fetch.ContentBlockDetector{}
+
+	for _, code := range []int{401, 403, 407, 429, 503} {
+		resp := &foxhound.Response{StatusCode: code}
+		if !d.IsBlocked(resp) {
+			t.Errorf("expected IsBlocked=true for status %d", code)
+		}
+	}
+}
+
+// TestSmartFetcher_EscalatesOnCaptchaPage verifies that SmartFetcher escalates
+// to the browser fetcher when the static fetcher returns a 200 page containing
+// CAPTCHA markers.
+func TestSmartFetcher_EscalatesOnCaptchaPage(t *testing.T) {
+	// Static returns 200 but with Cloudflare challenge content.
+	captchaBody := []byte(`<html><body>Checking your browser before accessing cloudflare. Just a moment...</body></html>`)
+	staticF := &mockFetcher{
+		fn: func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
+			return &foxhound.Response{
+				StatusCode: 200,
+				Body:       captchaBody,
+				FetchMode:  foxhound.FetchStatic,
+				Job:        job,
+			}, nil
+		},
+	}
+
+	browserCalled := false
+	browserF := &mockFetcher{
+		fn: func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
+			browserCalled = true
+			return &foxhound.Response{
+				StatusCode: 200,
+				Body:       []byte(`<html><body>Real content</body></html>`),
+				FetchMode:  foxhound.FetchBrowser,
+				Job:        job,
+			}, nil
+		},
+	}
+
+	smart := fetch.NewSmart(staticF, browserF)
+	defer smart.Close()
+
+	job := newJob("https://example.com")
+	job.FetchMode = foxhound.FetchAuto
+
+	resp, err := smart.Fetch(context.Background(), job)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !browserCalled {
+		t.Error("expected browser fetcher to be called after CAPTCHA detected in static response")
+	}
+	if resp.FetchMode != foxhound.FetchBrowser {
+		t.Errorf("expected FetchBrowser after escalation, got %v", resp.FetchMode)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Test doubles
 // ---------------------------------------------------------------------------
 
