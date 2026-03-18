@@ -17,6 +17,7 @@ package fetch
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -25,6 +26,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/andybalholm/brotli"
 
 	foxhound "github.com/foxhound-scraper/foxhound"
 	"github.com/foxhound-scraper/foxhound/identity"
@@ -150,7 +153,20 @@ func (f *StealthFetcher) Fetch(ctx context.Context, job *foxhound.Job) (*foxhoun
 	}
 	defer httpResp.Body.Close()
 
-	body, err := io.ReadAll(httpResp.Body)
+	// Decompress response body when we manually set Accept-Encoding
+	// (Go's Transport disables auto-decompression in that case).
+	var reader io.Reader = httpResp.Body
+	switch strings.ToLower(httpResp.Header.Get("Content-Encoding")) {
+	case "gzip":
+		if gr, gzErr := gzip.NewReader(httpResp.Body); gzErr == nil {
+			defer gr.Close()
+			reader = gr
+		}
+	case "br":
+		reader = brotli.NewReader(httpResp.Body)
+	}
+
+	body, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, fmt.Errorf("fetch/stealth: reading response body from %s: %w", job.URL, err)
 	}

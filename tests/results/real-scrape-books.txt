@@ -1,0 +1,57 @@
+time=2026-03-18T08:34:30.631+08:00 level=INFO msg="identity generated" ua="Mozilla/5.0 (Windows NT 11.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0" os=windows locale=en-US
+time=2026-03-18T08:34:30.632+08:00 level=INFO msg="starting hunt" target=http://books.toscrape.com/ output=books.csv
+time=2026-03-18T08:34:30.632+08:00 level=INFO msg="hunt started" component=hunt hunt=books-toscrape walkers=2 seeds=1 domain=books.toscrape.com
+time=2026-03-18T08:34:31.491+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/ items=20 next_pages=1
+time=2026-03-18T08:34:31.785+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-2.html items=20 next_pages=1
+time=2026-03-18T08:34:32.123+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-3.html items=20 next_pages=1
+time=2026-03-18T08:34:32.405+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-4.html items=20 next_pages=1
+time=2026-03-18T08:34:32.689+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-5.html items=20 next_pages=1
+time=2026-03-18T08:34:32.972+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-6.html items=20 next_pages=1
+time=2026-03-18T08:34:33.255+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-7.html items=20 next_pages=1
+time=2026-03-18T08:34:33.537+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-8.html items=20 next_pages=1
+time=2026-03-18T08:34:33.818+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-9.html items=20 next_pages=1
+time=2026-03-18T08:34:34.111+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-10.html items=20 next_pages=1
+time=2026-03-18T08:34:34.487+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-11.html items=20 next_pages=1
+time=2026-03-18T08:34:34.769+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-12.html items=20 next_pages=1
+time=2026-03-18T08:34:35.052+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-13.html items=20 next_pages=1
+time=2026-03-18T08:34:35.409+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-14.html items=20 next_pages=1
+time=2026-03-18T08:34:35.692+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-15.html items=20 next_pages=1
+time=2026-03-18T08:34:35.974+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-16.html items=20 next_pages=1
+time=2026-03-18T08:34:36.256+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-17.html items=20 next_pages=1
+time=2026-03-18T08:34:36.539+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-18.html items=20 next_pages=1
+time=2026-03-18T08:34:36.822+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-19.html items=20 next_pages=1
+time=2026-03-18T08:34:37.106+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-20.html items=20 next_pages=1
+time=2026-03-18T08:34:37.389+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-21.html items=20 next_pages=1
+time=2026-03-18T08:34:37.675+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-22.html items=20 next_pages=1
+time=2026-03-18T08:34:37.957+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-23.html items=20 next_pages=1
+time=2026-03-18T08:34:38.238+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-24.html items=20 next_pages=1
+time=2026-03-18T08:34:38.519+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-25.html items=20 next_pages=1
+time=2026-03-18T08:34:38.802+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-26.html items=20 next_pages=1
+time=2026-03-18T08:34:39.082+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-27.html items=20 next_pages=1
+time=2026-03-18T08:34:39.366+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-28.html items=20 next_pages=1
+time=2026-03-18T08:34:39.652+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-29.html items=20 next_pages=1
+time=2026-03-18T08:34:39.933+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-30.html items=20 next_pages=1
+time=2026-03-18T08:34:40.216+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-31.html items=20 next_pages=1
+time=2026-03-18T08:34:40.497+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-32.html items=20 next_pages=1
+time=2026-03-18T08:34:40.779+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-33.html items=20 next_pages=1
+time=2026-03-18T08:34:41.059+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-34.html items=20 next_pages=1
+time=2026-03-18T08:34:41.342+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-35.html items=20 next_pages=1
+time=2026-03-18T08:34:41.624+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-36.html items=20 next_pages=1
+time=2026-03-18T08:34:41.907+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-37.html items=20 next_pages=1
+time=2026-03-18T08:34:42.187+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-38.html items=20 next_pages=1
+time=2026-03-18T08:34:42.469+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-39.html items=20 next_pages=1
+time=2026-03-18T08:34:42.752+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-40.html items=20 next_pages=1
+time=2026-03-18T08:34:43.033+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-41.html items=20 next_pages=1
+time=2026-03-18T08:34:43.326+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-42.html items=20 next_pages=1
+time=2026-03-18T08:34:43.606+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-43.html items=20 next_pages=1
+time=2026-03-18T08:34:44.012+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-44.html items=20 next_pages=1
+time=2026-03-18T08:34:44.295+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-45.html items=20 next_pages=1
+time=2026-03-18T08:34:44.578+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-46.html items=20 next_pages=1
+time=2026-03-18T08:34:44.860+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-47.html items=20 next_pages=1
+time=2026-03-18T08:34:45.143+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-48.html items=20 next_pages=1
+time=2026-03-18T08:34:45.426+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-49.html items=20 next_pages=1
+time=2026-03-18T08:34:45.709+08:00 level=INFO msg="page scraped" url=http://books.toscrape.com/catalogue/page-50.html items=20 next_pages=0
+time=2026-03-18T08:34:45.776+08:00 level=INFO msg="hunt complete" component=hunt hunt=books-toscrape stats="elapsed=15s requests=50 success=50 errors=0 blocked=0 items=1000 escalated=0 bytes=2542961 [: req=50 err=0 blocked=0 avg=299ms]"
+
+Hunt complete: elapsed=15s requests=50 success=50 errors=0 blocked=0 items=1000 escalated=0 bytes=2542961 [: req=50 err=0 blocked=0 avg=299ms]
+Output written to: books.csv
