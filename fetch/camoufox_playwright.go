@@ -30,6 +30,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -100,6 +101,17 @@ func WithMaxBrowserRequests(n int) CamoufoxOption {
 	}
 }
 
+// WithPersistSession controls whether the same BrowserContext is reused
+// across requests for the same walker session. When true, cookies and
+// localStorage are preserved between fetches — necessary for sites that
+// require login state to be maintained across page visits. When false
+// (default) a fresh isolated context is created per fetch.
+func WithPersistSession(persist bool) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.persistSession = persist
+	}
+}
+
 // CamoufoxFetcher drives a Camoufox (Firefox fork) browser instance via the
 // Juggler protocol using playwright-go.
 //
@@ -107,16 +119,23 @@ func WithMaxBrowserRequests(n int) CamoufoxOption {
 // BrowserContext so cookies and sessions never bleed across requests.
 // The browser is automatically restarted every maxRequests fetches to clear
 // accumulated state and rotate the fingerprint.
+//
+// When persistSession=true a single BrowserContext is reused across all Fetch
+// calls so cookies, localStorage, and session state are preserved between
+// requests — useful for sites that require login state.
 type CamoufoxFetcher struct {
-	pw           *playwright.Playwright
-	browser      playwright.Browser
-	identity     *identity.Profile
-	blockImages  bool
-	headless     string
-	timeout      time.Duration
-	maxRequests  int           // restart after this many fetches (0 = disabled)
-	requestCount atomic.Int64  // total fetches served by the current browser instance
-	mu           sync.Mutex    // serialises browser restart
+	pw             *playwright.Playwright
+	browser        playwright.Browser
+	identity       *identity.Profile
+	blockImages    bool
+	headless       string
+	timeout        time.Duration
+	maxRequests    int          // restart after this many fetches (0 = disabled)
+	requestCount   atomic.Int64 // total fetches served by the current browser instance
+	mu             sync.Mutex   // serialises browser restart
+	persistSession bool
+	sessionCtx     playwright.BrowserContext // reused when persistSession=true
+	sessionMu      sync.Mutex               // guards sessionCtx lifecycle
 }
 
 // NewCamoufox initialises playwright, applies the supplied options, launches a
@@ -240,22 +259,145 @@ func (f *CamoufoxFetcher) Fetch(ctx context.Context, job *foxhound.Job) (*foxhou
 	}
 }
 
+// getOrCreateContext returns the BrowserContext to use for this request.
+// When persistSession=false a new isolated context is created (caller must
+// close it). When persistSession=true the shared sessionCtx is initialised
+// on first call and reused; the caller must NOT close it.
+// Returns (ctx, shouldClose, err).
+func (f *CamoufoxFetcher) getOrCreateContext() (playwright.BrowserContext, bool, error) {
+	if !f.persistSession {
+		bctx, err := f.browser.NewContext(f.buildContextOptions())
+		return bctx, true, err // caller should close
+	}
+
+	f.sessionMu.Lock()
+	defer f.sessionMu.Unlock()
+
+	if f.sessionCtx == nil {
+		bctx, err := f.browser.NewContext(f.buildContextOptions())
+		if err != nil {
+			return nil, false, err
+		}
+		f.sessionCtx = bctx
+	}
+	return f.sessionCtx, false, nil // caller must NOT close
+}
+
+// simulateHumanBehavior performs lightweight mouse and scroll actions after a
+// page has finished loading. These interactions prove to behavioural anti-bot
+// systems that a real user is present and interacting with the page.
+//
+// Actions performed (all are best-effort; errors are silently ignored so the
+// underlying content extraction is not blocked by a failed gesture):
+//  1. Random reading pause after page load (1-3 s)
+//  2. Move mouse to a random viewport position
+//  3. Scroll down 200-600 px
+//  4. Optionally scroll back up (30 % probability, natural reading pattern)
+//  5. Move mouse to a second random viewport position
+func (f *CamoufoxFetcher) simulateHumanBehavior(page playwright.Page) {
+	// 1. Reading pause — simulates time-to-first-interaction after load.
+	time.Sleep(time.Duration(1000+rand.IntN(2000)) * time.Millisecond)
+
+	// 2. Move mouse to a random position in the visible viewport.
+	viewportSize := page.ViewportSize()
+	if viewportSize != nil && viewportSize.Width > 100 && viewportSize.Height > 100 {
+		x := float64(rand.IntN(viewportSize.Width-100) + 50)
+		y := float64(rand.IntN(viewportSize.Height-100) + 50)
+		if err := page.Mouse().Move(x, y); err != nil {
+			slog.Debug("fetch/camoufox: simulateHuman: mouse move 1 failed", "err", err)
+		}
+		time.Sleep(time.Duration(200+rand.IntN(300)) * time.Millisecond)
+	}
+
+	// 3. Scroll down — shows the user is reading past the fold.
+	scrollY := float64(200 + rand.IntN(400))
+	if err := page.Mouse().Wheel(0, scrollY); err != nil {
+		slog.Debug("fetch/camoufox: simulateHuman: scroll down failed", "err", err)
+	}
+	time.Sleep(time.Duration(500+rand.IntN(1000)) * time.Millisecond)
+
+	// 4. Occasionally scroll back up — natural reading / re-reading behaviour.
+	if rand.Float64() < 0.3 {
+		scrollUp := float64(100 + rand.IntN(200))
+		if err := page.Mouse().Wheel(0, -scrollUp); err != nil {
+			slog.Debug("fetch/camoufox: simulateHuman: scroll up failed", "err", err)
+		}
+		time.Sleep(time.Duration(300+rand.IntN(500)) * time.Millisecond)
+	}
+
+	// 5. Move mouse to a second random viewport position.
+	if viewportSize != nil && viewportSize.Width > 100 && viewportSize.Height > 100 {
+		x := float64(rand.IntN(viewportSize.Width-100) + 50)
+		y := float64(rand.IntN(viewportSize.Height-100) + 50)
+		if err := page.Mouse().Move(x, y); err != nil {
+			slog.Debug("fetch/camoufox: simulateHuman: mouse move 2 failed", "err", err)
+		}
+	}
+}
+
+// handleCookieConsent attempts to click common cookie-consent accept buttons.
+// It tries each selector in order, clicking the first visible match and
+// returning immediately. If no consent button is found the call is a no-op.
+//
+// Accepting cookie banners prevents the banner from obscuring page content
+// and matches the behaviour of a real user who dismisses these prompts.
+func (f *CamoufoxFetcher) handleCookieConsent(page playwright.Page) {
+	consentSelectors := []string{
+		"button[id*='accept']",
+		"button[class*='accept']",
+		"button[id*='consent']",
+		"a[id*='accept']",
+		"[data-testid*='accept']",
+		"button:has-text('Accept')",
+		"button:has-text('I agree')",
+		"button:has-text('Accept all')",
+		"button:has-text('Accept All')",
+		"button:has-text('Terima')",  // Indonesian
+		"button:has-text('Setuju')",  // Indonesian
+		"#onetrust-accept-btn-handler",
+		".cookie-accept",
+		"#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll",
+	}
+
+	for _, sel := range consentSelectors {
+		el, err := page.QuerySelector(sel)
+		if err != nil || el == nil {
+			continue
+		}
+		visible, visErr := el.IsVisible()
+		if visErr != nil || !visible {
+			continue
+		}
+		if clickErr := el.Click(); clickErr != nil {
+			slog.Debug("fetch/camoufox: cookie consent click failed",
+				"selector", sel, "err", clickErr)
+			continue
+		}
+		slog.Debug("fetch/camoufox: clicked cookie consent", "selector", sel)
+		time.Sleep(500 * time.Millisecond)
+		return
+	}
+}
+
 // navigate performs the actual playwright navigation. It is called from a
 // goroutine so that context cancellation can abort it cleanly.
 func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error) {
-	// Create an isolated context for this request so sessions never bleed.
-	bctx, err := f.browser.NewContext(f.buildContextOptions())
+	// Obtain a BrowserContext — either a fresh one or the shared session
+	// context, depending on the persistSession configuration.
+	bctx, shouldClose, err := f.getOrCreateContext()
 	if err != nil {
 		return nil, fmt.Errorf("fetch/camoufox: creating browser context for %s: %w", job.URL, err)
 	}
-	defer func() {
-		if closeErr := bctx.Close(); closeErr != nil {
-			slog.Warn("fetch/camoufox: error closing browser context",
-				"url", job.URL,
-				"err", closeErr,
-			)
-		}
-	}()
+	if shouldClose {
+		defer func() {
+			if closeErr := bctx.Close(); closeErr != nil {
+				slog.Warn("fetch/camoufox: error closing browser context",
+					"url", job.URL,
+					"err", closeErr,
+				)
+			}
+		}()
+	}
 
 	// Inject Accept-Language from the identity profile as an extra header so
 	// the browser reports the correct locale to the server.
@@ -321,6 +463,15 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 	if err != nil {
 		return nil, fmt.Errorf("fetch/camoufox: navigating to %s: %w", job.URL, err)
 	}
+
+	// Human behaviour simulation — makes page interaction look natural to
+	// anti-bot behavioural analysis (Layer 4 defence). These actions run after
+	// the network becomes idle so they do not interfere with page rendering.
+	f.simulateHumanBehavior(page)
+
+	// Dismiss cookie consent banners if present. A real user accepts these
+	// prompts; leaving them open can obscure content and signal automation.
+	f.handleCookieConsent(page)
 
 	// Extract the fully-rendered HTML. page.Content() returns the live DOM
 	// after all JS has executed, which is the primary reason to use a browser.
@@ -473,11 +624,26 @@ func (f *CamoufoxFetcher) restart() error {
 }
 
 // Close gracefully shuts down the browser and stops the playwright runtime.
-// Resources are released in order: browser context (if any), browser, then the
-// playwright process. Errors from each step are logged but do not prevent the
-// subsequent steps from running.
+// Resources are released in order: persistent session context (if any),
+// browser, then the playwright process. Errors from each step are logged but
+// do not prevent the subsequent steps from running.
 func (f *CamoufoxFetcher) Close() error {
 	var firstErr error
+
+	// Close the persistent session context first so its resources are freed
+	// before the browser itself is torn down.
+	f.sessionMu.Lock()
+	if f.sessionCtx != nil {
+		if closeErr := f.sessionCtx.Close(); closeErr != nil {
+			if !strings.Contains(closeErr.Error(), "Target closed") &&
+				!strings.Contains(closeErr.Error(), "Browser has been closed") {
+				slog.Warn("fetch/camoufox: error closing persistent session context", "err", closeErr)
+				firstErr = fmt.Errorf("fetch/camoufox: closing session context: %w", closeErr)
+			}
+		}
+		f.sessionCtx = nil
+	}
+	f.sessionMu.Unlock()
 
 	if f.browser != nil {
 		if err := f.browser.Close(); err != nil {

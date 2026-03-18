@@ -17,7 +17,18 @@ type Config struct {
 	Middleware MiddlewareConfig `yaml:"middleware"`
 	Pipeline   []PipelineEntry  `yaml:"pipeline"`
 	Queue      QueueConfig      `yaml:"queue"`
+	Cache      CacheConfig      `yaml:"cache"`
+	Monitor    MonitorConfig    `yaml:"monitor"`
+	Captcha    CaptchaConfig    `yaml:"captcha"`
 	Logging    LoggingConfig    `yaml:"logging"`
+	Behavior   BehaviorConfig   `yaml:"behavior"`
+}
+
+// BehaviorConfig configures the human-simulation behavior profile for walkers.
+type BehaviorConfig struct {
+	// Profile selects the preset behavior profile: "careful", "moderate", or
+	// "aggressive". Defaults to "moderate" when unset.
+	Profile string `yaml:"profile"`
 }
 
 // HuntConfig configures the scraping campaign.
@@ -44,11 +55,13 @@ type ProxyConfig struct {
 
 // ProviderEntry defines a proxy provider in configuration.
 type ProviderEntry struct {
-	Type    string   `yaml:"type"`
-	List    []string `yaml:"list,omitempty"`
-	APIKey  string   `yaml:"api_key,omitempty"`
-	Product string   `yaml:"product,omitempty"`
-	Country string   `yaml:"country,omitempty"`
+	Type     string   `yaml:"type"`
+	List     []string `yaml:"list,omitempty"`
+	APIKey   string   `yaml:"api_key,omitempty"`
+	Username string   `yaml:"username,omitempty"`
+	Password string   `yaml:"password,omitempty"`
+	Product  string   `yaml:"product,omitempty"`
+	Country  string   `yaml:"country,omitempty"`
 }
 
 // FetchConfig configures the fetch layer.
@@ -75,9 +88,68 @@ type BrowserFetchConfig struct {
 
 // MiddlewareConfig configures request/response processing middleware.
 type MiddlewareConfig struct {
-	RateLimit   RateLimitConfig   `yaml:"ratelimit"`
-	Dedup       DedupConfig       `yaml:"dedup"`
-	DepthLimit  DepthLimitConfig  `yaml:"depth_limit"`
+	RateLimit    RateLimitConfig    `yaml:"ratelimit"`
+	AutoThrottle AutoThrottleMiddlewareConfig `yaml:"autothrottle"`
+	Dedup        DedupConfig        `yaml:"dedup"`
+	DeltaFetch   DeltaFetchConfig   `yaml:"deltafetch"`
+	RobotsTxt    RobotsTxtConfig    `yaml:"robots_txt"`
+	DepthLimit   DepthLimitConfig   `yaml:"depth_limit"`
+}
+
+// AutoThrottleMiddlewareConfig configures the adaptive per-domain throttle.
+type AutoThrottleMiddlewareConfig struct {
+	Enabled           bool    `yaml:"enabled"`
+	TargetConcurrency float64 `yaml:"target_concurrency"`
+	InitialDelay      Duration `yaml:"initial_delay"`
+	MinDelay          Duration `yaml:"min_delay"`
+	MaxDelay          Duration `yaml:"max_delay"`
+}
+
+// DeltaFetchConfig configures cross-run URL deduplication.
+type DeltaFetchConfig struct {
+	Enabled  bool     `yaml:"enabled"`
+	Strategy string   `yaml:"strategy"` // "skip_seen" | "skip_recent"
+	TTL      Duration `yaml:"ttl"`
+	Store    string   `yaml:"store"` // "memory" | "redis" | "sqlite"
+}
+
+// RobotsTxtConfig configures robots.txt compliance.
+type RobotsTxtConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// CacheConfig configures response caching.
+type CacheConfig struct {
+	Backend string   `yaml:"backend"` // "memory" | "file" | "sqlite" | "redis" | "" (disabled)
+	TTL     Duration `yaml:"ttl"`
+	MaxSize int      `yaml:"max_size"` // max entries for memory cache
+}
+
+// MonitorConfig configures observability.
+type MonitorConfig struct {
+	Metrics  MetricsExportConfig `yaml:"metrics"`
+	Alerting AlertingExportConfig `yaml:"alerting"`
+}
+
+// MetricsExportConfig configures Prometheus metrics.
+type MetricsExportConfig struct {
+	Enabled bool `yaml:"enabled"`
+	Port    int  `yaml:"port"`
+}
+
+// AlertingExportConfig configures webhook alerting.
+type AlertingExportConfig struct {
+	WebhookURL     string  `yaml:"webhook_url"`
+	ErrorRateThreshold  float64 `yaml:"error_rate_threshold"`
+	BlockRateThreshold  float64 `yaml:"block_rate_threshold"`
+	Cooldown       Duration `yaml:"cooldown"`
+}
+
+// CaptchaConfig configures CAPTCHA detection and solving.
+type CaptchaConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Provider string `yaml:"provider"` // "capsolver" | "twocaptcha"
+	APIKey   string `yaml:"api_key"`
 }
 
 // RateLimitConfig configures per-domain rate limiting.
@@ -230,5 +302,45 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Logging.Output == "" {
 		cfg.Logging.Output = "stderr"
+	}
+	if cfg.Behavior.Profile == "" {
+		cfg.Behavior.Profile = "moderate"
+	}
+	// AutoThrottle defaults
+	if cfg.Middleware.AutoThrottle.TargetConcurrency <= 0 {
+		cfg.Middleware.AutoThrottle.TargetConcurrency = 2.0
+	}
+	if cfg.Middleware.AutoThrottle.InitialDelay.Duration == 0 {
+		cfg.Middleware.AutoThrottle.InitialDelay.Duration = 1 * time.Second
+	}
+	if cfg.Middleware.AutoThrottle.MinDelay.Duration == 0 {
+		cfg.Middleware.AutoThrottle.MinDelay.Duration = 500 * time.Millisecond
+	}
+	if cfg.Middleware.AutoThrottle.MaxDelay.Duration == 0 {
+		cfg.Middleware.AutoThrottle.MaxDelay.Duration = 30 * time.Second
+	}
+	// DeltaFetch defaults
+	if cfg.Middleware.DeltaFetch.Strategy == "" {
+		cfg.Middleware.DeltaFetch.Strategy = "skip_seen"
+	}
+	if cfg.Middleware.DeltaFetch.TTL.Duration == 0 {
+		cfg.Middleware.DeltaFetch.TTL.Duration = 24 * time.Hour
+	}
+	if cfg.Middleware.DeltaFetch.Store == "" {
+		cfg.Middleware.DeltaFetch.Store = "memory"
+	}
+	// Cache defaults
+	if cfg.Cache.TTL.Duration == 0 {
+		cfg.Cache.TTL.Duration = 1 * time.Hour
+	}
+	if cfg.Cache.MaxSize <= 0 {
+		cfg.Cache.MaxSize = 1000
+	}
+	// Monitor defaults
+	if cfg.Monitor.Metrics.Port <= 0 {
+		cfg.Monitor.Metrics.Port = 9090
+	}
+	if cfg.Monitor.Alerting.Cooldown.Duration == 0 {
+		cfg.Monitor.Alerting.Cooldown.Duration = 5 * time.Minute
 	}
 }

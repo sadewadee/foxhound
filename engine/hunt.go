@@ -35,6 +35,10 @@ type HuntConfig struct {
 	Writers []foxhound.Writer
 	// Middlewares are wrapped around the Fetcher (first middleware is outermost).
 	Middlewares []foxhound.Middleware
+	// BehaviorProfile selects the human-simulation preset applied by each
+	// Walker: "careful", "moderate", or "aggressive". Defaults to "moderate"
+	// when empty so walkers always apply timing and rhythm delays.
+	BehaviorProfile string
 }
 
 // HuntState represents the lifecycle state of a Hunt.

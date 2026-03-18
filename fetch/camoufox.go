@@ -85,17 +85,31 @@ func WithMaxBrowserRequests(n int) CamoufoxOption {
 	}
 }
 
+// WithPersistSession controls whether the same BrowserContext is reused
+// across requests for the same walker session (cookies and localStorage are
+// preserved between fetches). When false (default) a fresh context is created
+// per fetch for full isolation between requests.
+//
+// Use true when scraping sites that require login state to be maintained
+// across multiple page visits in a single session.
+func WithPersistSession(persist bool) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.persistSession = persist
+	}
+}
+
 // CamoufoxFetcher drives a Camoufox (Firefox fork) browser instance via the
 // Juggler protocol using playwright-go.
 //
 // Stub build (!playwright tag): Fetch always returns errPlaywrightNotConfigured.
 // Real build  ( playwright tag): see camoufox_playwright.go.
 type CamoufoxFetcher struct {
-	identity    *identity.Profile
-	blockImages bool
-	headless    string
-	timeout     time.Duration
-	maxRequests int // restart browser after this many requests (0 = disabled)
+	identity       *identity.Profile
+	blockImages    bool
+	headless       string
+	timeout        time.Duration
+	maxRequests    int  // restart browser after this many requests (0 = disabled)
+	persistSession bool // reuse BrowserContext across requests when true
 }
 
 // NewCamoufox creates a CamoufoxFetcher. In the stub build no browser is
