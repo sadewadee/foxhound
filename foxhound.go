@@ -13,7 +13,11 @@ package foxhound
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -128,6 +132,158 @@ func (it *Item) Set(key string, value any) {
 func (it *Item) Get(key string) (any, bool) {
 	v, ok := it.Fields[key]
 	return v, ok
+}
+
+// ToJSON returns item.Fields serialised as compact JSON bytes.
+func (it *Item) ToJSON() ([]byte, error) {
+	return json.Marshal(it.Fields)
+}
+
+// ToJSONPretty returns item.Fields serialised as indented JSON bytes.
+func (it *Item) ToJSONPretty() ([]byte, error) {
+	return json.MarshalIndent(it.Fields, "", "  ")
+}
+
+// ToMap returns a shallow copy of item.Fields.
+// Mutations to the returned map do not affect the Item.
+func (it *Item) ToMap() map[string]any {
+	m := make(map[string]any, len(it.Fields))
+	for k, v := range it.Fields {
+		m[k] = v
+	}
+	return m
+}
+
+// ToCSVRow returns field values as a string slice following the given column
+// order. Missing fields are returned as empty strings.
+func (it *Item) ToCSVRow(columns []string) []string {
+	row := make([]string, len(columns))
+	for i, col := range columns {
+		val, ok := it.Fields[col]
+		if !ok || val == nil {
+			row[i] = ""
+		} else {
+			row[i] = fmt.Sprintf("%v", val)
+		}
+	}
+	return row
+}
+
+// ToMarkdown returns a compact Markdown representation of the item as a
+// bullet list: the first key (sorted) is bolded; the rest are appended.
+func (it *Item) ToMarkdown() string {
+	keys := it.Keys()
+	if len(keys) == 0 {
+		return ""
+	}
+	first := fmt.Sprintf("**%v**", it.Fields[keys[0]])
+	parts := []string{first}
+	for _, k := range keys[1:] {
+		parts = append(parts, fmt.Sprintf("%v", it.Fields[k]))
+	}
+	return "- " + strings.Join(parts, " — ")
+}
+
+// ToText returns a plain-text representation with one "key: value" line per
+// field, fields in sorted order.
+func (it *Item) ToText() string {
+	keys := it.Keys()
+	lines := make([]string, 0, len(keys))
+	for _, k := range keys {
+		lines = append(lines, fmt.Sprintf("%s: %v", k, it.Fields[k]))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// String implements fmt.Stringer. It returns a compact JSON representation
+// of the item fields, falling back to a key=value format on marshal error.
+func (it *Item) String() string {
+	data, err := it.ToJSON()
+	if err != nil {
+		return it.ToText()
+	}
+	return string(data)
+}
+
+// Keys returns the item's field names in sorted (ascending) order.
+func (it *Item) Keys() []string {
+	keys := make([]string, 0, len(it.Fields))
+	for k := range it.Fields {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// Has reports whether the field exists and has a non-empty string
+// representation. A field set to nil or "" is treated as absent.
+func (it *Item) Has(key string) bool {
+	val, ok := it.Fields[key]
+	if !ok || val == nil {
+		return false
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", val)) != ""
+}
+
+// GetString returns the field value as a string. Returns "" if the field is
+// absent or its underlying type is not string.
+func (it *Item) GetString(key string) string {
+	val, ok := it.Fields[key]
+	if !ok {
+		return ""
+	}
+	s, ok := val.(string)
+	if !ok {
+		return ""
+	}
+	return s
+}
+
+// GetFloat returns the field value as float64. Accepts float64 and int/int64
+// stored in the Fields map. Returns 0 if the field is absent or non-numeric.
+func (it *Item) GetFloat(key string) float64 {
+	val, ok := it.Fields[key]
+	if !ok || val == nil {
+		return 0
+	}
+	switch v := val.(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case int32:
+		return float64(v)
+	default:
+		return 0
+	}
+}
+
+// GetInt returns the field value as int. Accepts int, int64, and float64
+// stored in the Fields map (float64 is truncated). Returns 0 if the field is
+// absent or non-numeric.
+func (it *Item) GetInt(key string) int {
+	val, ok := it.Fields[key]
+	if !ok || val == nil {
+		return 0
+	}
+	switch v := val.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case int32:
+		return int(v)
+	case float64:
+		return int(v)
+	case float32:
+		return int(v)
+	default:
+		return 0
+	}
 }
 
 // Result is the output of processing a job. It contains scraped items

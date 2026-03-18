@@ -374,8 +374,20 @@ func buildWriter(exp foxhound.ExportConfig, outputDir string) (foxhound.Writer, 
 			opts = append(opts, export.WithPGBatchSize(exp.BatchSize))
 		}
 		return export.NewPostgres(connString, table, opts...)
+	case "markdown", "md":
+		return export.NewMarkdown(path, export.MarkdownTable)
+	case "text", "txt":
+		return export.NewText(path, export.TextPretty)
+	case "xml":
+		return export.NewXML(path, "items", "item")
+	case "sqlite":
+		table := exp.Table
+		if table == "" {
+			table = "items"
+		}
+		return export.NewSQLite(path, table)
 	default:
-		return nil, fmt.Errorf("unknown export type %q (supported: json, jsonl, csv, webhook, postgres)", exp.Type)
+		return nil, fmt.Errorf("unknown export type %q (supported: json, jsonl, csv, webhook, postgres, markdown, md, text, txt, xml, sqlite)", exp.Type)
 	}
 }
 
