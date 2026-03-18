@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // Walker is a virtual user that pops jobs from the queue, fetches them,

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/pipeline"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/pipeline"
 )
 
 func TestTransform_FnIsApplied(t *testing.T) {

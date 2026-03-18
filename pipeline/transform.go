@@ -3,7 +3,7 @@ package pipeline
 import (
 	"context"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // Transform applies a user-defined function to each item.

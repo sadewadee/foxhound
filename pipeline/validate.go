@@ -5,7 +5,7 @@ package pipeline
 import (
 	"context"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // Validate is a pipeline stage that drops items missing required fields.

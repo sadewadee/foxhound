@@ -9,7 +9,7 @@ import (
 
 	_ "github.com/lib/pq" // PostgreSQL driver
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 const defaultPGBatchSize = 100

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/pipeline"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/pipeline"
 )
 
 func TestValidate_AllRequiredPresent(t *testing.T) {

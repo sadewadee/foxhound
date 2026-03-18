@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/foxhound-scraper/foxhound/monitor"
+	"github.com/sadewadee/foxhound/monitor"
 )
 
 func TestStats_NewStats_ZeroCounters(t *testing.T) {

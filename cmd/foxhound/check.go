@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/foxhound-scraper/foxhound/identity"
+	"github.com/sadewadee/foxhound/identity"
 )
 
 // cmdCheck generates an identity profile and verifies its internal consistency,

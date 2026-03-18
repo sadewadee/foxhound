@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/pipeline/export"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/pipeline/export"
 )
 
 func tempFile(t *testing.T, suffix string) string {

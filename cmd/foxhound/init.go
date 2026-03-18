@@ -67,7 +67,7 @@ func goModTemplate(name string) string {
 
 go 1.23
 
-require github.com/foxhound-scraper/foxhound v0.1.0
+require github.com/sadewadee/foxhound v0.1.0
 `, module)
 }
 
@@ -81,10 +81,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/parse"
-	"github.com/foxhound-scraper/foxhound/pipeline"
-	"github.com/foxhound-scraper/foxhound/pipeline/export"
+	"github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/parse"
+	"github.com/sadewadee/foxhound/pipeline"
+	"github.com/sadewadee/foxhound/pipeline/export"
 )
 
 // %[1]sSpider implements the scraping logic for this hunt.
@@ -140,7 +140,7 @@ func main() {
 
 func configYAMLTemplate(name string) string {
 	return fmt.Sprintf(`# Foxhound configuration for %s
-# See https://github.com/foxhound-scraper/foxhound for full documentation.
+# See https://github.com/sadewadee/foxhound for full documentation.
 
 hunt:
   domain: example.com

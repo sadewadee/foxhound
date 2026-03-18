@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 var (

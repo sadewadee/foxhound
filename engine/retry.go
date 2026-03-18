@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // RetryPolicy controls when and how often failed requests are retried.

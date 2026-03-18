@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // Scheduler manages a fixed-size pool of worker goroutines that consume jobs

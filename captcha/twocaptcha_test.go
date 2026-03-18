@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/foxhound-scraper/foxhound/captcha"
+	"github.com/sadewadee/foxhound/captcha"
 )
 
 // twocaptchaServer builds a mock 2captcha API server.

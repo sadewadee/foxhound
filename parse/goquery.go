@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/PuerkitoBio/goquery"
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // Document wraps goquery.Document for convenient CSS-selector-based extraction.

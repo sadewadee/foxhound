@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"sync"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // refererMiddleware tracks the last fetched URL per domain and uses it to

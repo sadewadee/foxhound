@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"regexp"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // RegexExtract returns the text of the first match of pattern in the response

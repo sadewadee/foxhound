@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // BlockDetector determines whether an HTTP response indicates that the server

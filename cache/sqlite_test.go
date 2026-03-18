@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/foxhound-scraper/foxhound/cache"
+	"github.com/sadewadee/foxhound/cache"
 )
 
 // newSQLiteCache creates a SQLiteCache backed by a temp file.

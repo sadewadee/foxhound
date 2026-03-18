@@ -10,7 +10,7 @@ package fetch_test
 import (
 	"testing"
 
-	"github.com/foxhound-scraper/foxhound/fetch"
+	"github.com/sadewadee/foxhound/fetch"
 )
 
 func TestWithMaxBrowserRequestsOptionAccepted(t *testing.T) {

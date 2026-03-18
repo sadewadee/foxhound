@@ -7,7 +7,7 @@ import (
 	"sort"
 	"sync"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // dedupMiddleware tracks seen canonical URLs and short-circuits duplicates.

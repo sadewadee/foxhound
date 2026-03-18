@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/foxhound-scraper/foxhound/captcha"
+	"github.com/sadewadee/foxhound/captcha"
 )
 
 // capsolverServer sets up a mock CapSolver API server.

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/identity"
-	"github.com/foxhound-scraper/foxhound/parse"
-	"github.com/foxhound-scraper/foxhound/proxy"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/identity"
+	"github.com/sadewadee/foxhound/parse"
+	"github.com/sadewadee/foxhound/proxy"
 )
 
 // cmdShell starts an interactive scraping REPL.

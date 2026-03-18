@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // CaptchaType identifies the type of CAPTCHA detected.

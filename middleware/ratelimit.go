@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 	"golang.org/x/time/rate"
 )
 

@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // XPath provides simplified XPath-like queries on HTML responses.

@@ -1,4 +1,4 @@
-module github.com/foxhound-scraper/foxhound
+module github.com/sadewadee/foxhound
 
 go 1.25.0
 

@@ -3,7 +3,7 @@ package parse_test
 import (
 	"testing"
 
-	"github.com/foxhound-scraper/foxhound/parse"
+	"github.com/sadewadee/foxhound/parse"
 )
 
 // sampleHTML is defined in goquery_test.go and shared across the parse_test package.

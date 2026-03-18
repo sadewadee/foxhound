@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 const version = "0.1.0"
