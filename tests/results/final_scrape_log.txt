@@ -1,0 +1,79 @@
+time=2026-03-18T10:05:18.773+08:00 level=INFO msg=identity ua="Mozilla/5.0 (Windows NT 11.0; Win64; x64; rv:148.0) Gecko/20..." locale=en-US
+time=2026-03-18T10:05:18.773+08:00 level=INFO msg="launching Camoufox with human simulation..."
+time=2026-03-18T10:05:21.475+08:00 level=INFO msg="fetch/camoufox: browser launched" headless=true block_images=false timeout=1m0s
+time=2026-03-18T10:05:21.475+08:00 level=INFO msg="Camoufox ready"
+
+═══════════════════════════════════════════════════
+TARGET 1: Google SERP — wisata alam jawa timur
+═══════════════════════════════════════════════════
+time=2026-03-18T10:05:21.476+08:00 level=INFO msg="trying stealth+proxy..."
+time=2026-03-18T10:05:24.028+08:00 level=INFO msg=fetched url="https://www.google.com/search?q=wisata+alam+jawa+timur&hl=id&gl=id&num=20" status=200 bytes=89518 duration=2.06548375s
+time=2026-03-18T10:05:24.029+08:00 level=INFO msg="stealth yielded no results, trying Camoufox browser..."
+time=2026-03-18T10:05:24.029+08:00 level=INFO msg="human pause" delay=4.924s
+time=2026-03-18T10:05:35.424+08:00 level=INFO msg=fetched url="https://www.google.com/search?q=wisata+alam+jawa+timur&hl=id&gl=id&num=20" status=200 bytes=6515 duration=2.593238458s
+time=2026-03-18T10:05:35.424+08:00 level=WARN msg="CAPTCHA detected on browser too" type=recaptcha
+  Requests: 2 | OK: 2 | Blocked: 0 | CAPTCHA: 1 | Items: 0 | Avoidance: 100%
+time=2026-03-18T10:05:35.425+08:00 level=INFO msg="human pause" delay=6.816s
+
+═══════════════════════════════════════════════════
+TARGET 2: Google Maps — villa di bali
+═══════════════════════════════════════════════════
+time=2026-03-18T10:05:50.549+08:00 level=INFO msg=fetched url=https://www.google.com/maps/search/villa+di+bali/ status=200 bytes=410960 duration=4.832163042s
+  Requests: 1 | OK: 1 | Blocked: 0 | CAPTCHA: 0 | Items: 15 | Avoidance: 100%
+  [1] Kayu Village (rating: 4,9, reviews: (106))
+  [2] Kayu Village (rating: , reviews: )
+  [3] Iklan·Kayu Village – Pererenan·Our resort is set back from Pererenan’s main beach road and amongst lush private gardens·Kunjungi Situs·kayuvillage.com (rating: , reviews: )
+  [4] Delu Villas Suite - One-Bedroom Villa with Private Pool (rating: 4,7, reviews: (8))
+  [5] Delu Villas Suite - One-Bedroom Villa with Private Pool (rating: , reviews: )
+  [6] Pondok Sebatu Villa (rating: 4,3, reviews: (1.208))
+  [7] Pondok Sebatu Villa (rating: , reviews: )
+  [8] Liam Private Villa (rating: 4,4, reviews: (87))
+  [9] Liam Private Villa (rating: , reviews: )
+  [10] Exceptional 3brd with pool and breakfast (rating: 5,0, reviews: (9))
+  [11] Exceptional 3brd with pool and breakfast (rating: , reviews: )
+  [12] EL Suites Berawa - Canggu - Three-Bedroom Villa (rating: 4,9, reviews: (8))
+  [13] EL Suites Berawa - Canggu - Three-Bedroom Villa (rating: , reviews: )
+  [14] Bulan Bali Homestay (rating: , reviews: )
+  [15] Bulan Bali Homestay (rating: , reviews: )
+time=2026-03-18T10:05:50.553+08:00 level=INFO msg="human pause" delay=3.156s
+
+═══════════════════════════════════════════════════
+TARGET 3: Alibaba — yoga mat products
+═══════════════════════════════════════════════════
+time=2026-03-18T10:06:05.950+08:00 level=INFO msg=fetched url="https://www.alibaba.com/trade/search?SearchText=yoga+mat&page=1" status=200 bytes=1948726 duration=9.338857917s
+  Requests: 1 | OK: 1 | Blocked: 0 | CAPTCHA: 0 | Items: 10 | Avoidance: 100%
+  [1] Sansd Custom Print Tpe Arch 68cm Yoga Mats Eco Friendly Private Label Non Slip Widen Tpe Yoga Mat Set Oval Yoga Fitness Mat — US$2,90-3,20 (Sansd (jiangsu) Environmental Technology Co., Ltd)
+  [2] Dream Health Gym Non Glue Eco Friendly Pu Rubber 3-6mm Best Quality Adult Extra Wide Infrared Heat Print Yoga Mat — US$4,98-19 (Nanjing Tropical International Co., Ltd.)
+  [3] EVA Yoga Mat for Beginners, Anti-Slip Yoga Mat, Home Gym & Yoga Studio, Ready Stock, Wholesale — US$1,27-3,90 (Qingdao Transcend Outdoor Products Co., Ltd.)
+  [4] Wholesale Thick 10mm Private Label Custom Printed Eco Friendly Foldable Customized Color NBR Yoga Mat With Strap — US$2,78-3,48 (Ningbo Winz Sports Goods Co., Ltd.)
+  [5] High Quality Eco-Friendly PU Custom Logo Non-Slip-Factory Wholesale Yoga Mat — US$11,56-12,49 (Dongguan Jiuzilong Industrial Co., Ltd)
+  [6] Private Label Eco-Friendly 100% Natural Rubber PU Yoga Mat Custom Design Thick TPE Mat For Wholesale 15mm Thickness Custom Size — US$1,98-6,30 (Nanjing Tropical International Co., Ltd.)
+  [7] 2026 Factory Golden Supplier Eco Friendly Personalize Luxury Dry Rainbow Black PU Rubber Yoga Mat — US$1,99-9,29 (Fuzhou Bohanson Trading Co., Ltd.)
+  [8] Customized Gym Exercise Pilates Environmental Friendly Arch Shaped High-quality Rubber Yoga Mat Wholesale — US$2,30-35,60 (Xiamen Kejinqu Toy Products Co., Ltd.)
+  [9] Dual Layer Suede Foldable Non-Slip Yoga Mat Travel-friendly 6mm TPE Mark Line Roll Bulk Order Yoga Mat for Gym or Outdoors — US$6,32 (Guangzhou Sanxing Technology Co., Ltd.)
+  [10] Pro Custom Eco Friendly PVC Yoga Mat Pilates Travel Fitness Non Slip Yoga Mat — US$4,98-27,43 (Nanjing Tropical International Co., Ltd.)
+time=2026-03-18T10:06:05.974+08:00 level=INFO msg="human pause" delay=4.19s
+
+═══════════════════════════════════════════════════
+TARGET 4: Yoga Alliance — school directory
+═══════════════════════════════════════════════════
+time=2026-03-18T10:06:18.235+08:00 level=INFO msg=fetched url="https://app.yogaalliance.org/directoryregistrants?type=School" status=200 bytes=388755 duration=4.461473833s
+  Requests: 1 | OK: 1 | Blocked: 0 | CAPTCHA: 0 | Items: 4 | Avoidance: 100%
+  [1] Virtual / Online — 
+  [2] Upcoming Programs — 
+  [3] Virtual / Online — 
+  [4] Filter Results By — 
+
+
+══════════════════════════════════════════════════════════════════════
+FINAL BENCHMARK REPORT — Foxhound Full Anti-Detection Stack
+══════════════════════════════════════════════════════════════════════
+Target               | Reqs |   OK | Block | CAPTCHA |   Items | Avoidance
+──────────────────────────────────────────────────────────────────────
+Google SERP          |    2 |    2 |    0 |     1  |       0 | 100%
+Google Maps          |    1 |    1 |    0 |     0  |      15 | 100%
+Alibaba              |    1 |    1 |    0 |     0  |      10 | 100%
+Yoga Alliance        |    1 |    1 |    0 |     0  |       4 | 100%
+──────────────────────────────────────────────────────────────────────
+TOTAL                |    5 |    5 |    0 |     1  |      29 | 100%
+══════════════════════════════════════════════════════════════════════
