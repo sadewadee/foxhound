@@ -74,3 +74,13 @@ foxhound-architecture.md
 foxhound-ecosystem.md
 
 /plans/
+
+# Third-party extensions (downloaded at runtime)
+captcha/nopecha/
+*.xpi
+
+# Compiled test binaries
+/turnstile_test
+
+# Screenshots
+*.png
