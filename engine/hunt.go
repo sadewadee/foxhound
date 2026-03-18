@@ -21,6 +21,9 @@ type HuntConfig struct {
 	Domain string
 	// Walkers is the number of concurrent virtual-user goroutines.
 	Walkers int
+	// MaxConcurrency is the global cap on simultaneous in-flight requests.
+	// When 0, defaults to Walkers count.
+	MaxConcurrency int
 	// Seeds are the initial jobs pushed to the queue before walkers start.
 	Seeds []*foxhound.Job
 	// Processor is the user-supplied response handler.
@@ -95,6 +98,7 @@ type Hunt struct {
 	mu            sync.RWMutex
 	logger        *slog.Logger
 	activeWalkers atomic.Int32
+	sem           chan struct{} // global concurrency limiter
 }
 
 // NewHunt creates a Hunt from cfg. It does not start any goroutines; call
@@ -103,11 +107,16 @@ func NewHunt(cfg HuntConfig) *Hunt {
 	if cfg.Walkers < 1 {
 		cfg.Walkers = 1
 	}
+	maxConc := cfg.Walkers
+	if cfg.MaxConcurrency > 0 {
+		maxConc = cfg.MaxConcurrency
+	}
 	return &Hunt{
 		config: cfg,
 		state:  HuntIdle,
 		stats:  NewStats(),
 		logger: slog.With("component", "hunt", "hunt", cfg.Name),
+		sem:    make(chan struct{}, maxConc),
 	}
 }
 

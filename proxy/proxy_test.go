@@ -74,6 +74,122 @@ func TestParseInvalid(t *testing.T) {
 	}
 }
 
+// TestParse_AllFormats exercises every supported proxy string format.
+func TestParse_AllFormats(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantHost  string
+		wantPort  string
+		wantUser  string
+		wantPass  string
+		wantProto string
+	}{
+		// Standard URL format
+		{
+			name: "standard http URL",
+			input: "http://user:pass@1.2.3.4:8080",
+			wantHost: "1.2.3.4", wantPort: "8080",
+			wantUser: "user", wantPass: "pass", wantProto: "http",
+		},
+		{
+			name: "standard socks5 URL",
+			input: "socks5://user:pass@1.2.3.4:1080",
+			wantHost: "1.2.3.4", wantPort: "1080",
+			wantUser: "user", wantPass: "pass", wantProto: "socks5",
+		},
+		// host:port only
+		{
+			name: "bare host:port",
+			input: "1.2.3.4:8080",
+			wantHost: "1.2.3.4", wantPort: "8080",
+			wantUser: "", wantPass: "", wantProto: "http",
+		},
+		// host:port:user:pass
+		{
+			name: "host:port:user:pass",
+			input: "1.2.3.4:8080:myuser:mypass",
+			wantHost: "1.2.3.4", wantPort: "8080",
+			wantUser: "myuser", wantPass: "mypass", wantProto: "http",
+		},
+		// user:pass:host:port
+		{
+			name: "user:pass:host:port",
+			input: "myuser:mypass:1.2.3.4:8080",
+			wantHost: "1.2.3.4", wantPort: "8080",
+			wantUser: "myuser", wantPass: "mypass", wantProto: "http",
+		},
+		// protocol:host:port:user:pass
+		{
+			name: "socks5:host:port:user:pass",
+			input: "socks5:1.2.3.4:1080:myuser:mypass",
+			wantHost: "1.2.3.4", wantPort: "1080",
+			wantUser: "myuser", wantPass: "mypass", wantProto: "socks5",
+		},
+		{
+			name: "http:host:port:user:pass",
+			input: "http:1.2.3.4:8080:user:pass",
+			wantHost: "1.2.3.4", wantPort: "8080",
+			wantUser: "user", wantPass: "pass", wantProto: "http",
+		},
+		// user:pass@host:port (no scheme)
+		{
+			name: "user:pass@host:port no scheme",
+			input: "user:pass@1.2.3.4:8080",
+			wantHost: "1.2.3.4", wantPort: "8080",
+			wantUser: "user", wantPass: "pass", wantProto: "http",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := proxy.Parse(tc.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) unexpected error: %v", tc.input, err)
+			}
+			if p.Host != tc.wantHost {
+				t.Errorf("host: got %q, want %q", p.Host, tc.wantHost)
+			}
+			if p.Port != tc.wantPort {
+				t.Errorf("port: got %q, want %q", p.Port, tc.wantPort)
+			}
+			if p.Username != tc.wantUser {
+				t.Errorf("username: got %q, want %q", p.Username, tc.wantUser)
+			}
+			if p.Password != tc.wantPass {
+				t.Errorf("password: got %q, want %q", p.Password, tc.wantPass)
+			}
+			if p.Protocol != tc.wantProto {
+				t.Errorf("protocol: got %q, want %q", p.Protocol, tc.wantProto)
+			}
+		})
+	}
+}
+
+// TestParse_EmptyString verifies that an empty input returns an error.
+func TestParse_EmptyString(t *testing.T) {
+	_, err := proxy.Parse("")
+	if err == nil {
+		t.Fatal("expected error for empty string, got nil")
+	}
+}
+
+// TestParse_InvalidFormat verifies that unrecognised colon counts return errors.
+func TestParse_InvalidFormat(t *testing.T) {
+	badInputs := []string{
+		"a:b:c",         // 3 parts — ambiguous
+		"a:b:c:d:e:f",  // 6 parts — too many
+	}
+	for _, input := range badInputs {
+		t.Run(input, func(t *testing.T) {
+			_, err := proxy.Parse(input)
+			if err == nil {
+				t.Fatalf("Parse(%q): expected error, got nil", input)
+			}
+		})
+	}
+}
+
 // --- StaticProvider tests ---
 
 func TestStaticProviderReturnsProxies(t *testing.T) {

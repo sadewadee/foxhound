@@ -60,6 +60,11 @@ func Detect(resp *foxhound.Response) *DetectResult {
 		result.Type = CaptchaCloudflare
 		result.SiteKey = extractSiteKey(body)
 
+	case isCloudflareJSChallenge(lower):
+		// Cloudflare JS challenge is not a traditional CAPTCHA but it is a
+		// block that requires challenge resolution before content is accessible.
+		result.Type = CaptchaCloudflare
+
 	case isRecaptcha(lower):
 		result.Type = CaptchaRecaptcha
 		result.SiteKey = extractSiteKey(body)
@@ -79,6 +84,16 @@ func Detect(resp *foxhound.Response) *DetectResult {
 func isTurnstile(lower string) bool {
 	return strings.Contains(lower, "challenges.cloudflare.com/turnstile") ||
 		strings.Contains(lower, "cf-turnstile")
+}
+
+// isCloudflareJSChallenge returns true when the page is a Cloudflare JS
+// challenge interstitial ("Checking your browser" / "Just a moment").
+// This is distinct from Turnstile — it requires no widget interaction; the
+// browser solves it automatically via JS execution.
+func isCloudflareJSChallenge(lower string) bool {
+	return (strings.Contains(lower, "checking your browser") ||
+		strings.Contains(lower, "just a moment")) &&
+		strings.Contains(lower, "cloudflare")
 }
 
 // isRecaptcha returns true when the page contains Google reCAPTCHA markers.
