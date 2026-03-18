@@ -1,0 +1,98 @@
+{
+  "total_requests": 10,
+  "successful": 10,
+  "failed": 0,
+  "total_items": 100,
+  "total_bytes": 4454757,
+  "total_duration_ms": 277469263625,
+  "avg_latency_ms": 24968571862,
+  "min_latency_ms": 8303535375,
+  "max_latency_ms": 38979614875,
+  "requests_per_min": 2.162401673472924,
+  "items_per_min": 21.624016734729242,
+  "items_per_hour": 1297.4410040837545,
+  "success_rate_pct": 100,
+  "avg_items_per_request": 10,
+  "requests": [
+    {
+      "query": "villa di bali",
+      "status": 200,
+      "items": 10,
+      "bytes": 415995,
+      "latency_ms": 25178061208,
+      "blocked": false
+    },
+    {
+      "query": "hotel di ubud",
+      "status": 200,
+      "items": 10,
+      "bytes": 435978,
+      "latency_ms": 20196548584,
+      "blocked": false
+    },
+    {
+      "query": "restaurant di seminyak",
+      "status": 200,
+      "items": 10,
+      "bytes": 414863,
+      "latency_ms": 21726239000,
+      "blocked": false
+    },
+    {
+      "query": "spa di kuta bali",
+      "status": 200,
+      "items": 10,
+      "bytes": 440343,
+      "latency_ms": 19398817334,
+      "blocked": false
+    },
+    {
+      "query": "yoga studio di canggu",
+      "status": 200,
+      "items": 10,
+      "bytes": 411727,
+      "latency_ms": 38979614875,
+      "blocked": false
+    },
+    {
+      "query": "cafe di sanur bali",
+      "status": 200,
+      "items": 10,
+      "bytes": 658963,
+      "latency_ms": 8303535375,
+      "blocked": false
+    },
+    {
+      "query": "villa di lombok",
+      "status": 200,
+      "items": 10,
+      "bytes": 418314,
+      "latency_ms": 23419073041,
+      "blocked": false
+    },
+    {
+      "query": "resort di nusa dua",
+      "status": 200,
+      "items": 10,
+      "bytes": 428998,
+      "latency_ms": 30529934041,
+      "blocked": false
+    },
+    {
+      "query": "diving center bali",
+      "status": 200,
+      "items": 10,
+      "bytes": 415741,
+      "latency_ms": 38233931584,
+      "blocked": false
+    },
+    {
+      "query": "surfing school bali",
+      "status": 200,
+      "items": 10,
+      "bytes": 413835,
+      "latency_ms": 23719963583,
+      "blocked": false
+    }
+  ]
+}
