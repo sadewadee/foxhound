@@ -17,12 +17,17 @@ import (
 	"github.com/sadewadee/foxhound/identity"
 )
 
-const (
-	proxyUser = "REDACTED_USER"
-	proxyPass = "REDACTED_PASS"
-	proxyHost = "REDACTED_HOST"
-	proxyPort = "6418"
+var (
+	proxyUser = os.Getenv("FOXHOUND_PROXY_USER")
+	proxyPass = os.Getenv("FOXHOUND_PROXY_PASS")
+	proxyHost = getEnvOrDefault("FOXHOUND_PROXY_HOST", "proxy-host")
+	proxyPort = getEnvOrDefault("FOXHOUND_PROXY_PORT", "port")
 )
+
+func getEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" { return v }
+	return fallback
+}
 
 type ProxyTestResult struct {
 	Mode       string `json:"mode"`

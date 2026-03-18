@@ -23,7 +23,7 @@ import (
 	"github.com/sadewadee/foxhound/parse"
 )
 
-const proxyURL = "http://REDACTED_USER:REDACTED_PASS@REDACTED_HOST:80"
+var proxyURL = getEnvOrDefault("FOXHOUND_PROXY", "http://user:pass@proxy:port")
 
 type Item struct {
 	Title   string `json:"title,omitempty"`
@@ -60,7 +60,7 @@ func main() {
 
 	fmt.Println("══════════════════════════════════════════════════════")
 	fmt.Println("  Camoufox Binary + Rotating Residential Proxy")
-	fmt.Printf("  Proxy: %s\n", "http://***-rotate@REDACTED_HOST:80")
+	fmt.Printf("  Proxy: %s\n", "(from FOXHOUND_PROXY env)")
 	fmt.Printf("  UA:    %s\n", prof.UA)
 	fmt.Println("══════════════════════════════════════════════════════")
 
@@ -301,4 +301,9 @@ func pause() {
 func saveJSON(path string, v any) {
 	data, _ := json.MarshalIndent(v, "", "  ")
 	os.WriteFile(path, data, 0644)
+}
+
+func getEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" { return v }
+	return fallback
 }

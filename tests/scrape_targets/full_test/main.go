@@ -50,7 +50,7 @@ type Benchmark struct {
 	BlockAvoidance float64 `json:"block_avoidance_pct"`
 }
 
-const proxyURL = "socks5://REDACTED_USER:REDACTED_PASS@REDACTED_HOST:6418"
+var proxyURL = getEnvOrDefault("FOXHOUND_PROXY", "socks5://user:pass@proxy:port")
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
@@ -395,4 +395,9 @@ func printBenchmark(b Benchmark) {
 func saveJSON(path string, v any) {
 	data, _ := json.MarshalIndent(v, "", "  ")
 	os.WriteFile(path, data, 0644)
+}
+
+func getEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" { return v }
+	return fallback
 }

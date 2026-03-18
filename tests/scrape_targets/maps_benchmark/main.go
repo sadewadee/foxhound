@@ -22,7 +22,7 @@ import (
 	"github.com/sadewadee/foxhound/parse"
 )
 
-const proxyURL = "http://REDACTED_USER:REDACTED_PASS@REDACTED_HOST:80"
+var proxyURL = getEnvOrDefault("FOXHOUND_PROXY", "http://user:pass@proxy:port")
 
 type Villa struct {
 	Title   string `json:"title"`
@@ -272,4 +272,9 @@ func parseMaps(resp *foxhound.Response, query string) []Villa {
 func saveJSON(path string, v any) {
 	data, _ := json.MarshalIndent(v, "", "  ")
 	os.WriteFile(path, data, 0644)
+}
+
+func getEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" { return v }
+	return fallback
 }

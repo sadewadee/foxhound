@@ -2,7 +2,7 @@
 
 // visible_proxy_test runs all 4 scrape targets with:
 //   - headless: false (visible browser window)
-//   - SOCKS5 proxy (REDACTED_HOST:6418)
+//   - proxy from FOXHOUND_PROXY env
 //   - human simulation (mouse, scroll, delays)
 //   - persistent session (cookies survive across pages)
 package main
@@ -27,7 +27,7 @@ import (
 )
 
 // Firefox/Playwright doesn't support SOCKS5 with auth — use HTTP proxy instead.
-const proxyURL = "http://REDACTED_USER:REDACTED_PASS@REDACTED_HOST:6418"
+var proxyURL = getEnvOrDefault("FOXHOUND_PROXY", "http://user:pass@proxy:port")
 
 type Item struct {
 	Title    string `json:"title,omitempty"`
@@ -70,7 +70,7 @@ func main() {
 	fmt.Println("══════════════════════════════════════════════════════════════")
 	fmt.Println("  FOXHOUND — Visible Browser + SOCKS5 Proxy Test")
 	fmt.Println("  Headless: FALSE (you will see the browser window)")
-	fmt.Printf("  Proxy:    %s\n", "socks5://***@REDACTED_HOST:6418")
+	fmt.Printf("  Proxy:    %s\n", "(from FOXHOUND_PROXY env)")
 	fmt.Printf("  UA:       %s\n", prof.UA)
 	fmt.Println("══════════════════════════════════════════════════════════════")
 
@@ -334,4 +334,9 @@ func humanPause(minSec, maxSec int) {
 func saveJSON(path string, v any) {
 	data, _ := json.MarshalIndent(v, "", "  ")
 	os.WriteFile(path, data, 0644)
+}
+
+func getEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" { return v }
+	return fallback
 }
