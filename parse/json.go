@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // JSON parses the response body as JSON into target.

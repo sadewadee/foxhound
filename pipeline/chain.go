@@ -3,7 +3,7 @@ package pipeline
 import (
 	"context"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // Chain combines multiple Pipeline stages into a single Pipeline.

@@ -26,15 +26,15 @@ import (
 	"strings"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/engine"
-	"github.com/foxhound-scraper/foxhound/fetch"
-	"github.com/foxhound-scraper/foxhound/identity"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/engine"
+	"github.com/sadewadee/foxhound/fetch"
+	"github.com/sadewadee/foxhound/identity"
 	"github.com/PuerkitoBio/goquery"
-	"github.com/foxhound-scraper/foxhound/parse"
-	"github.com/foxhound-scraper/foxhound/pipeline"
-	"github.com/foxhound-scraper/foxhound/pipeline/export"
-	"github.com/foxhound-scraper/foxhound/queue"
+	"github.com/sadewadee/foxhound/parse"
+	"github.com/sadewadee/foxhound/pipeline"
+	"github.com/sadewadee/foxhound/pipeline/export"
+	"github.com/sadewadee/foxhound/queue"
 )
 
 // baseURL is a public scraping sandbox — safe to scrape in examples.

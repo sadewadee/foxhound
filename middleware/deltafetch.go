@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // DeltaStrategy controls when DeltaFetch skips a URL.

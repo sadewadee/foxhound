@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // redirectStatusCodes contains HTTP status codes that require following a

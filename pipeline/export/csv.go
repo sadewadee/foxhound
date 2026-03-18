@@ -7,7 +7,7 @@ import (
 	"os"
 	"sort"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // CSVWriter exports items to a CSV file.

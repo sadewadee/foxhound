@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // FieldDef describes how to extract a single field from an HTML element.

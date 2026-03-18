@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/foxhound-scraper/foxhound/cache"
+	"github.com/sadewadee/foxhound/cache"
 )
 
 // --- MemoryCache tests ---

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/foxhound-scraper/foxhound/proxy"
+	"github.com/sadewadee/foxhound/proxy"
 )
 
 const oxylabsHost = "pr.oxylabs.io"

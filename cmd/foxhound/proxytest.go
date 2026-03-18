@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/proxy"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/proxy"
 )
 
 // cmdProxyTest loads the proxy pool from configuration and probes each proxy,

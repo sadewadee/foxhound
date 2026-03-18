@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // cmdResume loads an interrupted hunt's state from a persistent queue and

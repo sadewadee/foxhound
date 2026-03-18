@@ -3,7 +3,7 @@
 package middleware
 
 import (
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // chainMiddleware applies a slice of middlewares as a single Middleware.

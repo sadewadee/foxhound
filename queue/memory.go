@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // ErrQueueClosed is returned when operating on a closed queue.

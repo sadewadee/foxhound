@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // depthMiddleware aborts requests whose Job.Depth exceeds the configured limit.

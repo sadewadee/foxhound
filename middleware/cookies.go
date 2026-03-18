@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"sync"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // cookiesMiddleware maintains a per-session cookie jar that persists cookies

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // ItemDedup drops duplicate items based on a key field.

@@ -3,8 +3,8 @@ package captcha_test
 import (
 	"testing"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/captcha"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/captcha"
 )
 
 func resp(body string) *foxhound.Response {

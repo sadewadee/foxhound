@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // HuntConfig holds all dependencies and settings for a single scraping

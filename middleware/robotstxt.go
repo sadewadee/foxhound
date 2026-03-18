@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // robotsRules holds the list of disallowed path prefixes for a domain.

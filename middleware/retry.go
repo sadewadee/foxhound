@@ -6,7 +6,7 @@ import (
 	"math/rand/v2"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // blockedStatusCodes contains HTTP status codes that indicate the server is

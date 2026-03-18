@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/foxhound-scraper/foxhound/middleware"
+	"github.com/sadewadee/foxhound/middleware"
 )
 
 // ---------------------------------------------------------------------------

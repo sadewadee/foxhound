@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/foxhound-scraper/foxhound/proxy/providers"
+	"github.com/sadewadee/foxhound/proxy/providers"
 )
 
 // --- BrightData ---

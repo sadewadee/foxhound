@@ -35,8 +35,8 @@ import (
 	"time"
 
 	azuretls "github.com/Noooste/azuretls-client"
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/identity"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/identity"
 )
 
 // defaultStealthTimeout is used when no explicit timeout is supplied.

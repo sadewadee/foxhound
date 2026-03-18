@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/foxhound-scraper/foxhound/fetch"
-	"github.com/foxhound-scraper/foxhound/identity"
+	"github.com/sadewadee/foxhound/fetch"
+	"github.com/sadewadee/foxhound/identity"
 )
 
 // TestTLSStealthFetcher_FetchReturnsResponse verifies the azuretls-backed fetcher
