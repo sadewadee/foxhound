@@ -7,6 +7,7 @@ import (
 
 	foxhound "github.com/sadewadee/foxhound"
 	"github.com/sadewadee/foxhound/behavior"
+	"github.com/sadewadee/foxhound/captcha"
 )
 
 // Walker is a virtual user that pops jobs from the queue, fetches them,
@@ -138,6 +139,18 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 	w.logger.Debug("fetch complete",
 		"url", job.URL, "status", resp.StatusCode, "bytes", len(resp.Body),
 		"duration", time.Since(start), "fetch_mode", resp.FetchMode)
+
+	// CAPTCHA detection — if the response contains a CAPTCHA challenge,
+	// log it and count as blocked. This is Layer 6 defense from the architecture.
+	if detection := captcha.Detect(resp); detection.Type != captcha.CaptchaNone {
+		w.logger.Warn("CAPTCHA detected in response",
+			"url", job.URL,
+			"captcha_type", detection.Type,
+			"site_key", detection.SiteKey,
+		)
+		w.hunt.stats.RecordRequest(job.Domain, time.Since(start), nil, true)
+		return
+	}
 
 	result, procErr := w.processor.Process(ctx, resp)
 	if procErr != nil {
