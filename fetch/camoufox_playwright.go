@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	neturl "net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -130,12 +131,21 @@ type CamoufoxFetcher struct {
 	blockImages    bool
 	headless       string
 	timeout        time.Duration
+	proxyURL       string       // SOCKS5 or HTTP proxy URL
 	maxRequests    int          // restart after this many fetches (0 = disabled)
 	requestCount   atomic.Int64 // total fetches served by the current browser instance
 	mu             sync.Mutex   // serialises browser restart
 	persistSession bool
 	sessionCtx     playwright.BrowserContext // reused when persistSession=true
 	sessionMu      sync.Mutex               // guards sessionCtx lifecycle
+}
+
+// WithBrowserProxy sets the proxy URL for all browser requests.
+// Supports SOCKS5 (socks5://user:pass@host:port) and HTTP (http://user:pass@host:port).
+func WithBrowserProxy(proxyURL string) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.proxyURL = proxyURL
+	}
 }
 
 // NewCamoufox initialises playwright, applies the supplied options, launches a
@@ -172,6 +182,13 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 		// Juggler is the Firefox-specific remote-debugging protocol used by
 		// Camoufox.  Passing an empty Args slice keeps defaults; Juggler is
 		// automatically selected by playwright-go for Firefox.
+	}
+
+	// Set proxy at browser launch level — Firefox requires this for SOCKS5.
+	if f.proxyURL != "" {
+		proxyOpt := parsePlaywrightProxy(f.proxyURL)
+		launchOpts.Proxy = proxyOpt
+		slog.Info("fetch/camoufox: browser launching with proxy", "server", proxyOpt.Server)
 	}
 
 	browser, err := pw.Firefox.Launch(launchOpts)
@@ -573,6 +590,35 @@ func camoufoxEnvFromProfile(p *identity.Profile) map[string]string {
 		return map[string]string{}
 	}
 	return p.CamoufoxEnv
+}
+
+// parsePlaywrightProxy converts a proxy URL like
+// "socks5://user:pass@host:port" into a playwright.Proxy struct
+// with Server, Username, and Password separated (required by Playwright).
+func parsePlaywrightProxy(rawURL string) *playwright.Proxy {
+	proxy := &playwright.Proxy{}
+
+	// Parse the URL to extract components
+	u, err := neturl.Parse(rawURL)
+	if err != nil {
+		// Fallback: use as-is
+		proxy.Server = rawURL
+		return proxy
+	}
+
+	// Server = scheme://host:port (no auth)
+	proxy.Server = fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+
+	// Extract username and password separately
+	if u.User != nil {
+		username := u.User.Username()
+		proxy.Username = &username
+		if pass, ok := u.User.Password(); ok {
+			proxy.Password = &pass
+		}
+	}
+
+	return proxy
 }
 
 // restart closes the current browser instance and launches a new one, resetting

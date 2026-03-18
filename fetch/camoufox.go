@@ -108,8 +108,17 @@ type CamoufoxFetcher struct {
 	blockImages    bool
 	headless       string
 	timeout        time.Duration
-	maxRequests    int  // restart browser after this many requests (0 = disabled)
-	persistSession bool // reuse BrowserContext across requests when true
+	proxyURL       string // SOCKS5 or HTTP proxy URL
+	maxRequests    int    // restart browser after this many requests (0 = disabled)
+	persistSession bool   // reuse BrowserContext across requests when true
+}
+
+// WithBrowserProxy sets the proxy URL for all browser requests.
+// Supports SOCKS5 (socks5://user:pass@host:port) and HTTP (http://user:pass@host:port).
+func WithBrowserProxy(proxyURL string) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.proxyURL = proxyURL
+	}
 }
 
 // NewCamoufox creates a CamoufoxFetcher. In the stub build no browser is

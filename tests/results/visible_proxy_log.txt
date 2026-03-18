@@ -1,0 +1,55 @@
+══════════════════════════════════════════════════════════════
+  FOXHOUND — Visible Browser + SOCKS5 Proxy Test
+  Headless: FALSE (you will see the browser window)
+  Proxy:    socks5://***@REDACTED_HOST:6418
+  UA:       Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0; rv:148.0) Gecko/20100101 Firefox/148.0
+══════════════════════════════════════════════════════════════
+time=2026-03-18T10:16:09.781+08:00 level=INFO msg="launching visible Camoufox with proxy..."
+time=2026-03-18T10:16:10.414+08:00 level=INFO msg="fetch/camoufox: browser launching with proxy" server=http://REDACTED_HOST:6418
+time=2026-03-18T10:16:12.867+08:00 level=INFO msg="fetch/camoufox: browser launched" headless=false block_images=false timeout=1m0s
+time=2026-03-18T10:16:12.867+08:00 level=INFO msg="Camoufox visible browser ready with proxy"
+
+[1/4] Google SERP — wisata alam jawa timur
+time=2026-03-18T10:16:32.000+08:00 level=INFO msg=fetched target="Google SERP" status=200 bytes=6516 duration=12.96404375s
+time=2026-03-18T10:16:32.001+08:00 level=WARN msg="CAPTCHA detected" target="Google SERP" type=recaptcha sitekey=6LdLLIMbAAAAAIl-KLj9p1ePhM-4LCCDbjtJLqRO
+  Status: 1 req, 1 OK, 0 blocked, 1 CAPTCHA | 0 items | avoidance 100%
+time=2026-03-18T10:16:32.002+08:00 level=INFO msg="human pause" delay=4.706s
+
+[2/4] Google Maps — villa di bali
+time=2026-03-18T10:16:51.282+08:00 level=INFO msg=fetched target="Google Maps" status=200 bytes=430000 duration=10.148947125s
+  Status: 1 req, 1 OK, 0 blocked, 0 CAPTCHA | 10 items | avoidance 100%
+  [1] Show the Input Tools menu
+  [2] Delu Villas Suite - One-Bedroom Villa with Private Pool (4,7★)
+  [3] Delu Villas Suite - One-Bedroom Villa with Private Pool
+  [4] Exceptional 3brd with pool and breakfast (5,0★)
+  [5] Exceptional 3brd with pool and breakfast
+  [6] Sanur Art Villas (3,8★)
+  [7] Sanur Art Villas
+  [8] Pondok Gadri Villa Ubud (4,7★)
+  [9] Pondok Gadri Villa Ubud
+  [10] Rouge - Loft Mango - Villa with Private Pool (4,6★)
+time=2026-03-18T10:16:51.294+08:00 level=INFO msg="human pause" delay=5.612s
+
+[3/4] Alibaba — yoga mat
+time=2026-03-18T10:17:25.045+08:00 level=INFO msg=fetched target=Alibaba status=200 bytes=118167 duration=23.631775958s
+  Status: 1 req, 1 OK, 0 blocked, 0 CAPTCHA | 0 items | avoidance 100%
+time=2026-03-18T10:17:25.047+08:00 level=INFO msg="human pause" delay=4.284s
+
+[4/4] Yoga Alliance — school directory
+time=2026-03-18T10:17:45.888+08:00 level=INFO msg=fetched target="Yoga Alliance" status=200 bytes=388755 duration=12.868090667s
+time=2026-03-18T10:17:45.890+08:00 level=WARN msg="CAPTCHA detected" target="Yoga Alliance" type=recaptcha sitekey=""
+  Status: 1 req, 1 OK, 0 blocked, 1 CAPTCHA | 0 items | avoidance 100%
+
+
+══════════════════════════════════════════════════════════════════════════
+BENCHMARK REPORT — Visible Browser + SOCKS5 Proxy
+══════════════════════════════════════════════════════════════════════════
+Target               | Reqs |   OK | Block | CAPTCHA |   Items | Avoidance
+──────────────────────────────────────────────────────────────────────────
+Google SERP          |    1 |    1 |     0 |     1   |       0 | 100%
+Google Maps          |    1 |    1 |     0 |     0   |      10 | 100%
+Alibaba              |    1 |    1 |     0 |     0   |       0 | 100%
+Yoga Alliance        |    1 |    1 |     0 |     1   |       0 | 100%
+──────────────────────────────────────────────────────────────────────────
+TOTAL                |    4 |    4 |     0 |     2   |      10 | 100%
+══════════════════════════════════════════════════════════════════════════
