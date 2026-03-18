@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -59,11 +60,15 @@ const (
 // Step action constants for JobStep. These are package-level int constants
 // (not engine.StepAction) to avoid an import cycle between foxhound ↔ engine.
 const (
-	JobStepNavigate = 0
-	JobStepClick    = 1
-	JobStepWait     = 2
-	JobStepExtract  = 3
-	JobStepScroll   = 4
+	JobStepNavigate       = 0
+	JobStepClick          = 1
+	JobStepWait           = 2
+	JobStepExtract        = 3
+	JobStepScroll         = 4
+	JobStepInfiniteScroll = 5 // scroll to bottom until no new content loads
+	JobStepLoadMore       = 6 // click "load more" button repeatedly until gone
+	JobStepPaginate       = 7 // detect and follow pagination links
+	JobStepEvaluate       = 8 // execute custom JavaScript on the page
 )
 
 // JobStep is a single browser-side action that should be executed after the
@@ -86,6 +91,400 @@ type JobStep struct {
 	// ScrollMode is 0 for ScrollReading, 1 for ScrollScan. Zero value
 	// (omitted in JSON) defaults to ScrollReading.
 	ScrollMode int `json:"scroll_mode,omitempty"`
+	// MaxScrolls is the maximum number of scroll-to-bottom iterations for
+	// InfiniteScroll steps. Defaults to 50 when zero.
+	MaxScrolls int `json:"max_scrolls,omitempty"`
+	// MaxClicks is the maximum number of "load more" button clicks for
+	// LoadMore steps. Defaults to 20 when zero.
+	MaxClicks int `json:"max_clicks,omitempty"`
+	// MaxPages is the maximum number of pagination pages to follow for
+	// Paginate steps. Defaults to 10 when zero.
+	MaxPages int `json:"max_pages,omitempty"`
+	// Script is the JavaScript code to execute for Evaluate steps.
+	Script string `json:"script,omitempty"`
+	// WaitState specifies what state to wait for in Wait steps:
+	// "attached" (default), "detached", "visible", or "hidden".
+	// Maps to playwright's WaitForSelectorState.
+	WaitState string `json:"wait_state,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
+// Response selection helpers — CSS(), XPath(), Follow()
+// ---------------------------------------------------------------------------
+
+// Selector provides CSS-selector-based querying on the Response body.
+// It wraps a lazily-parsed HTML document so multiple CSS/XPath calls share
+// the same parse result.
+type Selector struct {
+	resp *Response
+	body []byte
+}
+
+// CSS returns a Selector bound to this Response. Subsequent calls share the
+// same parsed document, making it efficient to chain multiple selectors:
+//
+//	title := resp.CSS("h1").Text()
+//	links := resp.CSS("a[href]").Attrs("href")
+func (r *Response) CSS(selector string) *Selection {
+	sel := &Selector{resp: r, body: r.Body}
+	return sel.CSS(selector)
+}
+
+// XPath evaluates a simplified XPath expression against the response body
+// and returns the first matching element's text.
+// See parse.XPath for supported syntax.
+func (r *Response) XPath(expr string) string {
+	sel := &Selector{resp: r, body: r.Body}
+	return sel.XPath(expr)
+}
+
+// XPathAll evaluates a simplified XPath expression and returns text content
+// of all matching elements.
+func (r *Response) XPathAll(expr string) []string {
+	sel := &Selector{resp: r, body: r.Body}
+	return sel.XPathAll(expr)
+}
+
+// TextBody returns the response body as a string.
+func (r *Response) TextBody() string {
+	return string(r.Body)
+}
+
+// CSS returns a Selection for the given CSS selector.
+func (s *Selector) CSS(selector string) *Selection {
+	return &Selection{
+		selector: selector,
+		body:     s.body,
+	}
+}
+
+// XPath evaluates a simplified XPath expression and returns the first match text.
+func (s *Selector) XPath(expr string) string {
+	results := s.XPathAll(expr)
+	if len(results) == 0 {
+		return ""
+	}
+	return results[0]
+}
+
+// XPathAll evaluates a simplified XPath expression and returns all match texts.
+func (s *Selector) XPathAll(expr string) []string {
+	css := xpathToCSSSimple(expr)
+	sel := &Selection{selector: css, body: s.body}
+	return sel.Texts()
+}
+
+// Selection represents a CSS selector applied to an HTML body. It provides
+// convenience methods for extracting text, attributes, and HTML from matched
+// elements without requiring the user to import the parse package directly.
+type Selection struct {
+	selector string
+	body     []byte
+}
+
+// Text returns the trimmed text content of the first element matching the selector.
+func (s *Selection) Text() string {
+	texts := s.Texts()
+	if len(texts) == 0 {
+		return ""
+	}
+	return texts[0]
+}
+
+// Texts returns the trimmed text content of all elements matching the selector.
+func (s *Selection) Texts() []string {
+	return htmlSelectTexts(s.body, s.selector)
+}
+
+// Attr returns an attribute value from the first matching element.
+func (s *Selection) Attr(attr string) string {
+	attrs := s.Attrs(attr)
+	if len(attrs) == 0 {
+		return ""
+	}
+	return attrs[0]
+}
+
+// Attrs returns attribute values from all matching elements.
+func (s *Selection) Attrs(attr string) []string {
+	return htmlSelectAttrs(s.body, s.selector, attr)
+}
+
+// Len returns the number of elements matching the selector.
+func (s *Selection) Len() int {
+	return htmlSelectCount(s.body, s.selector)
+}
+
+// ---------------------------------------------------------------------------
+// Response.Follow() — generate follow-up jobs from links
+// ---------------------------------------------------------------------------
+
+// FollowOption configures how Follow generates jobs from discovered links.
+type FollowOption func(*followConfig)
+
+type followConfig struct {
+	fetchMode  FetchMode
+	priority   Priority
+	meta       map[string]any
+	callback   string // callback name stored in Meta["callback"]
+	dontFilter bool   // skip deduplication for this job
+	referer    bool   // set current URL as referer in meta
+}
+
+// WithFollowMode sets the FetchMode for generated follow-up jobs.
+func WithFollowMode(mode FetchMode) FollowOption {
+	return func(c *followConfig) { c.fetchMode = mode }
+}
+
+// WithFollowPriority sets the Priority for generated follow-up jobs.
+func WithFollowPriority(p Priority) FollowOption {
+	return func(c *followConfig) { c.priority = p }
+}
+
+// WithFollowMeta sets metadata on generated follow-up jobs.
+func WithFollowMeta(meta map[string]any) FollowOption {
+	return func(c *followConfig) { c.meta = meta }
+}
+
+// WithFollowCallback sets a callback name in Meta["callback"] for generated
+// jobs, allowing spider-style routing of responses to different handlers.
+func WithFollowCallback(callback string) FollowOption {
+	return func(c *followConfig) { c.callback = callback }
+}
+
+// WithFollowDontFilter marks generated jobs to skip deduplication filtering.
+// Useful for pages that need to be re-fetched (e.g. pagination, monitoring).
+func WithFollowDontFilter(dontFilter bool) FollowOption {
+	return func(c *followConfig) { c.dontFilter = dontFilter }
+}
+
+// WithFollowReferer sets the current response URL as referer in the generated
+// job's Meta["referer"]. This maintains referer chain for natural browsing
+// simulation.
+func WithFollowReferer(referer bool) FollowOption {
+	return func(c *followConfig) { c.referer = referer }
+}
+
+// Follow generates follow-up Jobs from all links matching the CSS selector
+// in the response body. Links are resolved relative to the response URL,
+// deduplicated, and filtered to HTTP(S) schemes. The generated jobs inherit
+// Depth+1 from the originating job.
+//
+// Example:
+//
+//	jobs := resp.Follow("a.product-link[href]", foxhound.WithFollowCallback("parseProduct"))
+func (r *Response) Follow(selector string, opts ...FollowOption) []*Job {
+	cfg := &followConfig{
+		fetchMode: FetchAuto,
+		priority:  PriorityNormal,
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	hrefs := htmlSelectAttrs(r.Body, selector, "href")
+	if len(hrefs) == 0 {
+		return nil
+	}
+
+	base, err := url.Parse(r.URL)
+	if err != nil {
+		return nil
+	}
+
+	parentDepth := 0
+	if r.Job != nil {
+		parentDepth = r.Job.Depth
+	}
+
+	seen := make(map[string]struct{})
+	var jobs []*Job
+
+	for _, href := range hrefs {
+		href = strings.TrimSpace(href)
+		if href == "" || strings.HasPrefix(href, "#") {
+			continue
+		}
+
+		ref, err := url.Parse(href)
+		if err != nil {
+			continue
+		}
+
+		resolved := base.ResolveReference(ref)
+		resolved.Fragment = ""
+		link := resolved.String()
+
+		scheme := strings.ToLower(resolved.Scheme)
+		if scheme != "http" && scheme != "https" {
+			continue
+		}
+
+		if _, dup := seen[link]; dup {
+			continue
+		}
+		seen[link] = struct{}{}
+
+		meta := make(map[string]any)
+		for k, v := range cfg.meta {
+			meta[k] = v
+		}
+		if cfg.callback != "" {
+			meta["callback"] = cfg.callback
+		}
+
+		job := &Job{
+			ID:         link,
+			URL:        link,
+			Method:     "GET",
+			FetchMode:  cfg.fetchMode,
+			Priority:   cfg.priority,
+			Depth:      parentDepth + 1,
+			Domain:     resolved.Host,
+			Meta:       meta,
+			DontFilter: cfg.dontFilter,
+			CreatedAt:  time.Now(),
+		}
+		if cfg.referer {
+			job.Meta["referer"] = r.URL
+		}
+		jobs = append(jobs, job)
+	}
+
+	return jobs
+}
+
+// FollowAll generates follow-up Jobs for all anchor links (a[href]) in the
+// response body. It is shorthand for Follow("a[href]", opts...).
+func (r *Response) FollowAll(opts ...FollowOption) []*Job {
+	return r.Follow("a[href]", opts...)
+}
+
+// FollowURL creates a single follow-up Job for the given URL. The URL is
+// resolved relative to the response URL. The generated job inherits Depth+1
+// from the originating job.
+//
+// Unlike Follow, which extracts links from HTML via CSS selectors, FollowURL
+// is for programmatically following a known URL (e.g. an API endpoint or a
+// URL extracted from JSON data).
+//
+// Example:
+//
+//	nextPage := resp.FollowURL("/api/products?page=2", foxhound.WithFollowReferer(true))
+func (r *Response) FollowURL(rawURL string, opts ...FollowOption) *Job {
+	cfg := &followConfig{
+		fetchMode: FetchAuto,
+		priority:  PriorityNormal,
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	base, err := url.Parse(r.URL)
+	if err != nil {
+		return nil
+	}
+
+	ref, err := url.Parse(rawURL)
+	if err != nil {
+		return nil
+	}
+
+	resolved := base.ResolveReference(ref)
+	resolved.Fragment = ""
+	link := resolved.String()
+
+	parentDepth := 0
+	if r.Job != nil {
+		parentDepth = r.Job.Depth
+	}
+
+	meta := make(map[string]any)
+	if cfg.referer {
+		meta["referer"] = r.URL
+	}
+	for k, v := range cfg.meta {
+		meta[k] = v
+	}
+	if cfg.callback != "" {
+		meta["callback"] = cfg.callback
+	}
+
+	return &Job{
+		ID:         link,
+		URL:        link,
+		Method:     "GET",
+		FetchMode:  cfg.fetchMode,
+		Priority:   cfg.priority,
+		Depth:      parentDepth + 1,
+		Domain:     resolved.Host,
+		Meta:       meta,
+		DontFilter: cfg.dontFilter,
+		CreatedAt:  time.Now(),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Minimal HTML selector helpers (avoid import cycle with parse package)
+// ---------------------------------------------------------------------------
+
+// htmlSelectTexts extracts text from elements matching a CSS selector.
+// Uses a minimal byte-scan approach to avoid importing goquery here.
+// For full-featured parsing, use the parse package directly.
+func htmlSelectTexts(body []byte, selector string) []string {
+	// Delegate to a package-level callback that parse registers during init.
+	if htmlSelectTextsFunc != nil {
+		return htmlSelectTextsFunc(body, selector)
+	}
+	return nil
+}
+
+// htmlSelectAttrs extracts attribute values from elements matching a selector.
+func htmlSelectAttrs(body []byte, selector, attr string) []string {
+	if htmlSelectAttrsFunc != nil {
+		return htmlSelectAttrsFunc(body, selector, attr)
+	}
+	return nil
+}
+
+// htmlSelectCount returns the number of elements matching a selector.
+func htmlSelectCount(body []byte, selector string) int {
+	if htmlSelectCountFunc != nil {
+		return htmlSelectCountFunc(body, selector)
+	}
+	return 0
+}
+
+// xpathToCSSSimple converts a limited XPath expression to CSS.
+func xpathToCSSSimple(expr string) string {
+	if xpathToCSSFunc != nil {
+		return xpathToCSSFunc(expr)
+	}
+	// Fallback: strip leading // and return as-is
+	return strings.TrimPrefix(strings.TrimPrefix(expr, "//"), "/")
+}
+
+// Package-level function hooks set by the parse package's init().
+// This avoids an import cycle: foxhound -> parse -> foxhound.
+var (
+	htmlSelectTextsFunc func(body []byte, selector string) []string
+	htmlSelectAttrsFunc func(body []byte, selector, attr string) []string
+	htmlSelectCountFunc func(body []byte, selector string) int
+	xpathToCSSFunc      func(expr string) string
+)
+
+// RegisterHTMLSelectors is called by the parse package to provide the
+// HTML selection implementations used by Response.CSS() and Response.XPath().
+func RegisterHTMLSelectors(
+	textsFunc func(body []byte, selector string) []string,
+	attrsFunc func(body []byte, selector, attr string) []string,
+	countFunc func(body []byte, selector string) int,
+	xpathFunc func(expr string) string,
+) {
+	htmlSelectTextsFunc = textsFunc
+	htmlSelectAttrsFunc = attrsFunc
+	htmlSelectCountFunc = countFunc
+	xpathToCSSFunc = xpathFunc
 }
 
 // Job represents a unit of work to be processed by the engine.
@@ -118,6 +517,17 @@ type Job struct {
 	// When non-empty, the job requires a browser fetcher. The omitempty tag
 	// ensures backward compatibility with existing queue serialization.
 	Steps []JobStep `json:"steps,omitempty"`
+	// DontFilter when true skips deduplication for this specific job.
+	// Useful for pages that need to be re-fetched (e.g. pagination, monitoring).
+	DontFilter bool `json:"dont_filter,omitempty"`
+	// Callback is an optional handler name that the spider routes to a
+	// specific Parse method. When empty, the default processor is used.
+	Callback string `json:"callback,omitempty"`
+}
+
+// IsSuccess returns true when the HTTP status code indicates success (2xx).
+func (r *Response) IsSuccess() bool {
+	return r.StatusCode >= 200 && r.StatusCode < 300
 }
 
 // Response wraps an HTTP response with additional metadata.

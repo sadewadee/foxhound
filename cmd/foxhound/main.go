@@ -35,7 +35,7 @@ func main() {
 	switch cmd {
 	case "version", "help":
 		// No logging needed.
-	case "check", "shell":
+	case "check", "shell", "browser-shell":
 		// These commands don't load config — use default logging config.
 		foxhound.SetupLogging(foxhound.LoggingConfig{
 			Level:  "info",
@@ -55,8 +55,14 @@ func main() {
 		cmdProxyTest(cmdArgs)
 	case "shell":
 		cmdShell(cmdArgs)
+	case "browser-shell":
+		cmdBrowserShell(cmdArgs)
 	case "resume":
 		cmdResume(cmdArgs)
+	case "curl2fox":
+		cmdCurl2Fox(cmdArgs)
+	case "preview":
+		cmdPreview(cmdArgs)
 	case "version":
 		fmt.Printf("foxhound v%s\n", version)
 	case "help":
@@ -115,7 +121,10 @@ Commands:
   check       Test identity fingerprint and TLS consistency
   proxy-test  Test proxy pool health and latency
   shell       Start an interactive scraping shell (REPL)
+  browser-shell  Start an interactive Camoufox browser REPL (requires -tags playwright)
   resume      Resume an interrupted hunt from a persistent queue
+  curl2fox    Convert a curl command to foxhound Go code
+  preview     Fetch a URL and print the response body
   version     Print version
   help        Show this help
 

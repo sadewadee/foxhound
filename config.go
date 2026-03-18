@@ -10,18 +10,19 @@ import (
 
 // Config is the top-level configuration for a Foxhound instance.
 type Config struct {
-	Hunt       HuntConfig       `yaml:"hunt"`
-	Identity   IdentityConfig   `yaml:"identity"`
-	Proxy      ProxyConfig      `yaml:"proxy"`
-	Fetch      FetchConfig      `yaml:"fetch"`
-	Middleware MiddlewareConfig `yaml:"middleware"`
-	Pipeline   []PipelineEntry  `yaml:"pipeline"`
-	Queue      QueueConfig      `yaml:"queue"`
-	Cache      CacheConfig      `yaml:"cache"`
-	Monitor    MonitorConfig    `yaml:"monitor"`
-	Captcha    CaptchaConfig    `yaml:"captcha"`
-	Logging    LoggingConfig    `yaml:"logging"`
-	Behavior   BehaviorConfig   `yaml:"behavior"`
+	Hunt        HuntConfig        `yaml:"hunt"`
+	Identity    IdentityConfig    `yaml:"identity"`
+	Proxy       ProxyConfig       `yaml:"proxy"`
+	Fetch       FetchConfig       `yaml:"fetch"`
+	Middleware  MiddlewareConfig  `yaml:"middleware"`
+	Pipeline    []PipelineEntry   `yaml:"pipeline"`
+	Queue       QueueConfig       `yaml:"queue"`
+	Cache       CacheConfig       `yaml:"cache"`
+	Monitor     MonitorConfig     `yaml:"monitor"`
+	Captcha     CaptchaConfig     `yaml:"captcha"`
+	Logging     LoggingConfig     `yaml:"logging"`
+	Behavior    BehaviorConfig    `yaml:"behavior"`
+	PageActions PageActionsConfig `yaml:"page_actions"`
 }
 
 // BehaviorConfig configures the human-simulation behavior profile for walkers.
@@ -89,18 +90,32 @@ type BrowserFetchConfig struct {
 
 // MiddlewareConfig configures request/response processing middleware.
 type MiddlewareConfig struct {
-	RateLimit    RateLimitConfig             `yaml:"ratelimit"`
-	AutoThrottle AutoThrottleMiddlewareConfig `yaml:"autothrottle"`
-	Dedup        DedupConfig                 `yaml:"dedup"`
-	DeltaFetch   DeltaFetchConfig            `yaml:"deltafetch"`
-	RobotsTxt    RobotsTxtConfig             `yaml:"robots_txt"`
-	DepthLimit   DepthLimitConfig            `yaml:"depth_limit"`
-	Concurrency  ConcurrencyConfig           `yaml:"concurrency"`
+	RateLimit      RateLimitConfig              `yaml:"ratelimit"`
+	AutoThrottle   AutoThrottleMiddlewareConfig `yaml:"autothrottle"`
+	Dedup          DedupConfig                  `yaml:"dedup"`
+	DeltaFetch     DeltaFetchConfig             `yaml:"deltafetch"`
+	RobotsTxt      RobotsTxtConfig              `yaml:"robots_txt"`
+	DepthLimit     DepthLimitConfig             `yaml:"depth_limit"`
+	Concurrency    ConcurrencyConfig            `yaml:"concurrency"`
+	DownloadDelay  DownloadDelayConfig          `yaml:"download_delay"`
+}
+
+// PageActionsConfig configures JavaScript execution after page load.
+type PageActionsConfig struct {
+	Scripts []string `yaml:"scripts"` // JS snippets to run after page load
 }
 
 // ConcurrencyConfig limits concurrent in-flight requests per domain.
 type ConcurrencyConfig struct {
 	PerDomain int `yaml:"per_domain"` // max concurrent requests per domain (default 2)
+}
+
+// DownloadDelayConfig configures per-domain download delays.
+type DownloadDelayConfig struct {
+	Enabled  bool              `yaml:"enabled"`
+	Default  Duration          `yaml:"default"`   // base delay between same-domain requests
+	Domains  map[string]string `yaml:"domains"`   // per-domain delay overrides (domain -> duration string)
+	Randomize bool            `yaml:"randomize"` // add ±25% jitter
 }
 
 // AutoThrottleMiddlewareConfig configures the adaptive per-domain throttle.

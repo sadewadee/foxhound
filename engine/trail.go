@@ -20,6 +20,15 @@ const (
 	StepExtract
 	// StepScroll scrolls the page (browser-mode only).
 	StepScroll
+	// StepInfiniteScroll scrolls to bottom repeatedly until no new content
+	// loads (for lazy-load / infinite scroll pages like Google Maps).
+	StepInfiniteScroll
+	// StepLoadMore clicks a "load more" button repeatedly until it
+	// disappears or max clicks reached.
+	StepLoadMore
+	// StepPaginate detects pagination links ("Next", page numbers) and
+	// follows them, collecting content from each page.
+	StepPaginate
 )
 
 // Step is a single action within a Trail.
@@ -34,6 +43,12 @@ type Step struct {
 	Duration time.Duration
 	// Process is the extraction logic for StepExtract.
 	Process foxhound.Processor
+	// MaxScrolls limits InfiniteScroll iterations.
+	MaxScrolls int
+	// MaxClicks limits LoadMore button clicks.
+	MaxClicks int
+	// MaxPages limits Paginate page follows.
+	MaxPages int
 }
 
 // Trail is a reusable navigation blueprint composed of ordered Steps.
@@ -85,6 +100,29 @@ func (t *Trail) Scroll() *Trail {
 	return t
 }
 
+// InfiniteScroll appends a step that scrolls to the bottom repeatedly until
+// no new content loads (for lazy-load / infinite scroll pages). maxScrolls
+// limits iterations (0 = default 50).
+func (t *Trail) InfiniteScroll(maxScrolls int) *Trail {
+	t.Steps = append(t.Steps, Step{Action: StepInfiniteScroll, MaxScrolls: maxScrolls})
+	return t
+}
+
+// LoadMore appends a step that clicks the element matching selector repeatedly
+// until it disappears or maxClicks is reached (0 = default 20).
+func (t *Trail) LoadMore(selector string, maxClicks int) *Trail {
+	t.Steps = append(t.Steps, Step{Action: StepLoadMore, Selector: selector, MaxClicks: maxClicks})
+	return t
+}
+
+// Paginate appends a step that detects pagination links matching selector
+// (e.g. "a.next", "li.next a") and follows them, collecting content from each
+// page. maxPages limits how many pages to follow (0 = default 10).
+func (t *Trail) Paginate(selector string, maxPages int) *Trail {
+	t.Steps = append(t.Steps, Step{Action: StepPaginate, Selector: selector, MaxPages: maxPages})
+	return t
+}
+
 // ToJobs converts the Trail into foxhound.Jobs. Each StepNavigate starts a
 // new Job; subsequent browser steps (Click, Wait, Scroll) are attached as
 // JobSteps on that Job and set FetchMode to FetchBrowser.
@@ -122,9 +160,12 @@ func (t *Trail) ToJobs() []*foxhound.Job {
 		}
 
 		js := foxhound.JobStep{
-			Action:   mapStepAction(step.Action),
-			Selector: step.Selector,
-			Duration: step.Duration,
+			Action:     mapStepAction(step.Action),
+			Selector:   step.Selector,
+			Duration:   step.Duration,
+			MaxScrolls: step.MaxScrolls,
+			MaxClicks:  step.MaxClicks,
+			MaxPages:   step.MaxPages,
 		}
 		current.Steps = append(current.Steps, js)
 
@@ -145,6 +186,12 @@ func mapStepAction(a StepAction) int {
 		return foxhound.JobStepWait
 	case StepScroll:
 		return foxhound.JobStepScroll
+	case StepInfiniteScroll:
+		return foxhound.JobStepInfiniteScroll
+	case StepLoadMore:
+		return foxhound.JobStepLoadMore
+	case StepPaginate:
+		return foxhound.JobStepPaginate
 	default:
 		return foxhound.JobStepNavigate
 	}

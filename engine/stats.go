@@ -126,6 +126,44 @@ func (s *Stats) DomainStatsFor(domain string) *DomainStats {
 	return &copy
 }
 
+// ToMap returns a structured snapshot of current statistics suitable for
+// JSON serialisation or structured logging.
+func (s *Stats) ToMap() map[string]any {
+	elapsed := time.Since(s.StartedAt).Seconds()
+	reqCount := s.RequestCount.Load()
+	rps := float64(0)
+	if elapsed > 0 {
+		rps = float64(reqCount) / elapsed
+	}
+
+	result := map[string]any{
+		"elapsed":        time.Since(s.StartedAt).Truncate(time.Second).String(),
+		"requests":       reqCount,
+		"success":        s.SuccessCount.Load(),
+		"errors":         s.ErrorCount.Load(),
+		"blocked":        s.BlockedCount.Load(),
+		"items":          s.ItemCount.Load(),
+		"escalated":      s.EscalatedCount.Load(),
+		"bytes_received": s.BytesReceived.Load(),
+		"req_per_sec":    rps,
+	}
+
+	s.mu.RLock()
+	domains := make(map[string]any, len(s.domainStats))
+	for domain, ds := range s.domainStats {
+		domains[domain] = map[string]any{
+			"requests":    ds.Requests,
+			"errors":      ds.Errors,
+			"blocked":     ds.Blocked,
+			"avg_latency": ds.AvgLatency.String(),
+		}
+	}
+	s.mu.RUnlock()
+	result["domains"] = domains
+
+	return result
+}
+
 // Summary returns a human-readable snapshot of current statistics.
 func (s *Stats) Summary() string {
 	elapsed := time.Since(s.StartedAt).Truncate(time.Second)

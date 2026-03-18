@@ -45,6 +45,25 @@ type HuntConfig struct {
 	// Checkpoint controls automatic state saving. Optional — checkpointing is
 	// inactive when Checkpoint.Enabled is false (the zero value).
 	Checkpoint CheckpointConfig
+	// ItemCallback is invoked for every item that survives the pipeline chain,
+	// before it is written. This enables streaming item processing during the
+	// crawl without needing to use Stream(). The callback runs synchronously
+	// in the walker goroutine so it must be fast.
+	ItemCallback func(ctx context.Context, item *foxhound.Item)
+	// OnStart is called once when the hunt begins (after seeds are queued).
+	OnStart func(ctx context.Context)
+	// OnClose is called once when the hunt completes (after writers flush).
+	OnClose func(ctx context.Context, stats *Stats)
+	// OnError is called when a fetch or process error occurs. Errors are
+	// still logged; this hook enables custom error handling.
+	OnError func(ctx context.Context, job *foxhound.Job, err error)
+	// OnItem is called for each item after pipeline processing. Unlike
+	// ItemCallback, OnItem receives the originating Job for context.
+	OnItem func(ctx context.Context, job *foxhound.Job, item *foxhound.Item)
+	// PageActions are JavaScript snippets executed after page load when using
+	// the browser fetcher. They are injected as JobSteps of type
+	// JobStepEvaluate on every job that uses browser mode.
+	PageActions []string
 }
 
 // HuntState represents the lifecycle state of a Hunt.
@@ -156,13 +175,20 @@ func (h *Hunt) Run(ctx context.Context) error {
 		"domain", h.config.Domain,
 	)
 
-	// Push seed jobs.
+	// Push seed jobs. If PageActions are configured, inject them as Evaluate
+	// steps on every seed job that uses browser mode.
 	for _, job := range h.config.Seeds {
+		h.injectPageActions(job)
 		h.logger.Debug("seeding job", "url", job.URL, "fetch_mode", job.FetchMode)
 		if err := h.config.Queue.Push(runCtx, job); err != nil {
 			h.setState(HuntFailed)
 			return fmt.Errorf("seeding queue: %w", err)
 		}
+	}
+
+	// Call OnStart hook.
+	if h.config.OnStart != nil {
+		h.config.OnStart(runCtx)
 	}
 
 	// Launch walkers.
@@ -211,6 +237,11 @@ func (h *Hunt) Run(ctx context.Context) error {
 		if err := w.Flush(ctx); err != nil {
 			h.logger.Warn("writer flush failed", "err", err)
 		}
+	}
+
+	// Call OnClose hook.
+	if h.config.OnClose != nil {
+		h.config.OnClose(ctx, h.stats)
 	}
 
 	h.setState(HuntDone)
@@ -442,6 +473,28 @@ func (h *Hunt) streamItem(item *foxhound.Item) {
 	case ch <- item:
 	default:
 		h.logger.Warn("stream: item channel full, dropping item")
+	}
+}
+
+// injectPageActions appends configured JavaScript page actions as Evaluate
+// steps on jobs that will use the browser fetcher.
+func (h *Hunt) injectPageActions(job *foxhound.Job) {
+	if len(h.config.PageActions) == 0 {
+		return
+	}
+	// Only inject on browser or auto-mode jobs.
+	if job.FetchMode != foxhound.FetchBrowser && job.FetchMode != foxhound.FetchAuto {
+		return
+	}
+	for _, script := range h.config.PageActions {
+		job.Steps = append(job.Steps, foxhound.JobStep{
+			Action: foxhound.JobStepEvaluate,
+			Script: script,
+		})
+	}
+	// If the job was auto mode and now has browser steps, upgrade to browser.
+	if job.FetchMode == foxhound.FetchAuto && len(job.Steps) > 0 {
+		job.FetchMode = foxhound.FetchBrowser
 	}
 }
 

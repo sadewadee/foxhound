@@ -143,6 +143,9 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 
 	if fetchErr != nil {
 		w.logger.Error("fetch failed", "url", job.URL, "err", fetchErr)
+		if w.hunt.config.OnError != nil {
+			w.hunt.config.OnError(ctx, job, fetchErr)
+		}
 		return
 	}
 
@@ -173,6 +176,9 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 	result, procErr := w.processor.Process(ctx, resp)
 	if procErr != nil {
 		w.logger.Error("process failed", "url", job.URL, "err", procErr)
+		if w.hunt.config.OnError != nil {
+			w.hunt.config.OnError(ctx, job, procErr)
+		}
 		return
 	}
 	if result == nil {
@@ -188,14 +194,23 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 		if out == nil {
 			continue // item was dropped
 		}
+		// Invoke ItemCallback for streaming item processing.
+		if w.hunt.config.ItemCallback != nil {
+			w.hunt.config.ItemCallback(ctx, out)
+		}
+		// Invoke OnItem with job context.
+		if w.hunt.config.OnItem != nil {
+			w.hunt.config.OnItem(ctx, job, out)
+		}
 		w.writeItem(ctx, out)
 		w.hunt.stats.RecordItems(1)
 		w.hunt.streamItem(out)
 		w.hunt.maybeCheckpoint()
 	}
 
-	// Enqueue newly discovered jobs.
+	// Enqueue newly discovered jobs (inject page actions if configured).
 	for _, next := range result.Jobs {
+		w.hunt.injectPageActions(next)
 		if err := w.queue.Push(ctx, next); err != nil {
 			if ctx.Err() != nil {
 				return

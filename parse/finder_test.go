@@ -3,6 +3,7 @@ package parse_test
 import (
 	"testing"
 
+	foxhound "github.com/sadewadee/foxhound"
 	"github.com/sadewadee/foxhound/parse"
 )
 
@@ -425,5 +426,138 @@ func TestDocument_First_NotFound(t *testing.T) {
 	el := doc.First(".nonexistent")
 	if el != nil {
 		t.Error("Document.First: expected nil for non-matching selector")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Element.FindSimilar tests
+// ---------------------------------------------------------------------------
+
+const findSimilarHTML = `<!DOCTYPE html>
+<html><body>
+<div class="products">
+  <div class="product-card" data-id="1">
+    <h3 class="name">Widget A</h3>
+    <span class="price">$10</span>
+  </div>
+  <div class="product-card" data-id="2">
+    <h3 class="name">Widget B</h3>
+    <span class="price">$20</span>
+  </div>
+  <div class="product-card" data-id="3">
+    <h3 class="name">Widget C</h3>
+    <span class="price">$30</span>
+  </div>
+  <div class="sidebar" data-id="extra">
+    <h3 class="name">Not a product</h3>
+  </div>
+</div>
+</body></html>`
+
+func newDocFromHTML(t *testing.T, htmlBody string) *parse.Document {
+	t.Helper()
+	resp := &foxhound.Response{
+		StatusCode: 200,
+		Body:       []byte(htmlBody),
+		URL:        "https://example.com",
+	}
+	doc, err := parse.NewDocument(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
+func TestElement_FindSimilar_ProductCards(t *testing.T) {
+	doc := newDocFromHTML(t, findSimilarHTML)
+
+	// Find first product card.
+	first := doc.First(".product-card")
+	if first == nil {
+		t.Fatal("no product card found")
+	}
+
+	// Find similar elements (should find the other 2 product cards).
+	similar := first.FindSimilar()
+	if len(similar) != 2 {
+		t.Errorf("FindSimilar returned %d elements, want 2 (other product cards)", len(similar))
+	}
+
+	// The sidebar div should NOT be in the results because it has different
+	// class attributes (different from "product-card").
+	for _, el := range similar {
+		if el.Attr("class") == "sidebar" {
+			t.Error("FindSimilar should not include sidebar div")
+		}
+	}
+}
+
+func TestElement_FindSimilar_WithThreshold(t *testing.T) {
+	doc := newDocFromHTML(t, findSimilarHTML)
+
+	first := doc.First(".product-card")
+	if first == nil {
+		t.Fatal("no product card found")
+	}
+
+	// Very high threshold should return fewer or no results.
+	similar := first.FindSimilar(parse.WithSimilarThreshold(1.0))
+	// At threshold=1.0 only exact attribute matches count,
+	// but data-id differs, so nothing should match.
+	if len(similar) != 0 {
+		t.Errorf("FindSimilar with threshold=1.0: got %d, want 0", len(similar))
+	}
+
+	// Very low threshold should include more.
+	similar = first.FindSimilar(parse.WithSimilarThreshold(0.0))
+	if len(similar) < 2 {
+		t.Errorf("FindSimilar with threshold=0.0: got %d, want >= 2", len(similar))
+	}
+}
+
+func TestElement_FindSimilar_ExcludesSelf(t *testing.T) {
+	doc := newDocFromHTML(t, findSimilarHTML)
+
+	first := doc.First(".product-card")
+	if first == nil {
+		t.Fatal("no product card found")
+	}
+
+	similar := first.FindSimilar(parse.WithSimilarThreshold(0.0))
+	for _, el := range similar {
+		if el.Attr("data-id") == "1" {
+			t.Error("FindSimilar should not include the element itself")
+		}
+	}
+}
+
+func TestElement_FindSimilar_ListItems(t *testing.T) {
+	doc := newFinderDoc(t)
+	// Find first list item.
+	first := doc.First("li.item")
+	if first == nil {
+		t.Fatal("no list item found")
+	}
+
+	// The finderHTML has 3 li items: "item", "item active", "item".
+	// The "item active" one has a different class attribute value, so at
+	// default threshold (0.2), it depends on attr similarity.
+	// With a low threshold, we should find both other items.
+	similar := first.FindSimilar(parse.WithSimilarThreshold(0.1))
+	if len(similar) < 1 {
+		t.Errorf("FindSimilar for li.item: got %d, want >= 1", len(similar))
+	}
+}
+
+func TestElement_FindSimilar_NoDoc(t *testing.T) {
+	doc := newDocFromHTML(t, "<html><body><p>Alone</p></body></html>")
+	el := doc.First("p")
+	if el == nil {
+		t.Fatal("no element")
+	}
+	// Only one <p> element, so FindSimilar should return empty.
+	similar := el.FindSimilar()
+	if len(similar) != 0 {
+		t.Errorf("FindSimilar for single element: got %d, want 0", len(similar))
 	}
 }

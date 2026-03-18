@@ -726,6 +726,94 @@ func TestSmartFetcher_EscalatesOnCaptchaPage(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// CamoufoxFetcher new option tests (stub build — field presence only)
+// ---------------------------------------------------------------------------
+
+// TestCamoufoxFetcher_WithInitScript verifies that WithInitScript compiles and
+// applies without panic in the stub build.
+func TestCamoufoxFetcher_WithInitScript(t *testing.T) {
+	f, err := fetch.NewCamoufox(
+		fetch.WithInitScript(`Object.defineProperty(navigator,'webdriver',{get:()=>false})`),
+	)
+	if err != nil {
+		t.Fatalf("NewCamoufox with WithInitScript should not fail: %v", err)
+	}
+	defer f.Close()
+
+	// Stub Fetch must still return the not-configured error (not a panic).
+	_, fetchErr := f.Fetch(context.Background(), newJob("https://example.com"))
+	if fetchErr == nil {
+		t.Fatal("expected error from stub Fetch, got nil")
+	}
+}
+
+// TestCamoufoxFetcher_WithUserDataDir verifies that WithUserDataDir compiles and
+// applies without panic in the stub build.
+func TestCamoufoxFetcher_WithUserDataDir(t *testing.T) {
+	f, err := fetch.NewCamoufox(
+		fetch.WithUserDataDir("/tmp/foxhound-profile"),
+	)
+	if err != nil {
+		t.Fatalf("NewCamoufox with WithUserDataDir should not fail: %v", err)
+	}
+	defer f.Close()
+
+	_, fetchErr := f.Fetch(context.Background(), newJob("https://example.com"))
+	if fetchErr == nil {
+		t.Fatal("expected error from stub Fetch, got nil")
+	}
+}
+
+// TestCamoufoxFetcher_WithCDPURL verifies that WithCDPURL compiles and applies
+// without panic in the stub build.
+func TestCamoufoxFetcher_WithCDPURL(t *testing.T) {
+	f, err := fetch.NewCamoufox(
+		fetch.WithCDPURL("http://localhost:9222"),
+	)
+	if err != nil {
+		t.Fatalf("NewCamoufox with WithCDPURL should not fail: %v", err)
+	}
+	defer f.Close()
+
+	_, fetchErr := f.Fetch(context.Background(), newJob("https://example.com"))
+	if fetchErr == nil {
+		t.Fatal("expected error from stub Fetch, got nil")
+	}
+}
+
+// TestCamoufoxFetcher_WithRealChrome verifies that WithRealChrome compiles and
+// applies without panic in the stub build.
+func TestCamoufoxFetcher_WithRealChrome(t *testing.T) {
+	f, err := fetch.NewCamoufox(
+		fetch.WithRealChrome(true),
+	)
+	if err != nil {
+		t.Fatalf("NewCamoufox with WithRealChrome should not fail: %v", err)
+	}
+	defer f.Close()
+
+	_, fetchErr := f.Fetch(context.Background(), newJob("https://example.com"))
+	if fetchErr == nil {
+		t.Fatal("expected error from stub Fetch, got nil")
+	}
+}
+
+// TestCamoufoxFetcher_AllNewOptionsCompose verifies all four new options can be
+// composed together without conflict.
+func TestCamoufoxFetcher_AllNewOptionsCompose(t *testing.T) {
+	f, err := fetch.NewCamoufox(
+		fetch.WithInitScript(`window.__foxhound=true`),
+		fetch.WithUserDataDir("/tmp/foxhound-composed"),
+		fetch.WithCDPURL("http://localhost:9222"),
+		fetch.WithRealChrome(false),
+	)
+	if err != nil {
+		t.Fatalf("NewCamoufox with all new options should not fail: %v", err)
+	}
+	defer f.Close()
+}
+
+// ---------------------------------------------------------------------------
 // Test doubles
 // ---------------------------------------------------------------------------
 
