@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Go 1.23 or later (`go version` to check)
+- Go 1.25 or later (`go version` to check)
 - Git
 
 Optional, for browser mode:
@@ -12,6 +12,12 @@ Optional, for browser mode:
   ```bash
   go run github.com/playwright-community/playwright-go/cmd/playwright install firefox
   ```
+
+## Stats
+
+- 37,003 lines of Go across 24 packages
+- 700+ tests
+- 174 Go source files
 
 ## Installation
 
@@ -96,7 +102,6 @@ const baseURL = "http://books.toscrape.com/"
 func main() {
     slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
-    // 1. Generate a consistent identity profile.
     profile := identity.Generate(
         identity.WithBrowser(identity.BrowserFirefox),
         identity.WithOS(identity.OSWindows),
@@ -104,31 +109,26 @@ func main() {
         identity.WithTimezone("America/New_York"),
     )
 
-    // 2. Create a stealth HTTP fetcher.
     fetcher := fetch.NewStealth(
         fetch.WithIdentity(profile),
         fetch.WithTimeout(30*time.Second),
     )
     defer fetcher.Close()
 
-    // 3. Create an in-memory queue.
     q := queue.NewMemoryQueue()
     defer q.Close()
 
-    // 4. Create a CSV writer with explicit column order.
     csvWriter, err := export.NewCSV("books.csv", "title", "price", "rating", "url")
     if err != nil {
         log.Fatalf("creating CSV writer: %v", err)
     }
     defer csvWriter.Close()
 
-    // 5. Build the pipeline.
     pipelineChain := pipeline.NewChain(
         &pipeline.Validate{Required: []string{"title", "price", "url"}},
         &pipeline.Clean{TrimWhitespace: true},
     )
 
-    // 6. Define the processor.
     processor := foxhound.ProcessorFunc(func(ctx context.Context, resp *foxhound.Response) (*foxhound.Result, error) {
         if resp.StatusCode != 200 {
             return &foxhound.Result{}, nil
@@ -156,7 +156,6 @@ func main() {
             }
         })
 
-        // Follow pagination.
         var jobs []*foxhound.Job
         nextHref := doc.Attr("li.next a", "href")
         if nextHref != "" {
@@ -170,7 +169,6 @@ func main() {
         return &foxhound.Result{Items: items, Jobs: jobs}, nil
     })
 
-    // 7. Create and run the hunt.
     h := engine.NewHunt(engine.HuntConfig{
         Name:      "books-toscrape",
         Domain:    "books.toscrape.com",
@@ -207,12 +205,64 @@ go run .
 Output is written to `books.csv`. You should see log lines like:
 
 ```
-time=2026-03-18T10:00:00Z level=INFO msg="identity generated" ua="Mozilla/5.0..."
 time=2026-03-18T10:00:00Z level=INFO msg="hunt started" walkers=2 seeds=1
 time=2026-03-18T10:00:01Z level=INFO msg="hunt complete"
 ```
 
-### Step 4 — Use the CLI instead
+### Step 4 — Streaming mode
+
+Instead of waiting for the hunt to finish, receive items as they arrive:
+
+```go
+ch, err := h.Stream(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+for item := range ch {
+    fmt.Printf("title=%s price=%s\n", item.GetString("title"), item.GetString("price"))
+}
+```
+
+Or with periodic stats:
+
+```go
+events, err := h.StreamWithStats(ctx, 5*time.Second)
+if err != nil {
+    log.Fatal(err)
+}
+for event := range events {
+    if event.Item != nil {
+        fmt.Println(event.Item.GetString("title"))
+    }
+    if event.Stats != nil {
+        fmt.Println(event.Stats.Summary())
+    }
+}
+```
+
+### Step 5 — Checkpoint / resume
+
+Enable auto-checkpointing to survive crashes:
+
+```go
+h := engine.NewHunt(engine.HuntConfig{
+    Checkpoint: engine.CheckpointConfig{
+        Enabled:  true,
+        Path:     "/tmp/books.checkpoint.json",
+        Interval: 100, // save every 100 items
+    },
+    // ...
+})
+```
+
+The checkpoint is written atomically. Inspect it:
+
+```go
+cp, err := engine.LoadCheckpoint("/tmp/books.checkpoint.json")
+fmt.Printf("items=%d queue=%d elapsed=%dms\n", cp.ItemsProcessed, cp.QueueLen, cp.ElapsedMs)
+```
+
+### Step 6 — Use the CLI instead
 
 To run the same hunt from the CLI without writing Go code, edit `config.yaml`:
 
@@ -227,8 +277,6 @@ Then:
 ```bash
 foxhound run --config config.yaml
 ```
-
-The CLI uses a built-in default processor that extracts titles and links.
 
 ## Project Structure (after `foxhound init`)
 
@@ -247,6 +295,7 @@ myproject/
 |------|---------|----------|
 | CLI | `foxhound run --config config.yaml` | Quick runs, no Go code needed |
 | Go API | `go run .` | Custom processors, library embedding |
+| Streaming | `hunt.Stream(ctx)` | Real-time item processing |
 | Docker | `docker compose up` | Production, multi-worker |
 | Static-only | `FOXHOUND_MODE=static foxhound run ...` | No browser dependency |
 | Browser | `-tags playwright` build | JS-heavy / protected sites |

@@ -73,10 +73,36 @@ type Item struct {
 
 // Create a new item with initialized maps:
 item := foxhound.NewItem()
+```
 
+**Item methods:**
+
+```go
 // Set and get fields:
 item.Set("title", "Go Programming")
 val, ok := item.Get("title")
+
+// Type-safe getters:
+s := item.GetString("title")          // "" if absent or not string
+f := item.GetFloat("price")           // 0 if absent or non-numeric
+n := item.GetInt("count")             // 0 if absent or non-numeric
+
+// Presence check (also returns false for nil and "" values):
+if item.Has("email") { ... }
+
+// Sorted field keys:
+keys := item.Keys() // []string, alphabetically sorted
+
+// Serialisation:
+data, err := item.ToJSON()            // compact JSON bytes
+data, err := item.ToJSONPretty()      // indented JSON bytes
+m := item.ToMap()                     // shallow copy of Fields
+row := item.ToCSVRow([]string{"title", "price"}) // []string in column order
+
+// Text representations:
+md := item.ToMarkdown()  // "- **firstVal** — val2 — val3"
+txt := item.ToText()     // "key: value\nkey2: value2"
+str := item.String()     // compact JSON (fallback to ToText on error)
 ```
 
 ### Result
@@ -105,7 +131,6 @@ Use `FetcherFunc` to adapt a plain function:
 
 ```go
 var f foxhound.Fetcher = foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
-    // your implementation
     return resp, nil
 })
 ```
@@ -120,11 +145,10 @@ type Processor interface {
 }
 ```
 
-Use `ProcessorFunc` to avoid defining a named type for simple cases:
+Use `ProcessorFunc` to avoid defining a named type:
 
 ```go
 processor := foxhound.ProcessorFunc(func(ctx context.Context, resp *foxhound.Response) (*foxhound.Result, error) {
-    // extract items, return next jobs
     return &foxhound.Result{Items: items, Jobs: nextJobs}, nil
 })
 ```
@@ -165,9 +189,7 @@ Use `MiddlewareFunc` for inline middleware:
 ```go
 mw := foxhound.MiddlewareFunc(func(next foxhound.Fetcher) foxhound.Fetcher {
     return foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
-        // pre-processing
         resp, err := next.Fetch(ctx, job)
-        // post-processing
         return resp, err
     })
 })
@@ -214,43 +236,38 @@ import (
 )
 
 func main() {
-    // 1. Generate identity.
     profile := identity.Generate(
         identity.WithBrowser(identity.BrowserFirefox),
         identity.WithOS(identity.OSLinux),
     )
 
-    // 2. Build the fetcher.
     fetcher := fetch.NewStealth(fetch.WithIdentity(profile))
     defer fetcher.Close()
 
-    // 3. Build the queue.
     q := queue.NewMemoryQueue()
     defer q.Close()
 
-    // 4. Build writers.
     w, _ := export.NewJSON("output.jsonl", export.JSONLines)
     defer w.Close()
 
-    // 5. Build middleware chain.
     mws := []foxhound.Middleware{
+        middleware.NewConcurrency(2),
         middleware.NewRateLimit(2.0, 5),
         middleware.NewDedup(),
         middleware.NewCookies(),
         middleware.NewRetry(3, 500*time.Millisecond),
     }
 
-    // 6. Build pipeline.
     pipelineStages := []foxhound.Pipeline{
         &pipeline.Validate{Required: []string{"title", "url"}},
         &pipeline.Clean{TrimWhitespace: true},
     }
 
-    // 7. Wire the hunt.
     h := engine.NewHunt(engine.HuntConfig{
         Name:            "example",
         Domain:          "example.com",
         Walkers:         4,
+        MaxConcurrency:  8,
         Fetcher:         fetcher,
         Processor:       myProcessor,
         Queue:           q,
@@ -258,6 +275,11 @@ func main() {
         Middlewares:     mws,
         Pipelines:       pipelineStages,
         BehaviorProfile: "moderate",
+        Checkpoint: engine.CheckpointConfig{
+            Enabled:  true,
+            Path:     "/tmp/example.checkpoint.json",
+            Interval: 100,
+        },
         Seeds: []*foxhound.Job{{
             ID:        "seed",
             URL:       "https://example.com",
@@ -266,14 +288,12 @@ func main() {
         }},
     })
 
-    // 8. Run with context.
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
     defer cancel()
 
     if err := h.Run(ctx); err != nil {
         panic(err)
     }
-
     fmt.Println(h.Stats().Summary())
 }
 ```
@@ -282,18 +302,146 @@ func main() {
 
 ```go
 type HuntConfig struct {
-    Name            string               // human-readable label for logs/metrics
-    Domain          string               // primary target domain
-    Walkers         int                  // concurrent walker goroutines
-    Seeds           []*foxhound.Job      // initial jobs pushed before walkers start
-    Processor       foxhound.Processor   // required: user response handler
-    Fetcher         foxhound.Fetcher     // required: base fetcher (before middleware)
-    Queue           foxhound.Queue       // required: job storage backend
-    Pipelines       []foxhound.Pipeline  // applied to each Item in order
-    Writers         []foxhound.Writer    // receive items that survive the pipeline
-    Middlewares     []foxhound.Middleware // wrapped outermost-first
-    BehaviorProfile string               // "careful" | "moderate" | "aggressive"
+    Name            string                // human-readable label for logs/metrics
+    Domain          string                // primary target domain
+    Walkers         int                   // concurrent walker goroutines
+    MaxConcurrency  int                   // global cap on in-flight requests (0 = walkers)
+    Seeds           []*foxhound.Job       // initial jobs pushed before walkers start
+    Processor       foxhound.Processor    // required: user response handler
+    Fetcher         foxhound.Fetcher      // required: base fetcher (before middleware)
+    Queue           foxhound.Queue        // required: job storage backend
+    Pipelines       []foxhound.Pipeline   // applied to each Item in order
+    Writers         []foxhound.Writer     // receive items that survive the pipeline
+    Middlewares     []foxhound.Middleware  // wrapped outermost-first
+    BehaviorProfile string                // "careful" | "moderate" | "aggressive"
+    Checkpoint      engine.CheckpointConfig // optional: auto-save state
 }
+```
+
+## Streaming API
+
+Use `Stream` when you want items as they arrive, without waiting for the hunt to finish:
+
+```go
+ch, err := hunt.Stream(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+for item := range ch {
+    fmt.Println(item.GetString("title"))
+}
+// ch is closed when the hunt completes
+```
+
+Use `StreamWithStats` to also receive periodic stats snapshots:
+
+```go
+events, err := hunt.StreamWithStats(ctx, 5*time.Second) // stats every 5s
+if err != nil {
+    log.Fatal(err)
+}
+for event := range events {
+    if event.Item != nil {
+        fmt.Println(event.Item.GetString("title"))
+    }
+    if event.Stats != nil {
+        fmt.Println(event.Stats.Summary())
+    }
+}
+```
+
+`StreamEvent` type:
+
+```go
+type StreamEvent struct {
+    Item  *foxhound.Item // non-nil for item events
+    Stats *Stats         // non-nil for stats events
+}
+```
+
+The item channel is buffered (100 items). Items are dropped with a warning log when the buffer is full — keep consumers fast or use `HuntConfig.Writers` for durable output.
+
+## CheckpointConfig
+
+```go
+type CheckpointConfig struct {
+    Enabled  bool   // turn auto-checkpointing on
+    Path     string // file path for the JSON checkpoint
+    Interval int    // save every N items processed (default 100 when 0)
+}
+```
+
+The checkpoint file is written atomically. Load it with:
+
+```go
+cp, err := engine.LoadCheckpoint("/tmp/hunt.checkpoint.json")
+// cp.HuntName, cp.Domain, cp.ItemsProcessed, cp.RequestsDone,
+// cp.ErrorCount, cp.LastURL, cp.Timestamp, cp.QueueLen, cp.ElapsedMs
+```
+
+Save on demand:
+
+```go
+h.SaveCheckpoint("/tmp/snapshot.json")
+```
+
+## Adaptive Parsing
+
+`AdaptiveExtractor` tracks selectors across page structure changes:
+
+```go
+import "github.com/sadewadee/foxhound/parse"
+
+ae := parse.NewAdaptiveExtractor("selectors.json") // loads saved signatures
+ae.Register("price", "span.price-current")
+ae.Register("title", "h1.product-name")
+
+// In processor:
+doc, _ := parse.NewDocument(resp)
+price := ae.ExtractText(doc, "price")   // tries CSS first, falls back to similarity
+title := ae.ExtractText(doc, "title")
+
+ae.Save() // persist updated signatures for next run
+```
+
+## Element Type and Document Finders
+
+```go
+import "github.com/sadewadee/foxhound/parse"
+
+doc, _ := parse.NewDocument(resp)
+
+// CSS selectors:
+el := doc.First("h1.title")           // *Element or nil
+els := doc.FindAll("article.product") // []*Element
+
+// Text-based finders:
+els = doc.FindByText("Buy Now")                    // exact text match
+els = doc.FindByTextContains("Add to")             // substring match
+els = doc.FindByTextRegex(`\$[\d,.]+`)             // regex match
+
+// Attribute finders:
+els = doc.FindByAttr("data-type", "product")       // exact attribute value
+els = doc.FindByAttrContains("class", "product")   // attribute contains substring
+
+// Similarity matching (used internally by AdaptiveExtractor):
+sig := parse.CaptureSignature(el)
+matches := doc.FindSimilar(sig, 0.6) // []SimilarMatch, sorted by Score desc
+
+// Element methods:
+el.Text()               // trimmed text content
+el.HTML()               // inner HTML
+el.Attr("href")         // attribute value
+el.Tag()                // lowercase tag name
+el.HasClass("active")   // class check
+el.Attrs()              // map[string]string of all attributes
+el.Children()           // direct child elements
+el.Parent()             // parent element or nil
+el.Siblings()           // all siblings
+el.Next()               // next sibling or nil
+el.Prev()               // previous sibling or nil
+el.Find("selector")     // all descendants matching selector
+el.CSS("selector")      // first descendant matching selector
 ```
 
 ## Identity Generation
@@ -334,37 +482,18 @@ profile := identity.Generate(
 )
 ```
 
-### Profile Fields
+## Config Loading
 
 ```go
-type Profile struct {
-    UA          string          // e.g. "Mozilla/5.0 (Windows NT 10.0...) Firefox/134.0"
-    BrowserName identity.Browser
-    BrowserVer  string
-    TLSProfile  string          // e.g. "firefox_134.0"
-    HeaderOrder []string        // canonical header order for this browser
-    OS          identity.OS
-    OSVersion   string
-    Platform    string          // "Win32" | "MacIntel" | "Linux x86_64"
-    Cores       int
-    Memory      float64
-    GPU         string
-    ScreenW     int
-    ScreenH     int
-    ColorDepth  int
-    PixelRatio  float64
-    Languages   []string
-    Timezone    string
-    Locale      string
-    Lat         float64
-    Lng         float64
-    CamoufoxEnv map[string]string  // CAMOU_CONFIG_* env vars for browser mode
-}
+cfg, err := foxhound.LoadConfig("config.yaml")
+// cfg is *foxhound.Config with all defaults applied
 ```
+
+`LoadConfig` expands `${ENV_VAR}` throughout the file before parsing.
 
 ## Custom Processor
 
-For multi-domain crawlers, implement the `Processor` interface and dispatch on the job domain:
+For multi-domain crawlers, implement `Processor` and dispatch on the job domain:
 
 ```go
 type MyScraper struct{}
@@ -379,49 +508,6 @@ func (s *MyScraper) Process(ctx context.Context, resp *foxhound.Response) (*foxh
         return &foxhound.Result{}, nil
     }
 }
-
-func (s *MyScraper) scrapeBooks(ctx context.Context, resp *foxhound.Response) (*foxhound.Result, error) {
-    doc, err := parse.NewDocument(resp)
-    if err != nil {
-        return nil, err
-    }
-    var items []*foxhound.Item
-    doc.Each("article.product_pod", func(i int, s *goquery.Selection) {
-        item := foxhound.NewItem()
-        title, _ := s.Find("h3 a").Attr("title")
-        item.Set("title", title)
-        item.URL = resp.URL
-        items = append(items, item)
-    })
-    return &foxhound.Result{Items: items}, nil
-}
-```
-
-## Custom Pipeline Stage
-
-```go
-type PriceFilterStage struct {
-    MinPrice float64
-}
-
-func (p *PriceFilterStage) Process(ctx context.Context, item *foxhound.Item) (*foxhound.Item, error) {
-    raw, ok := item.Get("price")
-    if !ok {
-        return nil, nil  // drop items without a price field
-    }
-    priceStr := fmt.Sprintf("%v", raw)
-    // Strip currency symbol and parse.
-    priceStr = strings.TrimPrefix(priceStr, "$")
-    price, err := strconv.ParseFloat(priceStr, 64)
-    if err != nil {
-        return nil, nil  // drop unparseable prices
-    }
-    if price < p.MinPrice {
-        return nil, nil  // drop items below minimum price
-    }
-    item.Set("price_float", price)
-    return item, nil
-}
 ```
 
 ## Custom Writer
@@ -432,40 +518,15 @@ type MyDBWriter struct {
 }
 
 func (w *MyDBWriter) Write(ctx context.Context, item *foxhound.Item) error {
-    title, _ := item.Get("title")
-    url, _ := item.Get("url")
     _, err := w.db.ExecContext(ctx,
         "INSERT INTO items (title, url, scraped_at) VALUES ($1, $2, $3)",
-        title, url, item.Timestamp,
+        item.GetString("title"), item.GetString("url"), item.Timestamp,
     )
     return err
 }
 
 func (w *MyDBWriter) Flush(_ context.Context) error { return nil }
 func (w *MyDBWriter) Close() error                  { return w.db.Close() }
-```
-
-## Custom Middleware
-
-```go
-type HeaderMiddleware struct {
-    headers map[string]string
-}
-
-func (m *HeaderMiddleware) Wrap(next foxhound.Fetcher) foxhound.Fetcher {
-    return foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
-        // Clone job headers to avoid mutating shared state.
-        cloned := *job
-        cloned.Headers = job.Headers.Clone()
-        if cloned.Headers == nil {
-            cloned.Headers = make(http.Header)
-        }
-        for k, v := range m.headers {
-            cloned.Headers.Set(k, v)
-        }
-        return next.Fetch(ctx, &cloned)
-    })
-}
 ```
 
 ## SmartFetcher
@@ -486,18 +547,4 @@ browserFetcher, _ := fetch.NewCamoufox(
 
 // SmartFetcher: static first, escalates to browser on 401/403/407/429/503
 smart := fetch.NewSmart(staticFetcher, browserFetcher)
-
-// Custom block detector:
-smart = fetch.NewSmart(staticFetcher, browserFetcher,
-    fetch.WithBlockDetector(myDetector),
-)
 ```
-
-## Config Loading
-
-```go
-cfg, err := foxhound.LoadConfig("config.yaml")
-// cfg is *foxhound.Config with all defaults applied
-```
-
-`LoadConfig` expands `${ENV_VAR}` throughout the file before parsing.

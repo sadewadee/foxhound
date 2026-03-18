@@ -2,6 +2,23 @@
 
 ## Docker
 
+### Pull from GHCR
+
+```bash
+docker pull ghcr.io/sadewadee/foxhound:v0.0.1
+docker pull ghcr.io/sadewadee/foxhound:latest
+```
+
+### Build locally
+
+```bash
+# Static-only (~40 MB):
+docker build -t foxhound:latest .
+
+# With browser support (includes Firefox + Xvfb, larger image):
+docker build --build-arg BUILD_TAGS=playwright -t foxhound:playwright .
+```
+
 ### Single worker
 
 ```bash
@@ -19,7 +36,7 @@ Starts three services:
 docker compose up --scale foxhound=4
 ```
 
-Scales to 4 concurrent foxhound workers. All workers share the same Redis queue and Postgres database. Each worker processes jobs independently.
+Scales to 4 concurrent foxhound workers. All workers share the same Redis queue and Postgres database.
 
 ### With monitoring (Prometheus + Grafana)
 
@@ -61,17 +78,21 @@ services:
           cpus: "2.0"
 ```
 
-Config files are mounted read-only from `./config/` into `/app/config/` inside the container.
-
-Output files are written to the `foxhound-output` named volume.
+Config files are mounted read-only from `./config/`. Output files are written to the `foxhound-output` named volume.
 
 ## Environment Variables
+
+Copy `.env.example` to `.env` and populate:
+
+```bash
+cp .env.example .env
+```
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `FOXHOUND_MODE` | `auto` | Fetch mode: `auto`, `static`, or `browser` |
 | `FOXHOUND_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `FOXHOUND_RUN_ID` | `default` | Used to namespace output files: `output/${FOXHOUND_RUN_ID}.jsonl` |
+| `FOXHOUND_RUN_ID` | `default` | Namespaces output files: `output/${FOXHOUND_RUN_ID}.jsonl` |
 | `REDIS_URL` | *(none)* | Redis connection URL: `redis://host:6379/0` |
 | `DATABASE_URL` | *(none)* | PostgreSQL DSN for queue and export |
 | `FOXHOUND_EXPORT_DB` | *(none)* | PostgreSQL DSN specifically for the postgres export writer |
@@ -83,23 +104,9 @@ Output files are written to the `foxhound-output` named volume.
 | `CAPSOLVER_API_KEY` | *(none)* | Capsolver CAPTCHA API key |
 | `TWOCAPTCHA_API_KEY` | *(none)* | 2Captcha API key |
 
-Environment variables are expanded in `config.yaml` using `${VAR}` syntax.
-
-## Building the Docker Image
-
-```bash
-# Build the image:
-docker build -t foxhound:latest .
-
-# Build with browser support (-tags playwright):
-docker build --build-arg BUILD_TAGS=playwright -t foxhound:playwright .
-```
-
-The default `Dockerfile` builds a static-only binary (~40 MB). For browser mode, the image includes Firefox and Xvfb and is significantly larger.
-
 ## Static-Only Deployment (no browser)
 
-For sites that don't require JavaScript execution, run in static-only mode:
+For sites that don't require JavaScript execution:
 
 ```bash
 # Environment variable:
@@ -137,11 +144,10 @@ middleware:
 
 ### Vertical scaling (more walkers per worker)
 
-Increase `hunt.walkers` in config.yaml:
-
 ```yaml
 hunt:
   walkers: 16
+  max_concurrency: 32
 ```
 
 Or override at runtime:
@@ -150,11 +156,11 @@ Or override at runtime:
 foxhound run --config config.yaml --workers 16
 ```
 
-Each walker is a goroutine. For static-only scraping, 16-32 walkers per process is typical. For browser mode, keep walkers equal to or less than the number of browser instances (default: 2).
+For static-only scraping, 16-32 walkers per process is typical. For browser mode, keep walkers equal to or less than the number of browser instances (default: 2).
 
 ### Resuming interrupted runs
 
-Use the Redis or SQLite queue backends for resumability. If a worker crashes, jobs still in the queue are processed when the worker restarts:
+Use the Redis or SQLite queue backends for resumability:
 
 ```bash
 foxhound resume --hunt-id my-hunt-001 --queue redis://localhost:6379/0 --config config.yaml
@@ -162,11 +168,7 @@ foxhound resume --hunt-id my-hunt-001 --queue redis://localhost:6379/0 --config 
 
 ## Health Endpoint
 
-The Prometheus metrics endpoint doubles as a health check:
-
-- `GET /metrics` — Prometheus metrics (plain text)
-
-When `monitor.metrics.enabled: true`, this endpoint starts on `monitor.metrics.port` (default: 9090).
+When `monitor.metrics.enabled: true`, the Prometheus metrics endpoint starts on `monitor.metrics.port` (default: 9090).
 
 Docker healthcheck:
 
@@ -176,6 +178,21 @@ healthcheck:
   interval: 30s
   timeout: 5s
   retries: 3
+```
+
+## v0.0.1 Release
+
+The v0.0.1 tag is the first public release:
+
+```bash
+git checkout v0.0.1
+go build -o foxhound ./cmd/foxhound/
+```
+
+Docker image:
+
+```bash
+docker pull ghcr.io/sadewadee/foxhound:v0.0.1
 ```
 
 ## Rollback

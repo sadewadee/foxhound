@@ -39,7 +39,6 @@ The TLS profile is derived automatically from the identity profile:
 ```go
 profile := identity.Generate(identity.WithBrowser(identity.BrowserFirefox))
 // profile.TLSProfile == "firefox_134.0"
-// StealthFetcher uses this to select the matching cipher suite + SETTINGS
 ```
 
 ## Layer 2 — HTTP Fingerprinting
@@ -51,7 +50,7 @@ Browsers send headers in a specific, version-dependent order. Go's `net/http` so
 Foxhound applies the canonical header order from `identity.Profile.HeaderOrder` for every request:
 
 ```go
-// Firefox header order (from identity/profile.go):
+// Firefox header order:
 []string{
     "Host", "User-Agent", "Accept", "Accept-Language",
     "Accept-Encoding", "Connection", "Upgrade-Insecure-Requests",
@@ -59,7 +58,7 @@ Foxhound applies the canonical header order from `identity.Profile.HeaderOrder` 
     "Sec-Fetch-User", "Priority", "Pragma", "Cache-Control",
 }
 
-// Chrome header order (from identity/profile.go):
+// Chrome header order:
 []string{
     "Host", "Connection", "sec-ch-ua", "sec-ch-ua-mobile",
     "sec-ch-ua-platform", "Upgrade-Insecure-Requests", "User-Agent",
@@ -113,7 +112,32 @@ This produces a profile where:
 | Firefox UA + Windows OS + Tokyo timezone | Contextual mismatch — suspicious |
 | Foxhound profile (all attributes consistent) | No mismatch at any layer |
 
-## Layer 4 — Human Behavior Simulation
+## Layer 4 — Camoufox Browser (C++ Level Anti-Fingerprinting)
+
+Camoufox is a patched Firefox fork that applies anti-fingerprinting at the C++ source level, not via JavaScript injection. This is critical: JavaScript overrides can be detected by checking `toString()` on patched functions, whereas C++ patches are invisible.
+
+Camoufox patches controlled via `CAMOU_CONFIG_*` environment variables (set from `identity.Profile.CamoufoxEnv`):
+
+- **Canvas fingerprint**: deterministic noise per session
+- **WebGL vendor/renderer**: configurable GPU string
+- **AudioContext fingerprint**: seeded noise
+- **Font enumeration**: controlled list of available fonts
+- **`navigator.webdriver`**: removed at browser level (CDP injection can be detected)
+- **Screen dimensions**: set from identity profile
+- **Hardware concurrency**: set from profile
+- **Device memory**: set from profile
+- **Platform string**: matches OS in profile
+
+Install the Camoufox binary (done once per environment):
+
+```bash
+go build -tags playwright ./...
+go run github.com/playwright-community/playwright-go/cmd/playwright install firefox
+```
+
+The binary is downloaded via playwright-go's install mechanism, which fetches Camoufox from the official release channel.
+
+## Layer 5 — Human Behavior Simulation
 
 ### Log-normal timing
 
@@ -139,15 +163,13 @@ Default parameters (`moderate` profile): Mu=1.0, Sigma=0.8
 | `moderate` | 1.0 | 0.8 | ~2.7 s | Most sites (default) |
 | `aggressive` | 0.5 | 0.6 | ~1.6 s | Lightly protected sites |
 
-### Bezier mouse movement
-
-Browser mode uses Bezier curves for mouse movement rather than direct linear paths. The mouse path includes realistic overshoot and jitter.
-
 ### Session rhythm
 
 Walkers implement a burst/pause rhythm: a burst of N requests followed by a longer pause, occasionally interrupted by a long break (lunch, distraction). This matches real user session patterns.
 
-Configuration via `BehaviorProfile` in `HuntConfig`:
+### Bezier mouse movement (browser mode)
+
+Browser mode uses Bezier curves for mouse movement rather than direct linear paths. The mouse path includes realistic overshoot and jitter.
 
 ```go
 h := engine.NewHunt(engine.HuntConfig{
@@ -156,7 +178,7 @@ h := engine.NewHunt(engine.HuntConfig{
 })
 ```
 
-## Layer 5 — Contextual Consistency
+## Layer 6 — Contextual Consistency
 
 ### Referer management
 
@@ -183,18 +205,39 @@ profile := identity.Generate(
 
 A New York proxy + Tokyo timezone is a contextual flag. Foxhound prevents this by deriving all locale data from the proxy geo.
 
-## Layer 6 — CAPTCHA Prevention
+## Layer 7 — Block Detection Middleware
+
+`middleware.NewBlockDetector` provides 9 vendor-specific patterns covering the most common anti-bot systems:
+
+| Pattern | Trigger |
+|---------|---------|
+| `cloudflare` | Body contains "checking your browser", "just a moment", "challenge-platform" |
+| `rate-limit` | HTTP 429 + body contains "rate limit", "too many requests" |
+| `access-denied` | HTTP 403 + body contains "access denied", "forbidden", "blocked" |
+| `bot-detection` | Body contains "bot detected", "automated access", "unusual traffic" |
+| `empty-trap` | HTTP 200 + body < 500 bytes + no `<html` tag |
+| `akamai` | Body contains "akamai", "security challenge", "reference #" |
+| `datadome` | Body contains "datadome", "dd.js" |
+| `perimeterx` | Body contains "perimeterx", "px-captcha" |
+| `login-wall` | Body contains "login", "sign in" |
+
+On detection, the middleware retries with exponential backoff (`baseDelay * 2^attempt * ±25% jitter`).
+
+## Layer 8 — CAPTCHA Prevention and Handling
 
 The goal is to **never trigger a CAPTCHA**. If a CAPTCHA appears, one or more earlier layers have failed.
 
-Detection order:
-1. Check response body for CAPTCHA markers (reCAPTCHA, hCaptcha, Turnstile, GeeTest)
-2. Check status codes: 403 with challenge page HTML
+When a CAPTCHA is detected in a response body (reCAPTCHA, hCaptcha, Turnstile, GeeTest):
 
-When a CAPTCHA is detected:
-- Log the event at WARN level
-- If `captcha.enabled: true` and a solver is configured, attempt automatic solving
-- If solving fails, escalate to browser mode with human simulation
+1. Log the event at WARN level
+2. Count as blocked in stats
+3. If `captcha.enabled: true` and a solver is configured, attempt automatic solving
+
+In browser mode, the following automations are attempted before reaching a solver:
+
+- **reCAPTCHA v2 auto-click**: attempts to click the "I'm not a robot" checkbox
+- **Cloudflare JS challenge**: waits for the challenge to complete and the page to reload
+- **Cookie consent**: clicks "Accept", "Accept All", "I agree" dialogs
 
 ### CAPTCHA solver configuration
 
@@ -207,25 +250,21 @@ captcha:
 
 Solvers are used as a last resort. The primary strategy is prevention.
 
-## Block Detection
+## Block Detection in SmartFetcher
 
-`SmartFetcher` uses `DefaultBlockDetector` to detect blocks:
+`SmartFetcher` escalates from static to browser on these status codes:
 
 ```go
-// Status codes that trigger escalation to browser:
 case 401, 403, 407, 429, 503:
-    return true
+    escalate to browser
 ```
 
-Implement `BlockDetector` to add custom detection logic (e.g. checking response body for "Access Denied" text):
+Custom block detector:
 
 ```go
 type MyDetector struct{}
 
 func (d *MyDetector) IsBlocked(resp *foxhound.Response) bool {
-    if resp.StatusCode == 403 {
-        return true
-    }
     return bytes.Contains(resp.Body, []byte("Access Denied"))
 }
 

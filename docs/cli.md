@@ -47,8 +47,6 @@ Creates the following files in a new directory named `<project-name>`:
 | `config.yaml` | Full configuration template with all sections |
 | `.env.example` | Environment variable reference (copy to `.env`, never commit) |
 
-**Example:**
-
 ```bash
 foxhound init ecommerce-scraper
 cd ecommerce-scraper
@@ -71,28 +69,15 @@ foxhound run [flags]
 | `--workers` | *(config value)* | Override `hunt.walkers` from the config |
 | `--dry-run` | false | Validate the config and print the run summary without actually running |
 
-**Examples:**
-
 ```bash
-# Basic run
 foxhound run --config config.yaml
-
-# Override workers
 foxhound run --config config.yaml --workers 8
-
-# Override target domain
 foxhound run --config config.yaml --hunt books.toscrape.com
-
-# Validate config without running
 foxhound run --config config.yaml --dry-run
-
-# Verbose logging
 foxhound -v run --config config.yaml
 ```
 
-The default processor (used when running from the CLI) extracts page titles and all same-domain links from each page. To use custom extraction logic, use the Go API — see [Go API](api.md).
-
-**Signals:** SIGINT and SIGTERM trigger a graceful shutdown. Walkers finish their current job before exiting.
+SIGINT and SIGTERM trigger a graceful shutdown. Walkers finish their current job before exiting.
 
 ### check
 
@@ -109,15 +94,13 @@ foxhound check [flags]
 
 Prints a report with PASS/FAIL indicators for UA-browser consistency, TLS profile, header order, screen dimensions, locale, and timezone. Exits with code 1 if any check fails.
 
-**Examples:**
-
 ```bash
 foxhound check
 foxhound check --browser chrome --os macos
 foxhound -v check --browser firefox --os windows
 ```
 
-**Sample output:**
+Sample output:
 
 ```
 Foxhound Identity Check
@@ -156,21 +139,80 @@ foxhound proxy-test [flags]
 
 Loads proxy providers from the config, checks each proxy for reachability, and prints a latency and health table.
 
-**Example:**
-
 ```bash
 foxhound proxy-test --config config.yaml
 ```
 
 ### shell
 
-Start an interactive scraping shell (REPL).
+Start an interactive scraping REPL. Useful for testing URLs and selectors before writing a full processor.
 
 ```
-foxhound shell
+foxhound shell [flags]
 ```
 
-The shell provides an interactive environment for testing URLs, inspecting responses, and experimenting with selectors. Useful for debugging before writing a full processor.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `config.yaml` | Config file for loading proxy settings |
+
+The shell has 14 commands:
+
+| Command | Usage | Description |
+|---------|-------|-------------|
+| `identity` | `identity` | Generate and display a new identity profile |
+| `fetch` | `fetch <url>` | Fetch URL, show status, size, and duration |
+| `headers` | `headers <url>` | Fetch URL, display response headers |
+| `parse` | `parse <url> <selector>` | Extract elements matching CSS selector |
+| `adaptive` | `adaptive <url> <selector>` | Apply selector with automatic fallback on no match |
+| `extract` | `extract <url> k1=sel1 k2=sel2` | Structured multi-field extraction |
+| `export` | `export <format> [path]` | Export last fetch (json, csv, markdown, text) |
+| `history` | `history` | Show last 10 fetched URLs with status/duration |
+| `timing` | `timing` | Show avg/min/max latency stats for this session |
+| `compare` | `compare <url1> <url2>` | Diff two pages and show unique text content |
+| `status` | `status` | Show session stats (totals, bytes, latency, proxies) |
+| `proxy` | `proxy` | Show proxy pool status |
+| `help` | `help` | Show all commands |
+| `exit` / `quit` | `exit` | Exit the shell |
+
+Shell examples:
+
+```
+foxhound> fetch https://books.toscrape.com/
+Status  : 200 OK
+Size    : 51274 bytes
+Duration: 312ms
+
+foxhound> parse https://books.toscrape.com/ article.product_pod h3 a
+Found 20 match(es) for "article.product_pod h3 a":
+  [1] A Light in the ...
+  [2] Tipping the Velvet
+  ...
+
+foxhound> extract https://books.toscrape.com/ title=h1 price=p.price_color
+Extraction results for https://books.toscrape.com/:
+  title:               All products | Books to Scrape - Sandbox
+  price:               (no match)
+
+foxhound> history
+Fetch history:
+  [ 1] 200  https://books.toscrape.com/  51274 bytes  312ms
+
+foxhound> timing
+Latency stats:
+  Samples : 1
+  Avg     : 312ms
+  Min     : 312ms
+  Max     : 312ms
+
+foxhound> export json /tmp/last-fetch.json
+Exported 51274 bytes to /tmp/last-fetch.json
+
+foxhound> compare https://books.toscrape.com/catalogue/page-1.html https://books.toscrape.com/catalogue/page-2.html
+Compare: ... vs ...
+  Common text nodes : 42
+  Only in page 1    : 20
+  Only in page 2    : 20
+```
 
 ### resume
 
@@ -183,29 +225,20 @@ foxhound resume [flags]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--hunt-id` | *(required)* | ID of the hunt to resume |
-| `--queue` | *(config value)* | Queue URL or file path (e.g. `redis://localhost:6379/0` or `/data/hunt.db`) |
+| `--queue` | *(config value)* | Queue URL or file path |
 | `--config` | `config.yaml` | Path to configuration file |
 
-The `--queue` flag supports:
-- `redis://host:port/db` — Redis queue
-- `sqlite://path/to/file.db` — SQLite queue
-- `/path/to/file.db` — SQLite file path (no scheme prefix)
-
-**Examples:**
+Supported queue formats:
+- `redis://host:port/db`
+- `sqlite://path/to/file.db`
+- `/path/to/file.db` (SQLite without scheme)
 
 ```bash
-# Resume from a Redis queue
 foxhound resume --hunt-id my-hunt --queue redis://localhost:6379/0 --config config.yaml
-
-# Resume from a SQLite file
 foxhound resume --hunt-id my-hunt --queue /data/foxhound.db --config config.yaml
 ```
 
-If the queue has zero pending jobs, the command prints a message and exits cleanly.
-
 ### version
-
-Print the Foxhound version string.
 
 ```bash
 foxhound version
@@ -213,8 +246,6 @@ foxhound version
 ```
 
 ### help
-
-Print the usage summary.
 
 ```bash
 foxhound help

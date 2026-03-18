@@ -12,8 +12,9 @@ cfg, err := foxhound.LoadConfig("config.yaml")
 
 ```yaml
 hunt:
-  domain: example.com    # primary target domain (used in logs and metrics)
-  walkers: 3             # concurrent virtual-user goroutines (default: 3)
+  domain: example.com       # primary target domain (used in logs and metrics)
+  walkers: 3                # concurrent virtual-user goroutines (default: 3)
+  max_concurrency: 0        # global cap on in-flight requests (0 = walkers count)
 
 identity:
   browser: firefox                         # "firefox" | "chrome" (default: firefox)
@@ -57,6 +58,8 @@ fetch:
     block_webrtc: true               # block WebRTC to prevent IP leaks
 
 middleware:
+  concurrency:
+    per_domain: 2                    # max concurrent requests per domain (default: 2)
   ratelimit:
     enabled: true
     requests_per_sec: 2.0            # tokens per second per domain
@@ -137,16 +140,122 @@ logging:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `domain` | string | — | Target domain. Used to seed the first URL and group metrics. |
-| `walkers` | int | 3 | Number of concurrent virtual users. Each walker has its own fetcher session. |
+| `domain` | string | — | Target domain. Used in logs and metrics grouping. |
+| `walkers` | int | 3 | Number of concurrent virtual users. Each walker has its own session. |
+| `max_concurrency` | int | 0 | Global cap on simultaneous in-flight requests. 0 means equal to `walkers` count. |
 
 ### identity
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `browser` | string | `firefox` | Browser to impersonate: `firefox` or `chrome`. |
-| `os` | []string | `[windows, macos, linux]` | OS pool. If more than one, a random OS is picked per walker. |
+| `os` | []string | `[windows, macos, linux]` | OS pool. A random OS is picked per walker. |
 | `fingerprint_db` | string | `embedded` | Profile database. Only `embedded` is supported in v0.0.1. |
+
+### middleware.concurrency
+
+Per-domain semaphore. Limits how many requests can be in-flight concurrently for a single domain, independent of the global `hunt.max_concurrency` cap.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `per_domain` | int | 2 | Maximum concurrent requests per domain. |
+
+### middleware.autothrottle
+
+Adapts the inter-request delay for each domain using an exponential moving average of response latency:
+
+```
+delay = EMA(latency) / target_concurrency
+```
+
+On 429 or 503 responses the delay spikes immediately to `max_delay`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | false | Enable autothrottle. |
+| `target_concurrency` | float64 | 2.0 | Target parallel requests per domain. |
+| `initial_delay` | duration | `1s` | Starting delay before the first request. |
+| `min_delay` | duration | `500ms` | Minimum delay (floor). |
+| `max_delay` | duration | `30s` | Maximum delay; spiked to this on 429/503. |
+
+### middleware.deltafetch
+
+Skips URLs that were already fetched in a prior run. Backed by a persistent store.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | false | Enable delta-fetch. |
+| `strategy` | string | `skip_seen` | `skip_seen` — skip any URL ever seen; `skip_recent` — skip only if within TTL. |
+| `ttl` | duration | `24h` | Used only by `skip_recent`. |
+| `store` | string | `memory` | `memory`, `redis`, or `sqlite`. |
+
+### middleware.robots_txt
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | false | Fetch and obey each domain's robots.txt. |
+
+### cache
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `backend` | string | `""` | `""` disables caching. Options: `memory`, `file`, `sqlite`, `redis`. |
+| `ttl` | duration | `1h` | TTL for cached entries. |
+| `max_size` | int | 1000 | Maximum entries for memory cache. |
+
+### monitor.metrics
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | false | Start Prometheus `/metrics` endpoint. |
+| `port` | int | 9090 | Port for the metrics HTTP server. |
+
+### monitor.alerting
+
+Webhook alerting fires when error or block rates cross thresholds.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `webhook_url` | string | `""` | URL to POST alert JSON to. |
+| `error_rate_threshold` | float64 | 0.10 | Alert when error rate exceeds this fraction. |
+| `block_rate_threshold` | float64 | 0.20 | Alert when block rate exceeds this fraction. |
+| `cooldown` | duration | `5m` | Minimum time between repeated alerts. |
+
+### captcha
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | false | Enable CAPTCHA auto-solving. |
+| `provider` | string | — | `capsolver` or `twocaptcha`. |
+| `api_key` | string | — | API key for the solver service. |
+
+### behavior
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `profile` | string | `moderate` | Human-simulation preset: `careful`, `moderate`, or `aggressive`. |
+
+### hunt.checkpoint (Go API only)
+
+Checkpoint is configured via `engine.CheckpointConfig` in `engine.HuntConfig`, not in config.yaml:
+
+```go
+h := engine.NewHunt(engine.HuntConfig{
+    Checkpoint: engine.CheckpointConfig{
+        Enabled:  true,
+        Path:     "/tmp/hunt.checkpoint.json",
+        Interval: 100, // save every 100 items (default when 0)
+    },
+    // ...
+})
+```
+
+The checkpoint file is written atomically (temp file + rename). Load with:
+
+```go
+cp, err := engine.LoadCheckpoint("/tmp/hunt.checkpoint.json")
+fmt.Println(cp.ItemsProcessed, cp.QueueLen)
+```
 
 ### proxy.rotation strategies
 
@@ -167,25 +276,19 @@ logging:
 
 Set `instances: 0` to run in static-only mode with no browser dependency.
 
-### middleware.autothrottle
-
-Autothrottle adapts the inter-request delay for each domain using an exponential moving average of response latency:
-
-```
-delay = EMA(latency) / target_concurrency
-```
-
-On 429 or 503 responses the delay spikes immediately to `max_delay`.
-
 ### pipeline.export types
 
 | Type | Description |
 |------|-------------|
 | `json` | JSON array file. |
-| `jsonl` | JSON Lines (one object per line). Recommended for large datasets. |
-| `csv` | CSV file. Column order follows the first item's field keys (sorted) unless headers are set in code. |
-| `webhook` | HTTP POST to a URL. Supports `batch_size` for batched requests. |
-| `postgres` | PostgreSQL upsert. Requires `FOXHOUND_EXPORT_DB` env var or `path` field with a DSN. |
+| `jsonl` | JSON Lines (one object per line). |
+| `csv` | CSV file. Column order follows first item's sorted keys unless set in code. |
+| `markdown` | Markdown file. Style set via `MarkdownFormat` in Go code. |
+| `text` | Plain text file. Style set via `TextFormat` in Go code. |
+| `xml` | XML file with configurable root/item element names. |
+| `sqlite` | SQLite database. Table created automatically; new fields trigger ALTER TABLE. |
+| `webhook` | HTTP POST to a URL. Supports `batch_size`. |
+| `postgres` | PostgreSQL upsert. Requires DSN via `path` or `FOXHOUND_EXPORT_DB` env var. |
 
 ### behavior profiles
 
@@ -197,7 +300,7 @@ On 429 or 503 responses the delay spikes immediately to `max_delay`.
 
 ## Environment Variable Expansion
 
-All string values in the config file support `${VAR}` expansion using `os.ExpandEnv`. Values are expanded at load time. Example:
+All string values in the config file support `${VAR}` expansion using `os.ExpandEnv`. Values are expanded at load time:
 
 ```yaml
 captcha:
@@ -216,6 +319,7 @@ When a field is omitted, `LoadConfig` applies these defaults:
 | Field | Default |
 |-------|---------|
 | `hunt.walkers` | 3 |
+| `hunt.max_concurrency` | 0 (equals walkers) |
 | `identity.browser` | `firefox` |
 | `identity.os` | `[windows, macos, linux]` |
 | `proxy.rotation` | `per_session` |
@@ -235,6 +339,7 @@ When a field is omitted, `LoadConfig` applies these defaults:
 | `logging.level` | `info` |
 | `logging.format` | `json` |
 | `logging.output` | `stderr` |
+| `middleware.concurrency.per_domain` | 2 |
 | `middleware.autothrottle.target_concurrency` | 2.0 |
 | `middleware.autothrottle.initial_delay` | `1s` |
 | `middleware.autothrottle.min_delay` | `500ms` |
