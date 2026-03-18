@@ -1,0 +1,7 @@
+══════════════════════════════════════════════════════════════
+  FOXHOUND — Rotating Residential Proxy Test
+  Proxy:  socks5://***-rotate@REDACTED_HOST:80
+  UA:     Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0; rv:148.0) Gecko/20100101 Firefox/148.0
+══════════════════════════════════════════════════════════════
+time=2026-03-18T12:21:42.837+08:00 level=INFO msg="fetch/camoufox: using Camoufox binary" path=/Users/sadewadee/Library/Caches/camoufox/Camoufox.app/Contents/MacOS/camoufox
+time=2026-03-18T12:21:42.837+08:00 level=INFO msg="fetch/camoufox: proxy configured" server=http://REDACTED_HOST:80
