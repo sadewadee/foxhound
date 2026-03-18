@@ -23,7 +23,7 @@ import (
 	"github.com/sadewadee/foxhound/parse"
 )
 
-const proxyURL = "socks5://REDACTED_USER:REDACTED_PASS@REDACTED_HOST:80"
+var proxyURL = getEnvOrDefault("FOXHOUND_PROXY", "socks5://user:pass@proxy:port")
 
 type Item struct {
 	Title    string `json:"title,omitempty"`
@@ -62,12 +62,12 @@ func main() {
 
 	fmt.Println("══════════════════════════════════════════════════════════════")
 	fmt.Println("  FOXHOUND — Rotating Residential Proxy Test")
-	fmt.Printf("  Proxy:  %s\n", "socks5://***-rotate@REDACTED_HOST:80")
+	fmt.Printf("  Proxy:  %s\n", "(from FOXHOUND_PROXY env)")
 	fmt.Printf("  UA:     %s\n", prof.UA)
 	fmt.Println("══════════════════════════════════════════════════════════════")
 
 	// Use HTTP since Playwright Firefox doesn't support SOCKS5+auth
-	httpProxy := "http://REDACTED_USER:REDACTED_PASS@REDACTED_HOST:80"
+	httpProxy := proxyURL
 
 	cf, err := fetch.NewCamoufox(
 		fetch.WithBrowserIdentity(prof),
@@ -381,4 +381,9 @@ func humanPause() {
 func saveJSON(path string, v any) {
 	data, _ := json.MarshalIndent(v, "", "  ")
 	os.WriteFile(path, data, 0644)
+}
+
+func getEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" { return v }
+	return fallback
 }

@@ -23,7 +23,7 @@ import (
 	"github.com/sadewadee/foxhound/parse"
 )
 
-const proxyURL = "http://REDACTED_USER:REDACTED_PASS@REDACTED_HOST:80"
+var proxyURL = getEnvOrDefault("FOXHOUND_PROXY", "http://user:pass@proxy:port")
 
 type Business struct {
 	Name     string   `json:"name"`
@@ -81,7 +81,7 @@ func main() {
 	stealth := fetch.NewStealth(
 		fetch.WithIdentity(prof),
 		fetch.WithTimeout(20*time.Second),
-		fetch.WithProxy("http://REDACTED_USER:REDACTED_PASS@REDACTED_HOST:80"),
+		fetch.WithProxy(proxyURL),
 	)
 	defer stealth.Close()
 
@@ -530,4 +530,9 @@ func extractContacts(stealth foxhound.Fetcher, browser foxhound.Fetcher, b *Busi
 func saveJSON(path string, v any) {
 	data, _ := json.MarshalIndent(v, "", "  ")
 	os.WriteFile(path, data, 0644)
+}
+
+func getEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" { return v }
+	return fallback
 }
