@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/foxhound-banner.svg" alt="Foxhound - Go Scraping Framework" width="600" height="450"/>
+  <img src="assets/foxhound-banner.webp" alt="Foxhound - Go Scraping Framework" width="600" height="450"/>
 </div>
 
 <p align="center">
