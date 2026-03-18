@@ -181,6 +181,8 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 		}
 		w.writeItem(ctx, out)
 		w.hunt.stats.RecordItems(1)
+		w.hunt.streamItem(out)
+		w.hunt.maybeCheckpoint()
 	}
 
 	// Enqueue newly discovered jobs.

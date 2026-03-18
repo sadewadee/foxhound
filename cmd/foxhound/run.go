@@ -148,18 +148,19 @@ func buildQueue(backend, queueURL string) (foxhound.Queue, error) {
 
 // buildMiddlewares assembles the FULL middleware chain from config.
 // Order (outermost → innermost):
-//  0. Concurrency  — limits parallel requests per domain (optional, outermost)
-//  1. Metrics      — records all requests including retries
-//  2. RateLimit    — enforces per-domain request rate
-//  3. RobotsTxt    — respects robots.txt (optional)
-//  4. DeltaFetch   — skips previously-scraped URLs (optional)
-//  5. Dedup        — skips duplicate URLs within this run
-//  6. AutoThrottle — adapts delay based on server response time (optional)
-//  7. Cookies      — persists cookies across requests (always, critical for anti-bot)
-//  8. Referer      — sets realistic Referer header (always, critical for anti-bot)
-//  9. Redirect     — follows HTTP redirects (always)
-// 10. DepthLimit   — limits crawl depth (optional)
-// 11. Retry        — retries failed requests (always, innermost)
+//  0.  Concurrency    — limits parallel requests per domain (optional, outermost)
+//  1.  Metrics        — records all requests including retries
+//  2.  RateLimit      — enforces per-domain request rate
+//  3.  RobotsTxt      — respects robots.txt (optional)
+//  4.  DeltaFetch     — skips previously-scraped URLs (optional)
+//  5.  Dedup          — skips duplicate URLs within this run
+//  6.  AutoThrottle   — adapts delay based on server response time (optional)
+//  7.  Cookies        — persists cookies across requests (always, critical for anti-bot)
+//  7.5 BlockDetector  — detect and retry soft blocks (always, anti-bot)
+//  8.  Referer        — sets realistic Referer header (always, critical for anti-bot)
+//  9.  Redirect       — follows HTTP redirects (always)
+// 10.  DepthLimit     — limits crawl depth (optional)
+// 11.  Retry          — retries failed requests (always, innermost)
 func buildMiddlewares(cfg *foxhound.Config) []foxhound.Middleware {
 	var mws []foxhound.Middleware
 
@@ -223,6 +224,9 @@ func buildMiddlewares(cfg *foxhound.Config) []foxhound.Middleware {
 
 	// 7. Cookies — always on (critical: sites set cookies then check them)
 	mws = append(mws, middleware.NewCookies())
+
+	// 7.5 Block detector — detect and retry on soft blocks (always, anti-bot)
+	mws = append(mws, middleware.NewBlockDetector(2, 3*time.Second))
 
 	// 8. Referer — always on (realistic browsing pattern)
 	mws = append(mws, middleware.NewReferer())
