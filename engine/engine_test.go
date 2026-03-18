@@ -789,7 +789,9 @@ func TestHunt_Stop_CancelsRun(t *testing.T) {
 
 func TestHunt_Stats_TracksRequests(t *testing.T) {
 	q := newMemQueue(8)
-	fetcher := &stubFetcher{resp: &foxhound.Response{StatusCode: 200, Body: []byte("body")}}
+	// Use a minimal HTML body so the captcha empty_trap heuristic does not fire
+	// (it triggers when body < 500 bytes and lacks <html).
+	fetcher := &stubFetcher{resp: &foxhound.Response{StatusCode: 200, Body: []byte("<html><body>ok</body></html>")}}
 	processor := &stubProcessor{result: &foxhound.Result{}}
 
 	seeds := []*foxhound.Job{seedJob("https://a.com"), seedJob("https://b.com")}

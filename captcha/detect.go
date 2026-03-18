@@ -25,6 +25,15 @@ const (
 	CaptchaGeeTest CaptchaType = "geetest"
 	// CaptchaUnknown is an unrecognised CAPTCHA challenge.
 	CaptchaUnknown CaptchaType = "unknown"
+	// CaptchaSoftBlock is a 200 OK response whose body signals "access denied".
+	CaptchaSoftBlock CaptchaType = "soft_block"
+	// CaptchaEmptyTrap is a 200 OK response with suspiciously minimal content.
+	CaptchaEmptyTrap CaptchaType = "empty_trap"
+	// CaptchaLoginWall is a redirect to a login page used to gate content.
+	CaptchaLoginWall CaptchaType = "login_wall"
+	// CaptchaJSChallenge is a JS-only challenge page (e.g. Akamai) that has no
+	// CAPTCHA widget but blocks until the browser executes challenge JS.
+	CaptchaJSChallenge CaptchaType = "js_challenge"
 )
 
 // DetectResult describes a detected CAPTCHA.
@@ -77,6 +86,36 @@ func Detect(resp *foxhound.Response) *DetectResult {
 		result.Type = CaptchaGeeTest
 	}
 
+	// Return early when a known CAPTCHA widget was already identified.
+	if result.Type != CaptchaNone {
+		return result
+	}
+
+	// --- Content-aware block detection ---
+
+	// JS challenge (Akamai-style): no CAPTCHA widget but JS challenge page.
+	if isJSChallenge(lower) {
+		result.Type = CaptchaJSChallenge
+		return result
+	}
+
+	// Soft block: 200 OK but body explicitly says "access denied" in a small page.
+	if resp.StatusCode == 200 {
+		softBlockPatterns := []string{"access denied", "permission denied", "blocked", "forbidden"}
+		for _, p := range softBlockPatterns {
+			if strings.Contains(lower, p) && len(resp.Body) < 10000 {
+				result.Type = CaptchaSoftBlock
+				return result
+			}
+		}
+	}
+
+	// Empty trap: 200 OK but body is suspiciously small and lacks <html.
+	if resp.StatusCode == 200 && len(resp.Body) < 500 && !strings.Contains(lower, "<html") {
+		result.Type = CaptchaEmptyTrap
+		return result
+	}
+
 	return result
 }
 
@@ -113,6 +152,15 @@ func isHCaptcha(lower string) bool {
 func isGeeTest(lower string) bool {
 	return strings.Contains(lower, "geetest.com") ||
 		strings.Contains(lower, "gt_captcha")
+}
+
+// isJSChallenge returns true when the page is a JavaScript-only challenge
+// (e.g. Akamai Bot Manager) that blocks access until the browser executes
+// challenge code but presents no traditional CAPTCHA widget.
+func isJSChallenge(lower string) bool {
+	return strings.Contains(lower, "browser verification") ||
+		strings.Contains(lower, "security challenge") ||
+		(strings.Contains(lower, "akamai") && strings.Contains(lower, "challenge"))
 }
 
 // extractSiteKey attempts to pull the value of data-sitekey from the page body.
