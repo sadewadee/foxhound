@@ -547,6 +547,140 @@ func (f *CamoufoxFetcher) handleRecaptcha(page playwright.Page) {
 	slog.Warn("fetch/camoufox: reCAPTCHA found but could not locate clickable checkbox")
 }
 
+// detectCloudflare inspects the fully-loaded page content and returns the type
+// of Cloudflare challenge present, or "" if none is detected.
+//
+// Recognised challenge types:
+//   - "js_challenge"  — "Checking your browser" / "Just a moment" interstitial
+//   - "turnstile"     — Cloudflare Turnstile widget (visible or managed/invisible)
+//   - "under_attack"  — Under Attack Mode (extended JS challenge)
+func (f *CamoufoxFetcher) detectCloudflare(page playwright.Page) string {
+	content, _ := page.Content()
+	lower := strings.ToLower(content)
+
+	// JS Challenge — "Checking your browser" / "Just a moment" interstitial
+	if strings.Contains(lower, "checking your browser") ||
+		strings.Contains(lower, "just a moment") ||
+		strings.Contains(lower, "cf-browser-verification") ||
+		strings.Contains(lower, "challenge-platform") {
+		return "js_challenge"
+	}
+
+	// Turnstile widget
+	if strings.Contains(lower, "challenges.cloudflare.com/turnstile") ||
+		strings.Contains(lower, "cf-turnstile") {
+		return "turnstile"
+	}
+
+	// Under Attack Mode
+	if strings.Contains(lower, "cf-chl-bypass") ||
+		(strings.Contains(lower, "ray id") && strings.Contains(lower, "cloudflare")) {
+		return "under_attack"
+	}
+
+	return ""
+}
+
+// handleCloudflare attempts to resolve a Cloudflare challenge on the given page.
+// It returns true when the challenge was resolved and the page content has
+// changed, and false when no challenge was detected or the challenge timed out.
+//
+// Three challenge types are handled:
+//   - js_challenge: wait up to 12 s for the automatic JS solve + redirect.
+//   - turnstile: locate the Turnstile iframe and click the checkbox; if not
+//     found, wait 5 s for managed auto-resolution.
+//   - under_attack: wait up to 15 s for the extended JS challenge to complete.
+func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page) bool {
+	cfType := f.detectCloudflare(page)
+	if cfType == "" {
+		return false
+	}
+
+	slog.Info("fetch/camoufox: Cloudflare challenge detected", "type", cfType)
+
+	switch cfType {
+	case "js_challenge":
+		// Cloudflare JS challenge auto-resolves after ~5 s when the browser
+		// passes Cloudflare's JS fingerprinting checks.  Poll until the
+		// challenge page disappears or 12 s elapses.
+		slog.Info("fetch/camoufox: waiting for Cloudflare JS challenge to resolve...")
+		for i := 0; i < 12; i++ {
+			time.Sleep(1 * time.Second)
+			if f.detectCloudflare(page) == "" {
+				slog.Info("fetch/camoufox: Cloudflare JS challenge resolved!")
+				page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+					State: playwright.LoadStateNetworkidle,
+				})
+				return true
+			}
+		}
+		slog.Warn("fetch/camoufox: Cloudflare JS challenge did not resolve in time")
+
+	case "turnstile":
+		slog.Info("fetch/camoufox: attempting Turnstile challenge...")
+
+		// Turnstile renders inside an iframe.  Try each known iframe selector.
+		iframeSelectors := []string{
+			"iframe[src*='challenges.cloudflare.com/turnstile']",
+			"iframe[src*='challenges.cloudflare.com/cdn-cgi']",
+		}
+		for _, sel := range iframeSelectors {
+			iframe, err := page.QuerySelector(sel)
+			if err != nil || iframe == nil {
+				continue
+			}
+			frame, err := iframe.ContentFrame()
+			if err != nil || frame == nil {
+				continue
+			}
+
+			// Locate and click the challenge checkbox inside the iframe.
+			checkbox, _ := frame.QuerySelector("input[type='checkbox'], div[class*='checkbox']")
+			if checkbox != nil {
+				time.Sleep(time.Duration(1000+rand.IntN(2000)) * time.Millisecond)
+				checkbox.Click()
+				time.Sleep(3 * time.Second)
+				page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+					State: playwright.LoadStateNetworkidle,
+				})
+				if f.detectCloudflare(page) == "" {
+					slog.Info("fetch/camoufox: Turnstile challenge resolved via checkbox click!")
+					return true
+				}
+			}
+		}
+
+		// Managed / invisible Turnstile may auto-resolve when the browser's
+		// behavioral score is good enough.
+		slog.Info("fetch/camoufox: waiting for Turnstile auto-resolution...")
+		time.Sleep(5 * time.Second)
+		page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+			State: playwright.LoadStateNetworkidle,
+		})
+		if f.detectCloudflare(page) == "" {
+			slog.Info("fetch/camoufox: Turnstile auto-resolved!")
+			return true
+		}
+
+	case "under_attack":
+		// Extended JS challenge — may require up to 10–15 s.
+		slog.Info("fetch/camoufox: Cloudflare Under Attack mode, waiting...")
+		for i := 0; i < 15; i++ {
+			time.Sleep(1 * time.Second)
+			if f.detectCloudflare(page) == "" {
+				slog.Info("fetch/camoufox: Under Attack mode resolved!")
+				page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+					State: playwright.LoadStateNetworkidle,
+				})
+				return true
+			}
+		}
+		slog.Warn("fetch/camoufox: Cloudflare Under Attack mode did not resolve in time")
+	}
+
+	return false
+}
+
 // submitAfterCaptcha looks for and clicks a submit button after CAPTCHA is solved.
 func (f *CamoufoxFetcher) submitAfterCaptcha(page playwright.Page) {
 	submitSelectors := []string{
@@ -656,6 +790,13 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 
 	if err != nil {
 		return nil, fmt.Errorf("fetch/camoufox: navigating to %s: %w", job.URL, err)
+	}
+
+	// Handle Cloudflare challenges (JS check, Turnstile, Under Attack Mode).
+	// Must run before human behaviour simulation so that the challenge is
+	// cleared and the real page content is available for extraction.
+	if f.handleCloudflare(page) {
+		slog.Debug("fetch/camoufox: page updated after Cloudflare challenge")
 	}
 
 	// Human behaviour simulation — makes page interaction look natural to

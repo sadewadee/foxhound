@@ -76,6 +76,15 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 	w.hunt.activeWalkers.Add(1)
 	defer w.hunt.activeWalkers.Add(-1)
 
+	// Acquire global concurrency slot before doing any network I/O.
+	// This ensures at most MaxConcurrency requests are in-flight at once.
+	select {
+	case w.hunt.sem <- struct{}{}:
+		defer func() { <-w.hunt.sem }()
+	case <-ctx.Done():
+		return
+	}
+
 	// Apply a human-like inter-request delay using the rhythm state machine.
 	// The delay is drawn from the active burst/pause phase. Using a select
 	// with ctx.Done() ensures cancellation is honoured immediately even when

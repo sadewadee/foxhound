@@ -5,6 +5,7 @@ package proxy
 import (
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -62,38 +63,116 @@ type ProxyHealth struct {
 
 // Parse converts a raw proxy string into a Proxy value.
 //
-// Accepted formats:
-//   - http://user:pass@host:port
-//   - socks5://user:pass@host:port
-//   - https://host:port
-//   - host:port  (assumed http, no auth)
+// Accepted formats (in order of detection):
+//   - protocol://user:pass@host:port    — standard URL (already had scheme)
+//   - user:pass@host:port               — URL without scheme (http assumed)
+//   - host:port                         — bare address (http, no auth)
+//   - host:port:user:pass               — colon-separated, port is numeric
+//   - user:pass:host:port               — colon-separated, port is last field
+//   - protocol:host:port:user:pass      — five colon-separated fields
 func Parse(raw string) (*Proxy, error) {
-	// Try parsing as a full URL first.
-	u, err := url.Parse(raw)
-	if err == nil && u.Host != "" && u.Scheme != "" {
-		p := &Proxy{
-			URL:      raw,
-			Protocol: u.Scheme,
-			Host:     u.Hostname(),
-			Port:     u.Port(),
-		}
-		if u.User != nil {
-			p.Username = u.User.Username()
-			p.Password, _ = u.User.Password()
-		}
-		return p, nil
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, fmt.Errorf("proxy: empty string")
 	}
 
-	// Fall back to bare host:port.
-	u2, err2 := url.Parse("http://" + raw)
-	if err2 == nil && u2.Host != "" && u2.Hostname() != "" && u2.Port() != "" {
+	// Format 1: full URL with scheme.
+	if strings.Contains(raw, "://") {
+		return parseProxyURL(raw)
+	}
+
+	// Format: user:pass@host:port (no scheme).
+	if strings.Contains(raw, "@") {
+		return parseProxyURL("http://" + raw)
+	}
+
+	// Remaining formats use only colon as separator.
+	parts := strings.Split(raw, ":")
+
+	switch len(parts) {
+	case 2:
+		// host:port
+		if !isPort(parts[1]) {
+			return nil, fmt.Errorf("proxy: unrecognized format %q (port %q is not numeric)", raw, parts[1])
+		}
 		return &Proxy{
 			URL:      "http://" + raw,
 			Protocol: "http",
-			Host:     u2.Hostname(),
-			Port:     u2.Port(),
+			Host:     parts[0],
+			Port:     parts[1],
 		}, nil
-	}
 
-	return nil, fmt.Errorf("proxy: cannot parse %q", raw)
+	case 4:
+		// host:port:user:pass  OR  user:pass:host:port
+		// Heuristic: if parts[1] is numeric it is a port → host:port:user:pass.
+		if isPort(parts[1]) {
+			return buildProxy("http", parts[0], parts[1], parts[2], parts[3])
+		}
+		// Otherwise: user:pass:host:port
+		return buildProxy("http", parts[2], parts[3], parts[0], parts[1])
+
+	case 5:
+		// protocol:host:port:user:pass
+		return buildProxy(parts[0], parts[1], parts[2], parts[3], parts[4])
+
+	default:
+		return nil, fmt.Errorf("proxy: unrecognized format %q "+
+			"(supported: protocol://user:pass@host:port, host:port, "+
+			"host:port:user:pass, user:pass:host:port, protocol:host:port:user:pass)",
+			raw)
+	}
+}
+
+// isPort returns true when s is a non-empty numeric string of at most 5 digits.
+func isPort(s string) bool {
+	if len(s) == 0 || len(s) > 5 {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// buildProxy constructs a Proxy from its individual components, normalising
+// the protocol name and assembling the canonical URL.
+func buildProxy(protocol, host, port, username, password string) (*Proxy, error) {
+	if protocol == "" {
+		protocol = "http"
+	}
+	switch strings.ToLower(protocol) {
+	case "http", "https", "socks5", "socks4":
+		protocol = strings.ToLower(protocol)
+	}
+	rawURL := fmt.Sprintf("%s://%s:%s@%s:%s", protocol, username, password, host, port)
+	return &Proxy{
+		URL:      rawURL,
+		Protocol: protocol,
+		Host:     host,
+		Port:     port,
+		Username: username,
+		Password: password,
+	}, nil
+}
+
+// parseProxyURL parses a raw proxy URL that already contains a scheme (or has
+// had "http://" prepended) using the standard net/url package.
+func parseProxyURL(raw string) (*Proxy, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return nil, fmt.Errorf("proxy: invalid URL %q: %v", raw, err)
+	}
+	p := &Proxy{
+		URL:      raw,
+		Protocol: u.Scheme,
+		Host:     u.Hostname(),
+		Port:     u.Port(),
+	}
+	if u.User != nil {
+		p.Username = u.User.Username()
+		p.Password, _ = u.User.Password()
+	}
+	return p, nil
 }

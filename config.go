@@ -33,8 +33,9 @@ type BehaviorConfig struct {
 
 // HuntConfig configures the scraping campaign.
 type HuntConfig struct {
-	Domain  string `yaml:"domain"`
-	Walkers int    `yaml:"walkers"`
+	Domain         string `yaml:"domain"`
+	Walkers        int    `yaml:"walkers"`
+	MaxConcurrency int    `yaml:"max_concurrency"` // global max concurrent requests (0 = walkers count)
 }
 
 // IdentityConfig configures identity generation.
@@ -88,12 +89,18 @@ type BrowserFetchConfig struct {
 
 // MiddlewareConfig configures request/response processing middleware.
 type MiddlewareConfig struct {
-	RateLimit    RateLimitConfig    `yaml:"ratelimit"`
+	RateLimit    RateLimitConfig             `yaml:"ratelimit"`
 	AutoThrottle AutoThrottleMiddlewareConfig `yaml:"autothrottle"`
-	Dedup        DedupConfig        `yaml:"dedup"`
-	DeltaFetch   DeltaFetchConfig   `yaml:"deltafetch"`
-	RobotsTxt    RobotsTxtConfig    `yaml:"robots_txt"`
-	DepthLimit   DepthLimitConfig   `yaml:"depth_limit"`
+	Dedup        DedupConfig                 `yaml:"dedup"`
+	DeltaFetch   DeltaFetchConfig            `yaml:"deltafetch"`
+	RobotsTxt    RobotsTxtConfig             `yaml:"robots_txt"`
+	DepthLimit   DepthLimitConfig            `yaml:"depth_limit"`
+	Concurrency  ConcurrencyConfig           `yaml:"concurrency"`
+}
+
+// ConcurrencyConfig limits concurrent in-flight requests per domain.
+type ConcurrencyConfig struct {
+	PerDomain int `yaml:"per_domain"` // max concurrent requests per domain (default 2)
 }
 
 // AutoThrottleMiddlewareConfig configures the adaptive per-domain throttle.
@@ -305,6 +312,14 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Behavior.Profile == "" {
 		cfg.Behavior.Profile = "moderate"
+	}
+	// MaxConcurrency default — fall back to Walkers count when not set.
+	if cfg.Hunt.MaxConcurrency <= 0 {
+		cfg.Hunt.MaxConcurrency = 0 // resolved at Hunt construction using Walkers count
+	}
+	// Concurrency middleware default
+	if cfg.Middleware.Concurrency.PerDomain <= 0 {
+		cfg.Middleware.Concurrency.PerDomain = 2
 	}
 	// AutoThrottle defaults
 	if cfg.Middleware.AutoThrottle.TargetConcurrency <= 0 {

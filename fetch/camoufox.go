@@ -150,3 +150,9 @@ func (f *CamoufoxFetcher) Fetch(_ context.Context, _ *foxhound.Job) (*foxhound.R
 func (f *CamoufoxFetcher) Close() error {
 	return nil
 }
+
+// detectCloudflare is a no-op stub. Real implementation is in camoufox_playwright.go.
+func (f *CamoufoxFetcher) detectCloudflare(_ interface{}) string { return "" }
+
+// handleCloudflare is a no-op stub. Real implementation is in camoufox_playwright.go.
+func (f *CamoufoxFetcher) handleCloudflare(_ interface{}) bool { return false }

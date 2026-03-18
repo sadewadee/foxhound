@@ -148,21 +148,28 @@ func buildQueue(backend, queueURL string) (foxhound.Queue, error) {
 
 // buildMiddlewares assembles the FULL middleware chain from config.
 // Order (outermost → innermost):
-//  1. Metrics       — records all requests including retries
-//  2. RateLimit     — enforces per-domain request rate
-//  3. RobotsTxt     — respects robots.txt (optional)
-//  4. DeltaFetch    — skips previously-scraped URLs (optional)
-//  5. Dedup         — skips duplicate URLs within this run
-//  6. AutoThrottle  — adapts delay based on server response time (optional)
-//  7. Cookies       — persists cookies across requests (always, critical for anti-bot)
-//  8. Referer       — sets realistic Referer header (always, critical for anti-bot)
-//  9. Redirect      — follows HTTP redirects (always)
-// 10. DepthLimit    — limits crawl depth (optional)
-// 11. Retry         — retries failed requests (always, innermost)
+//  0. Concurrency  — limits parallel requests per domain (optional, outermost)
+//  1. Metrics      — records all requests including retries
+//  2. RateLimit    — enforces per-domain request rate
+//  3. RobotsTxt    — respects robots.txt (optional)
+//  4. DeltaFetch   — skips previously-scraped URLs (optional)
+//  5. Dedup        — skips duplicate URLs within this run
+//  6. AutoThrottle — adapts delay based on server response time (optional)
+//  7. Cookies      — persists cookies across requests (always, critical for anti-bot)
+//  8. Referer      — sets realistic Referer header (always, critical for anti-bot)
+//  9. Redirect     — follows HTTP redirects (always)
+// 10. DepthLimit   — limits crawl depth (optional)
+// 11. Retry        — retries failed requests (always, innermost)
 func buildMiddlewares(cfg *foxhound.Config) []foxhound.Middleware {
 	var mws []foxhound.Middleware
 
-	// 1. Metrics — outermost, records everything
+	// 0. Concurrency — outermost, limits parallel in-flight requests per domain
+	if cfg.Middleware.Concurrency.PerDomain > 0 {
+		mws = append(mws, middleware.NewConcurrency(cfg.Middleware.Concurrency.PerDomain))
+		slog.Debug("middleware: concurrency enabled", "per_domain", cfg.Middleware.Concurrency.PerDomain)
+	}
+
+	// 1. Metrics — outermost after concurrency, records everything
 	if cfg.Monitor.Metrics.Enabled {
 		mws = append(mws, middleware.NewMetrics("foxhound"))
 		slog.Debug("middleware: metrics enabled")
@@ -636,6 +643,7 @@ func runHuntWithQueue(cfg *foxhound.Config, overrideQueue foxhound.Queue) error 
 		Name:            cfg.Hunt.Domain,
 		Domain:          cfg.Hunt.Domain,
 		Walkers:         cfg.Hunt.Walkers,
+		MaxConcurrency:  cfg.Hunt.MaxConcurrency,
 		Seeds:           seeds,
 		Processor:       defaultProcessor,
 		Fetcher:         smartFetcher,
