@@ -51,13 +51,42 @@ h := engine.NewHunt(engine.HuntConfig{
 h.Run(context.Background())
 ```
 
-## Real Results
+## Real Scraping Results
 
-| Target | Mode | Items | Time | Notes |
-|--------|------|-------|------|-------|
-| books.toscrape.com | Static | 1000 books | ~8s | 50 pages, 2 walkers |
-| quotes.toscrape.com | Static | 100 quotes | ~3s | 10 pages, 2 walkers |
-| Google Maps listing | Browser | 1 place | ~4s | FetchBrowser, Camoufox |
+| Target | Mode | Items | Block Avoidance | Notes |
+|--------|------|-------|-----------------|-------|
+| books.toscrape.com | Static | **1,000 books** | 100% | 50 pages, 15s, 0 blocks |
+| Google Maps (10 queries) | Camoufox + proxy | **100 places** | 100% | 1,297 items/hour, 0 CAPTCHAs |
+| Alibaba (yoga mat) | Camoufox + proxy | **10 products** | 100% | Prices + suppliers extracted |
+| bot.sannysoft.com | Camoufox | 29/30 PASS | — | webdriver NOT detected |
+| CreepJS | Camoufox | Trust: HIGH | — | Fingerprint consistent |
+
+## Benchmarks
+
+Parse performance on Apple M1 (5,000 HTML elements, `go test -bench=. ./benchmarks/`):
+
+| Method | Time | Memory | Allocs | vs Regex |
+|--------|------|--------|--------|----------|
+| **Regex** (baseline) | 4.2ms | 1.0 MB | 15K | 1.0x |
+| **Stdlib html.Parse** | 7.8ms | 5.8 MB | 95K | 1.9x slower |
+| **Foxhound CSS** | 8.6ms | 6.5 MB | 100K | 2.0x slower |
+| **Raw goquery** | 8.8ms | 6.5 MB | 100K | 2.1x slower |
+| **Foxhound Adaptive** | 8.4ms | 6.2 MB | 95K | 2.0x slower |
+| **Foxhound Schema** | 16.2ms | 13.3 MB | 320K | 3.9x slower |
+| **Foxhound TextExtract** | 13.8ms | 10.0 MB | 270K | 3.3x slower |
+
+| Operation | Time | Notes |
+|-----------|------|-------|
+| **Similarity score** | 77ns | Zero allocation, pure math |
+| **Item.ToJSON** | 672ns | 10 allocs |
+| **Item.ToMarkdown** | 407ns | 8 allocs |
+
+**Key insight**: Foxhound CSS adds <1% overhead vs raw goquery — the wrapper is essentially free. Regex is 2x faster but can't handle complex DOM structures. Adaptive parsing adds no overhead over standard CSS when the selector works.
+
+```bash
+# Run benchmarks yourself
+go test -bench=. -benchmem ./benchmarks/
+```
 
 ## Documentation
 
