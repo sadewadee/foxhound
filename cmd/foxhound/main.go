@@ -9,7 +9,7 @@ import (
 	foxhound "github.com/sadewadee/foxhound"
 )
 
-const version = "0.1.0"
+const version = "0.0.1"
 
 // globalVerbose is the verbosity level set by -v / -vv flags.
 // 0 = normal (info), 1 = verbose (debug), 2 = very verbose (debug + source).

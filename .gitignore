@@ -1,5 +1,10 @@
-# Binaries
+# Binaries (all compiled outputs)
 foxhound
+browser_test
+full_test
+proxy_test
+visible_proxy_test
+residential_test
 *.exe
 *.dll
 *.so
