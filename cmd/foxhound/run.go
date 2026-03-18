@@ -308,6 +308,7 @@ func buildPipelineStages(entries []foxhound.PipelineEntry, outputDir string) ([]
 			stages = append(stages, &pipeline.Clean{
 				TrimWhitespace: entry.Clean.TrimWhitespace,
 				NormalizePrice: entry.Clean.NormalizePrice,
+				NormalizeDate:  entry.Clean.NormalizeDate,
 			})
 			slog.Debug("pipeline: added clean stage")
 		}

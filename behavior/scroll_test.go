@@ -140,3 +140,74 @@ func TestScrollActionFields(t *testing.T) {
 		}
 	}
 }
+
+func TestScrollGestureAxis_Horizontal_DistanceInRange(t *testing.T) {
+	cfg := DefaultScrollConfig()
+	s := NewScroll(cfg)
+	for i := 0; i < 200; i++ {
+		dist, _, _ := s.ScrollGestureAxis(ScrollReading, ScrollHorizontal)
+		if dist < cfg.HorizMinPx || dist > cfg.HorizMaxPx {
+			t.Errorf("horizontal reading distance %d outside [%d, %d]", dist, cfg.HorizMinPx, cfg.HorizMaxPx)
+		}
+	}
+	for i := 0; i < 200; i++ {
+		dist, _, _ := s.ScrollGestureAxis(ScrollScan, ScrollHorizontal)
+		if dist < cfg.HorizScanMinPx || dist > cfg.HorizScanMaxPx {
+			t.Errorf("horizontal scan distance %d outside [%d, %d]", dist, cfg.HorizScanMinPx, cfg.HorizScanMaxPx)
+		}
+	}
+}
+
+func TestScrollSequenceAxis_Horizontal_CoversExtent(t *testing.T) {
+	s := NewScroll(DefaultScrollConfig())
+	actions := s.ScrollSequenceAxis(2000, ScrollScan, ScrollHorizontal)
+	if len(actions) == 0 {
+		t.Fatal("ScrollSequenceAxis returned empty slice")
+	}
+	for i, a := range actions {
+		if a.Axis != ScrollHorizontal {
+			t.Errorf("action[%d].Axis: want ScrollHorizontal, got %v", i, a.Axis)
+		}
+		if a.Distance <= 0 {
+			t.Errorf("action[%d].Distance must be positive, got %d", i, a.Distance)
+		}
+		if a.Pause <= 0 {
+			t.Errorf("action[%d].Pause must be positive, got %v", i, a.Pause)
+		}
+	}
+}
+
+func TestScrollGesture_BackwardCompatible(t *testing.T) {
+	cfg := DefaultScrollConfig()
+	s := NewScroll(cfg)
+	// ScrollGesture should still work and return vertical distances
+	for i := 0; i < 100; i++ {
+		dist, pause, _ := s.ScrollGesture(ScrollReading)
+		if dist < cfg.ReadMinPx || dist > cfg.ReadMaxPx {
+			t.Errorf("backward-compat: distance %d outside [%d, %d]", dist, cfg.ReadMinPx, cfg.ReadMaxPx)
+		}
+		if pause <= 0 {
+			t.Errorf("backward-compat: pause must be positive")
+		}
+	}
+}
+
+func TestScrollAction_AxisField(t *testing.T) {
+	s := NewScroll(DefaultScrollConfig())
+
+	// Vertical sequence should have Axis == ScrollVertical (zero value)
+	vActions := s.ScrollSequenceAxis(3000, ScrollScan, ScrollVertical)
+	for i, a := range vActions {
+		if a.Axis != ScrollVertical {
+			t.Errorf("vertical action[%d].Axis: want ScrollVertical, got %v", i, a.Axis)
+		}
+	}
+
+	// Horizontal sequence should have Axis == ScrollHorizontal
+	hActions := s.ScrollSequenceAxis(2000, ScrollScan, ScrollHorizontal)
+	for i, a := range hActions {
+		if a.Axis != ScrollHorizontal {
+			t.Errorf("horizontal action[%d].Axis: want ScrollHorizontal, got %v", i, a.Axis)
+		}
+	}
+}

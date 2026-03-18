@@ -66,13 +66,17 @@ func CarefulProfile() *BehaviorProfile {
 		},
 
 		Scroll: ScrollConfig{
-			ReadMinPx:    300,
-			ReadMaxPx:    600,
-			ScanMinPx:    800,
-			ScanMaxPx:    1500,
-			ReadPause:    3 * time.Second,  // midpoint reference
-			ScanPause:    800 * time.Millisecond,
-			ScrollUpProb: 0.25, // re-reads more often
+			ReadMinPx:      300,
+			ReadMaxPx:      600,
+			ScanMinPx:      800,
+			ScanMaxPx:      1500,
+			ReadPause:      3 * time.Second,
+			ScanPause:      800 * time.Millisecond,
+			ScrollUpProb:   0.25, // re-reads more often
+			HorizMinPx:     150,
+			HorizMaxPx:     400,
+			HorizScanMinPx: 300,
+			HorizScanMaxPx: 800,
 		},
 
 		Keyboard: KeyboardConfig{
@@ -148,13 +152,17 @@ func AggressiveProfile() *BehaviorProfile {
 		},
 
 		Scroll: ScrollConfig{
-			ReadMinPx:    500,
-			ReadMaxPx:    1000,
-			ScanMinPx:    1500,
-			ScanMaxPx:    4000,
-			ReadPause:    500 * time.Millisecond, // midpoint reference
-			ScanPause:    200 * time.Millisecond,
-			ScrollUpProb: 0.08,
+			ReadMinPx:      500,
+			ReadMaxPx:      1000,
+			ScanMinPx:      1500,
+			ScanMaxPx:      4000,
+			ReadPause:      500 * time.Millisecond,
+			ScanPause:      200 * time.Millisecond,
+			ScrollUpProb:   0.08,
+			HorizMinPx:     300,
+			HorizMaxPx:     800,
+			HorizScanMinPx: 600,
+			HorizScanMaxPx: 1600,
 		},
 
 		Keyboard: KeyboardConfig{

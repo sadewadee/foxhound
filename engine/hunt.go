@@ -299,6 +299,14 @@ func (h *Hunt) Stats() *Stats {
 	return h.stats
 }
 
+// SetLogger replaces the Hunt's logger. Walkers created after this call will
+// inherit the new logger. Intended for testing.
+func (h *Hunt) SetLogger(logger *slog.Logger) {
+	h.mu.Lock()
+	h.logger = logger
+	h.mu.Unlock()
+}
+
 // ---------------------------------------------------------------------------
 // Streaming API
 // ---------------------------------------------------------------------------

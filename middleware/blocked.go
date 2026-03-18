@@ -23,8 +23,8 @@ type BlockPattern struct {
 	// MinBodySize marks a response as suspicious when the body is smaller than
 	// this threshold (bytes). 0 disables this check.
 	MinBodySize int
-	// MaxBodySize is unused in the current heuristic but reserved for future
-	// content-length-without-payload detection.
+	// MaxBodySize flags a response as blocked when the body exceeds this
+	// threshold (bytes). 0 disables this check.
 	MaxBodySize int
 }
 
@@ -170,6 +170,12 @@ func (bd *blockDetector) detectBlock(resp *foxhound.Response) *BlockPattern {
 		if p.MinBodySize > 0 && resp.StatusCode == 200 &&
 			len(resp.Body) < p.MinBodySize &&
 			!strings.Contains(lower, "<html") {
+			return p
+		}
+
+		// Maximum body size check: response body exceeds the expected maximum,
+		// which can indicate injected content or an unexpected page.
+		if p.MaxBodySize > 0 && len(resp.Body) > p.MaxBodySize {
 			return p
 		}
 	}

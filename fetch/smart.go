@@ -19,6 +19,7 @@ import (
 	"log/slog"
 
 	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/captcha"
 )
 
 // BlockDetector determines whether an HTTP response indicates that the server
@@ -43,6 +44,30 @@ func (d *DefaultBlockDetector) IsBlocked(resp *foxhound.Response) bool {
 	default:
 		return false
 	}
+}
+
+// ContentBlockDetector extends status-code-only detection with body-based
+// CAPTCHA and soft-block detection using the captcha package. This is the
+// default detector used by NewSmart.
+type ContentBlockDetector struct{}
+
+// IsBlocked returns true when the response indicates a block — either via
+// status code (same as DefaultBlockDetector) or via body content (CAPTCHA
+// pages, soft blocks that return 200).
+func (d *ContentBlockDetector) IsBlocked(resp *foxhound.Response) bool {
+	// 1. Status code check (same as DefaultBlockDetector).
+	switch resp.StatusCode {
+	case 401, 403, 407, 429, 503:
+		return true
+	}
+	// 2. Body-based: delegate to captcha.Detect.
+	if len(resp.Body) > 0 {
+		det := captcha.Detect(resp)
+		if det.Type != captcha.CaptchaNone {
+			return true
+		}
+	}
+	return false
 }
 
 // SmartOption is a functional option for configuring a SmartFetcher after
@@ -87,7 +112,7 @@ func NewSmart(static, browser foxhound.Fetcher, opts ...SmartOption) *SmartFetch
 	f := &SmartFetcher{
 		static:   static,
 		browser:  browser,
-		detector: &DefaultBlockDetector{},
+		detector: &ContentBlockDetector{},
 	}
 	for _, opt := range opts {
 		opt(f)

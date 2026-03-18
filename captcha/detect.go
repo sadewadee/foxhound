@@ -74,12 +74,12 @@ func Detect(resp *foxhound.Response) *DetectResult {
 		// block that requires challenge resolution before content is accessible.
 		result.Type = CaptchaCloudflare
 
-	case isRecaptcha(lower):
-		result.Type = CaptchaRecaptcha
-		result.SiteKey = extractSiteKey(body)
-
 	case isHCaptcha(lower):
 		result.Type = CaptchaHCaptcha
+		result.SiteKey = extractSiteKey(body)
+
+	case isRecaptcha(lower):
+		result.Type = CaptchaRecaptcha
 		result.SiteKey = extractSiteKey(body)
 
 	case isGeeTest(lower):

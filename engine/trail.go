@@ -85,20 +85,67 @@ func (t *Trail) Scroll() *Trail {
 	return t
 }
 
-// ToJobs converts every StepNavigate in the Trail into a foxhound.Job.
-// Non-navigate steps are silently skipped because they have no URL target.
+// ToJobs converts the Trail into foxhound.Jobs. Each StepNavigate starts a
+// new Job; subsequent browser steps (Click, Wait, Scroll) are attached as
+// JobSteps on that Job and set FetchMode to FetchBrowser.
+//
+// Extract steps are NOT converted to JobSteps because their Processor
+// (an interface) cannot survive JSON serialization through queue backends.
+// Extraction is handled by the hunt-level Processor after the fetch completes.
+//
+// Steps that appear before the first Navigate are silently skipped.
 func (t *Trail) ToJobs() []*foxhound.Job {
 	var jobs []*foxhound.Job
+	var current *foxhound.Job
+
 	for _, step := range t.Steps {
-		if step.Action != StepNavigate {
+		if step.Action == StepNavigate {
+			// Start a new segment.
+			current = &foxhound.Job{
+				ID:        step.URL,
+				URL:       step.URL,
+				Method:    "GET",
+				CreatedAt: time.Now(),
+			}
+			jobs = append(jobs, current)
 			continue
 		}
-		jobs = append(jobs, &foxhound.Job{
-			ID:        step.URL,
-			URL:       step.URL,
-			Method:    "GET",
-			CreatedAt: time.Now(),
-		})
+
+		// Non-navigate steps attach to the current job.
+		if current == nil {
+			continue // no navigate yet — skip orphaned step
+		}
+
+		// Extract steps cannot be serialized — skip them.
+		if step.Action == StepExtract {
+			continue
+		}
+
+		js := foxhound.JobStep{
+			Action:   mapStepAction(step.Action),
+			Selector: step.Selector,
+			Duration: step.Duration,
+		}
+		current.Steps = append(current.Steps, js)
+
+		// Browser-only steps force FetchBrowser.
+		current.FetchMode = foxhound.FetchBrowser
 	}
 	return jobs
+}
+
+// mapStepAction converts an engine.StepAction to the package-level JobStep*
+// constant defined in foxhound.go. Only browser-executable actions (Click,
+// Wait, Scroll) are mapped; Extract is skipped before reaching this function.
+func mapStepAction(a StepAction) int {
+	switch a {
+	case StepClick:
+		return foxhound.JobStepClick
+	case StepWait:
+		return foxhound.JobStepWait
+	case StepScroll:
+		return foxhound.JobStepScroll
+	default:
+		return foxhound.JobStepNavigate
+	}
 }
