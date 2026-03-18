@@ -396,6 +396,183 @@ func (f *CamoufoxFetcher) handleCookieConsent(page playwright.Page) {
 	}
 }
 
+// handleRecaptcha detects and attempts to solve reCAPTCHA v2 checkbox challenges.
+// reCAPTCHA renders inside an iframe — we locate the iframe, find the checkbox,
+// move the mouse naturally toward it, and click. If Google's behavioral score
+// (based on prior mouse movements + timing) is good enough, the checkbox
+// resolves immediately without an image challenge.
+func (f *CamoufoxFetcher) handleRecaptcha(page playwright.Page) {
+	// Check if page contains reCAPTCHA indicators
+	hasRecaptcha := false
+	indicators := []string{
+		"iframe[src*='recaptcha']",
+		"iframe[src*='google.com/recaptcha']",
+		"#captcha-form",
+		".g-recaptcha",
+		"div[class*='recaptcha']",
+	}
+	for _, sel := range indicators {
+		el, err := page.QuerySelector(sel)
+		if err == nil && el != nil {
+			hasRecaptcha = true
+			break
+		}
+	}
+	if !hasRecaptcha {
+		return
+	}
+
+	slog.Info("fetch/camoufox: reCAPTCHA detected, attempting to solve...")
+
+	// Small random delay before interacting — a real user pauses to read
+	time.Sleep(time.Duration(1500+rand.IntN(2000)) * time.Millisecond)
+
+	// Strategy 1: Find the reCAPTCHA iframe and click the checkbox inside it
+	iframeSelectors := []string{
+		"iframe[src*='recaptcha/api2/anchor']",
+		"iframe[src*='recaptcha/enterprise/anchor']",
+		"iframe[title*='reCAPTCHA']",
+		"iframe[src*='google.com/recaptcha']",
+	}
+
+	for _, iframeSel := range iframeSelectors {
+		iframeEl, err := page.QuerySelector(iframeSel)
+		if err != nil || iframeEl == nil {
+			continue
+		}
+
+		frame, err := iframeEl.ContentFrame()
+		if err != nil || frame == nil {
+			continue
+		}
+
+		// The checkbox inside the reCAPTCHA iframe
+		checkboxSelectors := []string{
+			"#recaptcha-anchor",
+			".recaptcha-checkbox",
+			"span[role='checkbox']",
+			"div.recaptcha-checkbox-border",
+		}
+
+		for _, cbSel := range checkboxSelectors {
+			cb, err := frame.QuerySelector(cbSel)
+			if err != nil || cb == nil {
+				continue
+			}
+
+			visible, _ := cb.IsVisible()
+			if !visible {
+				continue
+			}
+
+			// Move mouse toward the checkbox with human-like trajectory
+			box, err := cb.BoundingBox()
+			if err == nil && box != nil {
+				// Move to a random point near the checkbox (not dead center)
+				targetX := box.X + box.Width*0.3 + float64(rand.IntN(int(box.Width*0.4)))
+				targetY := box.Y + box.Height*0.3 + float64(rand.IntN(int(box.Height*0.4)))
+
+				// Slow, multi-step mouse movement (human-like)
+				currentX := float64(200 + rand.IntN(400))
+				currentY := float64(200 + rand.IntN(200))
+				steps := 8 + rand.IntN(8)
+				for step := 1; step <= steps; step++ {
+					t := float64(step) / float64(steps)
+					// Ease-in-out curve
+					t = t * t * (3 - 2*t)
+					mx := currentX + (targetX-currentX)*t + float64(rand.IntN(3)-1)
+					my := currentY + (targetY-currentY)*t + float64(rand.IntN(3)-1)
+					page.Mouse().Move(mx, my)
+					time.Sleep(time.Duration(20+rand.IntN(40)) * time.Millisecond)
+				}
+
+				// Small pause before click (human reaction time)
+				time.Sleep(time.Duration(200+rand.IntN(300)) * time.Millisecond)
+			}
+
+			// Click the checkbox
+			if err := cb.Click(); err != nil {
+				slog.Debug("fetch/camoufox: reCAPTCHA checkbox click failed", "err", err)
+				continue
+			}
+
+			slog.Info("fetch/camoufox: reCAPTCHA checkbox clicked, waiting for verification...")
+
+			// Wait for Google to verify — this takes 2-5 seconds
+			time.Sleep(time.Duration(3000+rand.IntN(3000)) * time.Millisecond)
+
+			// Check if solved (checkbox gets aria-checked="true")
+			checked, _ := cb.GetAttribute("aria-checked")
+			if checked == "true" {
+				slog.Info("fetch/camoufox: reCAPTCHA SOLVED via checkbox click!")
+
+				// If there's a submit button after solving, click it
+				f.submitAfterCaptcha(page)
+
+				// Wait for page to load after form submission
+				time.Sleep(time.Duration(2000+rand.IntN(2000)) * time.Millisecond)
+				page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+					State: playwright.LoadStateNetworkidle,
+				})
+				return
+			}
+
+			slog.Info("fetch/camoufox: reCAPTCHA checkbox clicked but not solved (may need image challenge)")
+			// Even if not solved, we tried — image challenges need external solvers
+			return
+		}
+	}
+
+	// Strategy 2: Some pages embed reCAPTCHA inline (not in iframe)
+	inlineSelectors := []string{
+		"#recaptcha-anchor",
+		".recaptcha-checkbox",
+		"span[role='checkbox'][aria-labelledby*='recaptcha']",
+	}
+	for _, sel := range inlineSelectors {
+		el, err := page.QuerySelector(sel)
+		if err != nil || el == nil {
+			continue
+		}
+		visible, _ := el.IsVisible()
+		if !visible {
+			continue
+		}
+		slog.Info("fetch/camoufox: clicking inline reCAPTCHA checkbox")
+		el.Click()
+		time.Sleep(time.Duration(3000+rand.IntN(3000)) * time.Millisecond)
+		return
+	}
+
+	slog.Warn("fetch/camoufox: reCAPTCHA found but could not locate clickable checkbox")
+}
+
+// submitAfterCaptcha looks for and clicks a submit button after CAPTCHA is solved.
+func (f *CamoufoxFetcher) submitAfterCaptcha(page playwright.Page) {
+	submitSelectors := []string{
+		"#captcha-form input[type='submit']",
+		"#captcha-form button[type='submit']",
+		"button:has-text('Submit')",
+		"button:has-text('Continue')",
+		"button:has-text('Verify')",
+		"input[type='submit']",
+	}
+	for _, sel := range submitSelectors {
+		el, err := page.QuerySelector(sel)
+		if err != nil || el == nil {
+			continue
+		}
+		visible, _ := el.IsVisible()
+		if !visible {
+			continue
+		}
+		time.Sleep(time.Duration(500+rand.IntN(500)) * time.Millisecond)
+		el.Click()
+		slog.Info("fetch/camoufox: submitted form after CAPTCHA solve", "selector", sel)
+		return
+	}
+}
+
 // navigate performs the actual playwright navigation. It is called from a
 // goroutine so that context cancellation can abort it cleanly.
 func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error) {
@@ -489,6 +666,11 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 	// Dismiss cookie consent banners if present. A real user accepts these
 	// prompts; leaving them open can obscure content and signal automation.
 	f.handleCookieConsent(page)
+
+	// Attempt to solve reCAPTCHA v2 checkbox ("I'm not a robot").
+	// Must happen AFTER human simulation so Google's behavioral score
+	// considers the mouse movements and delays before the click.
+	f.handleRecaptcha(page)
 
 	// Extract the fully-rendered HTML. page.Content() returns the live DOM
 	// after all JS has executed, which is the primary reason to use a browser.
