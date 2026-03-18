@@ -131,21 +131,26 @@ func WithPersistSession(persist bool) CamoufoxOption {
 // calls so cookies, localStorage, and session state are preserved between
 // requests — useful for sites that require login state.
 type CamoufoxFetcher struct {
-	pw             *playwright.Playwright
-	browser        playwright.Browser
-	identity       *identity.Profile
-	blockImages    bool
-	headless       string
-	timeout        time.Duration
-	proxyURL       string       // SOCKS5 or HTTP proxy URL
-	extensionPath  string       // path to Firefox extension dir (e.g. NopeCHA)
-	maxRequests    int          // restart after this many fetches (0 = disabled)
-	requestCount   atomic.Int64 // total fetches served by the current browser instance
-	mu             sync.Mutex   // serialises browser restart
-	persistSession bool
-	sessionCtx     playwright.BrowserContext // reused when persistSession=true
-	sessionMu      sync.Mutex               // guards sessionCtx lifecycle
-	hasExtension   bool                      // true when solver extension is loaded
+	pw              *playwright.Playwright
+	browser         playwright.Browser
+	identity        *identity.Profile
+	blockImages     bool
+	headless        string
+	timeout         time.Duration
+	proxyURL        string       // SOCKS5 or HTTP proxy URL
+	extensionPath   string       // path to Firefox extension dir (e.g. NopeCHA)
+	maxRequests     int          // restart after this many fetches (0 = disabled)
+	requestCount    atomic.Int64 // total fetches served by the current browser instance
+	mu              sync.Mutex   // serialises browser restart
+	persistSession  bool
+	sessionCtx      playwright.BrowserContext // reused when persistSession=true
+	sessionMu       sync.Mutex               // guards sessionCtx lifecycle
+	hasExtension    bool                      // true when solver extension is loaded
+	initScript      string                    // JS injected into every page via AddInitScript
+	userDataDir     string                    // persistent profile dir; uses LaunchPersistentContext
+	persistCtx      playwright.BrowserContext // context from LaunchPersistentContext
+	cdpURL          string                    // connect to existing browser via CDP
+	useRealChrome   bool                      // use pw.Chromium with channel=chrome
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -163,6 +168,47 @@ func WithBrowserProxy(proxyURL string) CamoufoxOption {
 func WithExtensionPath(path string) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.extensionPath = path
+	}
+}
+
+// WithInitScript sets a JavaScript snippet that is injected into every new
+// page before the page's own scripts execute, via page.AddInitScript. Useful
+// for overriding navigator properties (e.g. navigator.webdriver=false) or
+// installing global stubs before any site JS runs.
+func WithInitScript(script string) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.initScript = script
+	}
+}
+
+// WithUserDataDir sets a persistent profile directory. When non-empty,
+// NewCamoufox uses pw.Firefox.LaunchPersistentContext (or
+// pw.Chromium.LaunchPersistentContext when WithRealChrome is true) so cookies,
+// localStorage, and cached resources survive across browser restarts.
+func WithUserDataDir(dir string) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.userDataDir = dir
+	}
+}
+
+// WithCDPURL sets a Chrome DevTools Protocol endpoint URL (e.g.
+// "http://localhost:9222"). When non-empty, NewCamoufox connects to an
+// existing browser process via pw.Chromium.ConnectOverCDP instead of launching
+// a new browser. Useful for remote debugging setups or distributed scraping
+// where the browser lifecycle is managed externally.
+func WithCDPURL(url string) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.cdpURL = url
+	}
+}
+
+// WithRealChrome switches from Firefox/Camoufox to pw.Chromium.Launch with
+// channel="chrome". Use when Chrome rendering is required or when a Chrome
+// installation is available but Camoufox is not. Falls back silently to
+// Chromium if the Chrome channel binary is not installed.
+func WithRealChrome(use bool) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.useRealChrome = use
 	}
 }
 
@@ -258,6 +304,104 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 			"path", absExt)
 	}
 
+	// --- Browser acquisition: CDP connect > persistent context > normal launch ---
+
+	// Mode 1: connect to an existing browser over CDP (e.g. remote Chrome).
+	// cdpURL takes precedence over all other launch options.
+	if f.cdpURL != "" {
+		browser, cdpErr := pw.Chromium.ConnectOverCDP(f.cdpURL)
+		if cdpErr != nil {
+			_ = pw.Stop()
+			return nil, fmt.Errorf("fetch/camoufox: ConnectOverCDP(%s): %w", f.cdpURL, cdpErr)
+		}
+		f.pw = pw
+		f.browser = browser
+		slog.Info("fetch/camoufox: connected to existing browser via CDP", "url", f.cdpURL)
+		return f, nil
+	}
+
+	// Mode 2: real Chrome channel (pw.Chromium with channel="chrome").
+	if f.useRealChrome {
+		chromeLaunchOpts := playwright.BrowserTypeLaunchOptions{
+			Headless: playwright.Bool(f.headless != "false"),
+			Channel:  playwright.String("chrome"),
+		}
+		if f.proxyURL != "" {
+			chromeLaunchOpts.Proxy = parsePlaywrightProxy(f.proxyURL)
+		}
+
+		// Persistent context takes priority when userDataDir is also set.
+		if f.userDataDir != "" {
+			persistOpts := playwright.BrowserTypeLaunchPersistentContextOptions{
+				Headless: playwright.Bool(f.headless != "false"),
+				Channel:  playwright.String("chrome"),
+			}
+			if f.proxyURL != "" {
+				persistOpts.Proxy = parsePlaywrightProxy(f.proxyURL)
+			}
+			bctx, persistErr := pw.Chromium.LaunchPersistentContext(f.userDataDir, persistOpts)
+			if persistErr != nil {
+				// Fall back to regular Chrome launch.
+				slog.Warn("fetch/camoufox: LaunchPersistentContext (Chrome) failed, falling back",
+					"err", persistErr)
+			} else {
+				f.pw = pw
+				f.persistCtx = bctx
+				// Obtain the browser handle from the context for restart logic.
+				f.browser = bctx.Browser()
+				slog.Info("fetch/camoufox: Chrome with persistent context ready",
+					"dir", f.userDataDir)
+				return f, nil
+			}
+		}
+
+		browser, chromeErr := pw.Chromium.Launch(chromeLaunchOpts)
+		if chromeErr != nil {
+			// Chrome not installed — fall back to plain Chromium.
+			slog.Warn("fetch/camoufox: Chrome channel not found, falling back to Chromium", "err", chromeErr)
+			chromeLaunchOpts.Channel = nil
+			browser, chromeErr = pw.Chromium.Launch(chromeLaunchOpts)
+			if chromeErr != nil {
+				_ = pw.Stop()
+				return nil, fmt.Errorf("fetch/camoufox: Chromium launch failed: %w", chromeErr)
+			}
+		}
+		f.pw = pw
+		f.browser = browser
+		slog.Info("fetch/camoufox: Chrome/Chromium browser ready",
+			"headless", f.headless,
+			"timeout", f.timeout,
+		)
+		return f, nil
+	}
+
+	// Mode 3: Firefox/Camoufox with persistent profile directory.
+	if f.userDataDir != "" {
+		persistOpts := playwright.BrowserTypeLaunchPersistentContextOptions{
+			Headless: playwright.Bool(f.headless != "false"),
+		}
+		if execPath != "" {
+			persistOpts.ExecutablePath = playwright.String(execPath)
+		}
+		if f.proxyURL != "" {
+			persistOpts.Proxy = parsePlaywrightProxy(f.proxyURL)
+		}
+		bctx, persistErr := pw.Firefox.LaunchPersistentContext(f.userDataDir, persistOpts)
+		if persistErr != nil {
+			slog.Warn("fetch/camoufox: LaunchPersistentContext failed, falling back to regular launch",
+				"err", persistErr)
+			// Fall through to Mode 4 (normal Firefox launch).
+		} else {
+			f.pw = pw
+			f.persistCtx = bctx
+			f.browser = bctx.Browser()
+			slog.Info("fetch/camoufox: Firefox/Camoufox with persistent context ready",
+				"dir", f.userDataDir)
+			return f, nil
+		}
+	}
+
+	// Mode 4: standard Firefox/Camoufox launch (default path).
 	browser, err := pw.Firefox.Launch(launchOpts)
 	if err != nil {
 		// If Camoufox binary failed, try plain Firefox as last resort.
@@ -441,11 +585,22 @@ func (f *CamoufoxFetcher) Fetch(ctx context.Context, job *foxhound.Job) (*foxhou
 }
 
 // getOrCreateContext returns the BrowserContext to use for this request.
-// When persistSession=false a new isolated context is created (caller must
-// close it). When persistSession=true the shared sessionCtx is initialised
-// on first call and reused; the caller must NOT close it.
+//
+// Priority order:
+//  1. persistCtx — set when LaunchPersistentContext succeeded (userDataDir).
+//     The persistent context IS the only context; never closed by callers.
+//  2. persistSession=true — a single BrowserContext shared across requests.
+//     Initialised on first call, never closed by callers.
+//  3. Default — a fresh isolated BrowserContext per request; caller must close.
+//
 // Returns (ctx, shouldClose, err).
 func (f *CamoufoxFetcher) getOrCreateContext() (playwright.BrowserContext, bool, error) {
+
+	// When a persistent context was obtained from LaunchPersistentContext,
+	// use it directly — it already embeds the profile directory state.
+	if f.persistCtx != nil {
+		return f.persistCtx, false, nil // caller must NOT close
+	}
 
 	if !f.persistSession {
 		bctx, err := f.browser.NewContext(f.buildContextOptions())
@@ -576,6 +731,113 @@ func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobSte
 				slog.Debug("fetch/camoufox: scroll step failed", "err", err)
 			}
 			time.Sleep(a.Pause)
+		}
+
+	case foxhound.JobStepInfiniteScroll:
+		maxScrolls := step.MaxScrolls
+		if maxScrolls <= 0 {
+			maxScrolls = 50
+		}
+		slog.Info("fetch/camoufox: infinite scroll started", "max", maxScrolls)
+
+		scroller := behavior.NewScroll(behavior.DefaultScrollConfig())
+		for i := 0; i < maxScrolls; i++ {
+			// Get current scroll height.
+			prevHeight, _ := page.Evaluate("() => document.body.scrollHeight")
+			prevH, _ := prevHeight.(float64)
+
+			// Scroll to bottom with human-like gesture.
+			dist, pause, _ := scroller.ScrollGesture(behavior.ScrollScan)
+			_ = page.Mouse().Wheel(0, float64(dist))
+			time.Sleep(pause)
+
+			// Also execute window.scrollTo for pages that need it.
+			page.Evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+			// Wait for new content to load.
+			time.Sleep(time.Duration(1500+rand.IntN(1500)) * time.Millisecond)
+
+			// Check if new content appeared.
+			newHeight, _ := page.Evaluate("() => document.body.scrollHeight")
+			newH, _ := newHeight.(float64)
+
+			if newH <= prevH {
+				slog.Info("fetch/camoufox: infinite scroll complete — no new content",
+					"iterations", i+1)
+				break
+			}
+		}
+
+	case foxhound.JobStepLoadMore:
+		maxClicks := step.MaxClicks
+		if maxClicks <= 0 {
+			maxClicks = 20
+		}
+		sel := step.Selector
+		if sel == "" {
+			// Common "load more" / "show more" selectors.
+			sel = "button:has-text('Load more'), button:has-text('Show more'), " +
+				"button:has-text('Muat lagi'), a:has-text('Load more'), " +
+				"[class*='load-more'], [class*='show-more'], [class*='loadMore']"
+		}
+		slog.Info("fetch/camoufox: load more started", "selector", sel, "max", maxClicks)
+
+		for i := 0; i < maxClicks; i++ {
+			el, err := page.QuerySelector(sel)
+			if err != nil || el == nil {
+				slog.Info("fetch/camoufox: load more button gone", "clicks", i)
+				break
+			}
+			visible, _ := el.IsVisible()
+			if !visible {
+				slog.Info("fetch/camoufox: load more button hidden", "clicks", i)
+				break
+			}
+			// Human-like pause before click.
+			time.Sleep(time.Duration(500+rand.IntN(1000)) * time.Millisecond)
+			if err := el.Click(); err != nil {
+				slog.Debug("fetch/camoufox: load more click failed", "err", err)
+				break
+			}
+			// Wait for new content to load.
+			time.Sleep(time.Duration(1500+rand.IntN(2000)) * time.Millisecond)
+		}
+
+	case foxhound.JobStepPaginate:
+		maxPages := step.MaxPages
+		if maxPages <= 0 {
+			maxPages = 10
+		}
+		sel := step.Selector
+		if sel == "" {
+			// Common pagination "next" selectors.
+			sel = "a[rel='next'], a:has-text('Next'), a:has-text('Selanjutnya'), " +
+				"li.next a, a.next, [aria-label='Next'], [aria-label='Next page'], " +
+				"a:has-text('›'), a:has-text('»')"
+		}
+		slog.Info("fetch/camoufox: pagination started", "selector", sel, "max", maxPages)
+
+		for i := 0; i < maxPages; i++ {
+			el, err := page.QuerySelector(sel)
+			if err != nil || el == nil {
+				slog.Info("fetch/camoufox: no more pagination links", "pages", i)
+				break
+			}
+			visible, _ := el.IsVisible()
+			if !visible {
+				slog.Info("fetch/camoufox: pagination link hidden", "pages", i)
+				break
+			}
+			// Human-like pause before navigating.
+			time.Sleep(time.Duration(1000+rand.IntN(2000)) * time.Millisecond)
+			if err := el.Click(); err != nil {
+				slog.Debug("fetch/camoufox: pagination click failed", "err", err)
+				break
+			}
+			// Wait for next page to load.
+			page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+				State: playwright.LoadStateNetworkidle,
+			})
+			time.Sleep(time.Duration(1000+rand.IntN(1500)) * time.Millisecond)
 		}
 
 	case foxhound.JobStepExtract:
@@ -1322,6 +1584,20 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 		}
 	}()
 
+	// Inject init script before any page JS executes. This runs on every
+	// page navigation, making it the right place for navigator overrides or
+	// global stubs that must survive across client-side route changes.
+	if f.initScript != "" {
+		if scriptErr := page.AddInitScript(playwright.Script{
+			Content: playwright.String(f.initScript),
+		}); scriptErr != nil {
+			slog.Warn("fetch/camoufox: AddInitScript failed (non-fatal)",
+				"url", job.URL,
+				"err", scriptErr,
+			)
+		}
+	}
+
 	// Block binary resources to reduce bandwidth for content-only scraping.
 	if f.blockImages {
 		for _, pattern := range resourceBlockPatterns {
@@ -1619,8 +1895,9 @@ func (f *CamoufoxFetcher) restart() error {
 
 // Close gracefully shuts down the browser and stops the playwright runtime.
 // Resources are released in order: persistent session context (if any),
-// browser, then the playwright process. Errors from each step are logged but
-// do not prevent the subsequent steps from running.
+// LaunchPersistentContext context (if any), browser, then the playwright
+// process. Errors from each step are logged but do not prevent the subsequent
+// steps from running.
 func (f *CamoufoxFetcher) Close() error {
 	var firstErr error
 
@@ -1640,6 +1917,22 @@ func (f *CamoufoxFetcher) Close() error {
 		f.sessionCtx = nil
 	}
 	f.sessionMu.Unlock()
+
+	// Close the LaunchPersistentContext context (userDataDir mode).
+	// This also implicitly closes the underlying browser process.
+	if f.persistCtx != nil {
+		if closeErr := f.persistCtx.Close(); closeErr != nil {
+			if !strings.Contains(closeErr.Error(), "Target closed") &&
+				!strings.Contains(closeErr.Error(), "Browser has been closed") {
+				slog.Warn("fetch/camoufox: error closing persistent profile context", "err", closeErr)
+				if firstErr == nil {
+					firstErr = fmt.Errorf("fetch/camoufox: closing persistent profile context: %w", closeErr)
+				}
+			}
+		}
+		f.persistCtx = nil
+		f.browser = nil // browser was bound to the persistent context
+	}
 
 	if f.browser != nil {
 		if err := f.browser.Close(); err != nil {

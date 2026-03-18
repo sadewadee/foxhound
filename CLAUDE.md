@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Foxhound is a Go scraping framework with native Camoufox (Firefox fork) anti-detection. It uses dual-mode fetching: a TLS-impersonating HTTP client for static pages and Camoufox via playwright-go for JS-heavy/protected pages, with automatic escalation when blocks are detected.
 
-**Status**: Phases 1-4 implemented. 19 packages, 408 tests, 18,010 lines of Go.
+**Status**: Phases 1-5 implemented. 19 packages, 991 tests. Phase 5 added: resource-type blocking, network interception, domain blocking, Response.FollowURL, selector wait states, spider block detection/retry, ItemList/CrawlResult/CrawlStats export, Element.FindSimilar, SQLite adaptive storage, page pool stats, fingerprint-customizable dedup, Stats.ToMap.
 
 ## Build & Test
 

@@ -112,6 +112,10 @@ type CamoufoxFetcher struct {
 	extensionPath  string // path to Firefox extension dir (e.g. NopeCHA)
 	maxRequests    int    // restart browser after this many requests (0 = disabled)
 	persistSession bool   // reuse BrowserContext across requests when true
+	initScript     string // JS injected into every new page via AddInitScript
+	userDataDir    string // persistent profile dir; triggers LaunchPersistentContext
+	cdpURL         string // connect to an existing browser via CDP instead of launching
+	useRealChrome  bool   // use pw.Chromium with channel=chrome instead of Firefox
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -128,6 +132,48 @@ func WithBrowserProxy(proxyURL string) CamoufoxOption {
 func WithExtensionPath(path string) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.extensionPath = path
+	}
+}
+
+// WithInitScript sets a JavaScript snippet that is injected into every new
+// page before the page's own scripts execute. This is useful for overriding
+// navigator properties (e.g. navigator.webdriver) or installing global hooks.
+// In the stub build this stores the value but has no effect.
+func WithInitScript(script string) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.initScript = script
+	}
+}
+
+// WithUserDataDir sets a persistent profile directory. When non-empty the real
+// build uses LaunchPersistentContext so cookies, localStorage, and cached
+// resources survive across browser restarts. In the stub build this stores the
+// value but has no effect.
+func WithUserDataDir(dir string) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.userDataDir = dir
+	}
+}
+
+// WithCDPURL sets a Chrome DevTools Protocol endpoint URL (e.g.
+// "http://localhost:9222"). When non-empty the real build connects to that
+// existing browser instance via pw.Chromium.ConnectOverCDP instead of
+// launching a new browser process. In the stub build this stores the value but
+// has no effect.
+func WithCDPURL(url string) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.cdpURL = url
+	}
+}
+
+// WithRealChrome switches the real build from Firefox/Camoufox to
+// pw.Chromium.Launch with channel="chrome". Use this when you need Chrome's
+// rendering behaviour or have a Chrome installation but not Camoufox. Falls
+// back to Chromium if the Chrome channel is not installed. In the stub build
+// this stores the value but has no effect.
+func WithRealChrome(use bool) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.useRealChrome = use
 	}
 }
 
