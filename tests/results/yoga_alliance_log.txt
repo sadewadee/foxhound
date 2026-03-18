@@ -1,0 +1,29 @@
+time=2026-03-18T08:54:35.184+08:00 level=INFO msg="identity generated" ua="Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0; rv:148.0) Gecko/20100101 Firefox/148.0" locale=en-US
+time=2026-03-18T08:54:35.184+08:00 level=INFO msg="strategy 1: static fetch of SPA page" url="https://app.yogaalliance.org/directoryregistrants?type=School"
+time=2026-03-18T08:54:36.187+08:00 level=INFO msg="fetch complete" url="https://app.yogaalliance.org/directoryregistrants?type=School" status=200 bytes=85883 duration_ms=1002 strategy=spa-static
+time=2026-03-18T08:54:36.187+08:00 level=WARN msg="no schools from SPA page — site is likely client-side-only rendered"
+time=2026-03-18T08:54:36.187+08:00 level=INFO msg="SPA parse complete" schools_found=0
+time=2026-03-18T08:54:38.188+08:00 level=INFO msg="strategy 2: internal API endpoint" url="https://app.yogaalliance.org/api/directory/registrants?type=School&page=1&per_page=10"
+time=2026-03-18T08:54:38.840+08:00 level=INFO msg="fetch complete" url="https://app.yogaalliance.org/api/directory/registrants?type=School&page=1&per_page=10" status=404 bytes=85868 duration_ms=652 strategy=api
+time=2026-03-18T08:54:38.840+08:00 level=WARN msg="non-200 — counted as block" status=404 url="https://app.yogaalliance.org/api/directory/registrants?type=School&page=1&per_page=10"
+time=2026-03-18T08:54:38.840+08:00 level=WARN msg="API fetch blocked/failed"
+time=2026-03-18T08:54:40.341+08:00 level=INFO msg="strategy 3: static directory page" url=https://www.yogaalliance.org/Find_a_School
+time=2026-03-18T08:54:42.932+08:00 level=INFO msg="fetch complete" url=https://www.yogaalliance.org/Find_a_School status=404 bytes=150408 duration_ms=2590 strategy=alt-static
+time=2026-03-18T08:54:42.932+08:00 level=WARN msg="non-200 — counted as block" status=404 url=https://www.yogaalliance.org/Find_a_School
+time=2026-03-18T08:54:42.932+08:00 level=WARN msg="alt static fetch blocked/failed"
+time=2026-03-18T08:54:44.435+08:00 level=INFO msg="results written" path=tests/results/yoga_alliance.json
+time=2026-03-18T08:54:44.435+08:00 level=INFO msg="results written" path=tests/results/yoga_alliance_benchmark.json
+═══════════════════════════════════════════
+BENCHMARK: Yoga Alliance: school directory
+═══════════════════════════════════════════
+Target:          https://app.yogaalliance.org/directoryregistrants?type=School
+Total Requests:  3
+Successful:      1 (33.3%)
+Blocked/Error:   2 (66.7%)
+Items Scraped:   0
+Total Duration:  9.249s
+Avg Latency:     3.083s/request
+Throughput:      0.00 items/sec
+Bytes Received:  322159
+Block Avoidance: 33.3%
+═══════════════════════════════════════════

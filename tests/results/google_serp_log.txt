@@ -1,0 +1,20 @@
+time=2026-03-18T08:53:50.903+08:00 level=INFO msg="identity generated" ua="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0" locale=id-ID
+time=2026-03-18T08:53:50.903+08:00 level=INFO msg=fetching url="https://www.google.com/search?q=wisata+alam+jawa+timur&hl=id&gl=id&num=20"
+time=2026-03-18T08:53:51.135+08:00 level=INFO msg="response received" status=200 bytes=89131 duration_ms=231
+time=2026-03-18T08:53:51.136+08:00 level=WARN msg="no organic results parsed — possible block or layout change" body_snippet="<!DOCTYPE html><html lang=\"id\"><head><title>Google Search</title><style>body{background-color:var(--xhUGwc)}</style><script nonce=\"RXSGgTaDKqaNkH1AsX2tFw\">window.google = window.google || {};window.google.c = window.google.c || {cap:0};</script></head><body><noscript><style>table,div,span,p{display:none}</style><meta content=\"0;url=/httpservice/retry/enablejs?sei=n_e5ad-qBba5seMPlL-LSQ\" http-equiv=\"refresh\"><div style=\"display:block\">Klik <a href=\"/httpservice/retry/enablejs?sei=n_e5ad-qBba5seMPlL-LSQ\">di sini</a> jika Anda tak dialihkan dalam beberapa detik.</div></noscript><script nonce=\"RXSGgTaDKqaNkH1AsX2tFw\">(function(){var sctm=false;(function(){sctm&&google.tick(\"load\",\"pbsst\");}).call(this);})();</script><script nonce=\"RXSGgTaDKqaNkH1AsX2tFw\">//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJ2ZXJzaW9uIjogMywic291cmNlcyI6WyIiXSwic291cmNlc0NvbnRlbnQiOlsiICJdLCJuYW1lcyI6WyJjbG9zdXJlRHluYW1pY0J1dHRvbiJdLCJtYXBwaW5ncyI6IkFBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEifQ==\n(function(){var f="
+time=2026-03-18T08:53:52.637+08:00 level=INFO msg="results written" path=tests/results/google_serp.json
+time=2026-03-18T08:53:52.638+08:00 level=INFO msg="results written" path=tests/results/google_serp_benchmark.json
+═══════════════════════════════════════════
+BENCHMARK: Google SERP: wisata alam jawa timur
+═══════════════════════════════════════════
+Target:          https://www.google.com/search?q=wisata+alam+jawa+timur&hl=id&gl=id&num=20
+Total Requests:  1
+Successful:      1 (100.0%)
+Blocked/Error:   0 (0.0%)
+Items Scraped:   0
+Total Duration:  1.733s
+Avg Latency:     1.733s/request
+Throughput:      0.00 items/sec
+Bytes Received:  89131
+Block Avoidance: 100.0%
+═══════════════════════════════════════════
