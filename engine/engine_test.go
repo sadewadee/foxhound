@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/engine"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/engine"
 )
 
 // ---------------------------------------------------------------------------

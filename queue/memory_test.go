@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/queue"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/queue"
 )
 
 func newJob(id string, priority foxhound.Priority) *foxhound.Job {

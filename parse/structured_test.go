@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/parse"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/parse"
 )
 
 const productListHTML = `<!DOCTYPE html>

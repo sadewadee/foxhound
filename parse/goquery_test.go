@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/parse"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/parse"
 )
 
 func newHTMLResponse(body string) *foxhound.Response {

@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/pipeline/export"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/pipeline/export"
 )
 
 // captureServer records all request bodies sent to it.

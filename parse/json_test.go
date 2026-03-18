@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/parse"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/parse"
 )
 
 func newJSONResponse(body string) *foxhound.Response {

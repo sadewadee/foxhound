@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/fetch"
-	"github.com/foxhound-scraper/foxhound/identity"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/fetch"
+	"github.com/sadewadee/foxhound/identity"
 )
 
 // skipIfPlaywrightUnavailable skips the calling test when playwright or

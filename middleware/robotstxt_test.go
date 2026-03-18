@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/middleware"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/middleware"
 )
 
 // ---------------------------------------------------------------------------

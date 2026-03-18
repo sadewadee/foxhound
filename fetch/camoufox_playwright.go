@@ -35,8 +35,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/identity"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/identity"
 	"github.com/playwright-community/playwright-go"
 )
 

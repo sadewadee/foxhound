@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/foxhound-scraper/foxhound/cache"
+	"github.com/sadewadee/foxhound/cache"
 	"github.com/redis/go-redis/v9"
 )
 

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/pipeline/export"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/pipeline/export"
 )
 
 // postgresConnString returns a test DSN, or skips the test if none is set.

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/pipeline/export"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/pipeline/export"
 )
 
 func TestCSVWriter_ExplicitHeaders(t *testing.T) {

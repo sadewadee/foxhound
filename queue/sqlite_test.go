@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/queue"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/queue"
 )
 
 // newSQLiteQueue creates a SQLiteQueue backed by a temp file.

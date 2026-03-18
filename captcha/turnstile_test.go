@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/foxhound-scraper/foxhound/captcha"
+	"github.com/sadewadee/foxhound/captcha"
 )
 
 // mockSolver is a controllable Solver for testing TurnstileHandler.

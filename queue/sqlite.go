@@ -10,7 +10,7 @@ import (
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver; registers the "sqlite" driver name
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // SQLiteQueue implements foxhound.Queue using SQLite for durability.

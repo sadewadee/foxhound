@@ -30,14 +30,14 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/engine"
-	"github.com/foxhound-scraper/foxhound/fetch"
-	"github.com/foxhound-scraper/foxhound/identity"
-	"github.com/foxhound-scraper/foxhound/parse"
-	"github.com/foxhound-scraper/foxhound/pipeline"
-	"github.com/foxhound-scraper/foxhound/pipeline/export"
-	"github.com/foxhound-scraper/foxhound/queue"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/engine"
+	"github.com/sadewadee/foxhound/fetch"
+	"github.com/sadewadee/foxhound/identity"
+	"github.com/sadewadee/foxhound/parse"
+	"github.com/sadewadee/foxhound/pipeline"
+	"github.com/sadewadee/foxhound/pipeline/export"
+	"github.com/sadewadee/foxhound/queue"
 )
 
 const outputFile = "hotels.jsonl"

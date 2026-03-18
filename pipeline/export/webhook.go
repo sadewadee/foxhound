@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // WebhookWriter sends items as JSON POST requests to a webhook URL.

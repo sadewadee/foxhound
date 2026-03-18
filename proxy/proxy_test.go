@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/foxhound-scraper/foxhound/proxy"
+	"github.com/sadewadee/foxhound/proxy"
 )
 
 // --- proxy.Parse tests ---

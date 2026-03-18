@@ -9,7 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // RedisQueue implements foxhound.Queue using a Redis sorted set.

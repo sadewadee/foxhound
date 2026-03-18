@@ -26,8 +26,8 @@ import (
 	"log/slog"
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/identity"
+	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/identity"
 )
 
 // errPlaywrightNotConfigured is returned by the stub Fetch implementation.

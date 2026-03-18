@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/foxhound-scraper/foxhound/identity"
+	"github.com/sadewadee/foxhound/identity"
 )
 
 // ---------------------------------------------------------------------------

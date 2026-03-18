@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/foxhound-scraper/foxhound/monitor"
+	"github.com/sadewadee/foxhound/monitor"
 )
 
 // alertCapture records all alert payloads received.

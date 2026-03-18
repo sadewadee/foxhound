@@ -3,7 +3,7 @@ package engine
 import (
 	"time"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // StepAction identifies what a Trail Step should do.

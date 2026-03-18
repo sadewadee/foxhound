@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"os"
 
-	foxhound "github.com/foxhound-scraper/foxhound"
+	foxhound "github.com/sadewadee/foxhound"
 )
 
 // JSONFormat selects the output format for JSONWriter.
