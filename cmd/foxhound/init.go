@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // cmdInit scaffolds a new Foxhound project at the given name/path.
@@ -132,7 +135,7 @@ func main() {
 	<-ctx.Done()
 	slog.Info("foxhound stopped")
 }
-`, strings.Title(strings.ReplaceAll(name, "-", " "))) //nolint:staticcheck
+`, cases.Title(language.English).String(strings.ReplaceAll(name, "-", " ")))
 }
 
 func configYAMLTemplate(name string) string {

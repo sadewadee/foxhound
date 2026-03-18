@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -24,10 +25,21 @@ func NewHealthChecker(checkURL string, timeout time.Duration) *HealthChecker {
 
 // Check probes a single proxy and returns its updated health.
 // The ProxyHealth.Score is set to 1.0 for alive proxies and 0.0 for dead ones.
+//
+// The request is routed through the proxy under test so that the latency and
+// reachability measurement reflects actual proxy connectivity.
 func (hc *HealthChecker) Check(ctx context.Context, p *Proxy) ProxyHealth {
 	start := time.Now()
 
-	transport := &http.Transport{}
+	proxyURL, err := url.Parse(p.URL)
+	if err != nil {
+		slog.Warn("proxy: health check cannot parse proxy URL", "proxy", p.URL, "err", err)
+		return ProxyHealth{Alive: false, Score: 0}
+	}
+
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(proxyURL),
+	}
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   hc.timeout,

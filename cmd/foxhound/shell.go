@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -194,5 +193,4 @@ func shellParse(client *http.Client, rawURL, selector string) {
 			fmt.Printf("  [%d] %s\n", i+1, t)
 		}
 	}
-	_ = context.Background() // imported for future use
 }

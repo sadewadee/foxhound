@@ -30,10 +30,15 @@ func NewCookies() foxhound.Middleware {
 // and stores Set-Cookie headers from each response.
 func (c *cookiesMiddleware) Wrap(next foxhound.Fetcher) foxhound.Fetcher {
 	return foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
-		// Ensure job headers are initialised.
-		if job.Headers == nil {
-			job.Headers = make(http.Header)
+		// Clone the job so we never mutate the caller's struct. This is
+		// important when retry middleware re-uses the same Job pointer across
+		// multiple attempts: mutating shared headers causes a data race.
+		clonedJob := *job
+		clonedJob.Headers = job.Headers.Clone()
+		if clonedJob.Headers == nil {
+			clonedJob.Headers = make(http.Header)
 		}
+		job = &clonedJob
 
 		u, err := url.Parse(job.URL)
 		if err != nil {

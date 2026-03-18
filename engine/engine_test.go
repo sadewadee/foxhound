@@ -889,3 +889,71 @@ func (w *flushCountWriter) Flush(_ context.Context) error {
 	return nil
 }
 func (w *flushCountWriter) Close() error { return nil }
+
+// ---------------------------------------------------------------------------
+// H1: drainQueue premature-cancellation regression test
+// ---------------------------------------------------------------------------
+
+// delayedDiscoveryProcessor simulates a processor that takes non-trivial time
+// before it enqueues a discovered job.  On call 1 it sleeps briefly then
+// returns a new job; on subsequent calls it returns nothing.
+type delayedDiscoveryProcessor struct {
+	calls    atomic.Int64
+	delay    time.Duration
+	newJobFn func() *foxhound.Job
+}
+
+func (p *delayedDiscoveryProcessor) Process(
+	ctx context.Context, _ *foxhound.Response,
+) (*foxhound.Result, error) {
+	n := p.calls.Add(1)
+	if n == 1 {
+		select {
+		case <-time.After(p.delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return &foxhound.Result{Jobs: []*foxhound.Job{p.newJobFn()}}, nil
+	}
+	return &foxhound.Result{}, nil
+}
+
+// TestHunt_DrainQueue_WaitsForInFlightWalkers verifies that the hunt does not
+// terminate prematurely when a walker has popped the last job from the queue
+// but hasn't yet enqueued discovered jobs.  Without the activeWalkers fix the
+// hunt would cancel the context while the walker is mid-flight, missing the
+// discovered job and yielding fetcher.CallCount==1 instead of 2.
+func TestHunt_DrainQueue_WaitsForInFlightWalkers(t *testing.T) {
+	q := newMemQueue(32)
+
+	fetcher := &stubFetcher{resp: &foxhound.Response{StatusCode: 200}}
+
+	// Processor takes 30 ms to return a discovered job; this is longer than
+	// the 10 ms drainPollInterval so without the fix the queue appears empty
+	// before the new job is pushed.
+	proc := &delayedDiscoveryProcessor{
+		delay:    30 * time.Millisecond,
+		newJobFn: func() *foxhound.Job { return seedJob("https://example.com/discovered") },
+	}
+
+	h := engine.NewHunt(engine.HuntConfig{
+		Name:      "drain-inflight-test",
+		Walkers:   1,
+		Seeds:     []*foxhound.Job{seedJob("https://example.com/seed")},
+		Queue:     q,
+		Fetcher:   fetcher,
+		Processor: proc,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := h.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Both the seed URL and the discovered URL must have been fetched.
+	if got := fetcher.CallCount(); got != 2 {
+		t.Errorf("fetcher calls: want 2 (seed + discovered), got %d — hunt cancelled too early", got)
+	}
+}

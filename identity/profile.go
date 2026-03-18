@@ -8,6 +8,7 @@ package identity
 import (
 	"fmt"
 	"math/rand/v2"
+	"strings"
 )
 
 // Browser represents a supported browser type.
@@ -76,14 +77,16 @@ type Profile struct {
 type Option func(*generateConfig)
 
 type generateConfig struct {
-	browser Browser
-	os      OS
-	proxyIP string
-	lat     float64
-	lng     float64
-	tz      string
-	locale  string
-	langs   []string
+	browser     Browser
+	os          OS
+	proxyIP     string
+	country     string
+	lat         float64
+	lng         float64
+	tz          string
+	locale      string
+	langs       []string
+	geoResolver GeoResolver
 }
 
 // WithBrowser constrains identity generation to a specific browser.
@@ -119,6 +122,25 @@ func WithGeo(lat, lng float64) Option {
 func WithTimezone(tz string) Option {
 	return func(c *generateConfig) {
 		c.tz = tz
+	}
+}
+
+// WithCountry constrains the identity to a specific country by looking up the
+// built-in geo table (or the configured GeoResolver).  It is a convenience
+// alternative to WithProxy when the caller knows the country directly.
+// If the country code is unknown the option is silently ignored.
+func WithCountry(code string) Option {
+	return func(c *generateConfig) {
+		c.country = strings.ToUpper(code)
+	}
+}
+
+// WithGeoResolver plugs in a custom GeoResolver so callers can use a real
+// MaxMind database or any external geo service instead of the built-in table.
+// The resolver is called during Generate when WithProxy or WithCountry is set.
+func WithGeoResolver(r GeoResolver) Option {
+	return func(c *generateConfig) {
+		c.geoResolver = r
 	}
 }
 
@@ -181,6 +203,9 @@ func Generate(opts ...Option) *Profile {
 
 	// Set header order for this browser
 	p.HeaderOrder = headerOrderForBrowser(cfg.browser)
+
+	// Resolve geo from proxy IP or country code when not explicitly overridden.
+	applyGeoToConfig(cfg)
 
 	// Set locale/geo from proxy or defaults
 	if cfg.locale != "" {

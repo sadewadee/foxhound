@@ -1,9 +1,18 @@
+//go:build !tls
+
 // Package fetch provides the dual-mode fetching layer for Foxhound.
 //
 // Three fetchers are provided:
 //   - StealthFetcher: TLS-impersonating HTTP client (Phase 1 foundation).
 //   - CamoufoxFetcher: stub for the future playwright-go/Camoufox browser backend.
 //   - SmartFetcher: auto-router that starts static and escalates to browser on blocks.
+//
+// This file is the fallback implementation using Go's standard net/http transport.
+// It provides correct header ordering from the identity profile but does NOT perform
+// real JA3/JA4 TLS fingerprint impersonation.
+//
+// For real TLS impersonation, build with: go build -tags tls ./...
+// That selects fetch/stealth_tls.go which uses github.com/Noooste/azuretls-client.
 package fetch
 
 import (

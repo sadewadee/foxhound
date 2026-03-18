@@ -514,3 +514,130 @@ func TestDeltaFetchMemoryStoreMarkAndSeen(t *testing.T) {
 		t.Fatal("expected non-zero timestamp after Mark")
 	}
 }
+
+// --- Cookies clone / race-safety tests (M6) ---
+
+// TestCookiesDoesNotMutateOriginalJobHeaders verifies that the cookies
+// middleware clones the job before adding headers, leaving the caller's
+// original Job.Headers unchanged.
+func TestCookiesDoesNotMutateOriginalJobHeaders(t *testing.T) {
+	inner := foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
+		resp := &foxhound.Response{
+			StatusCode: 200,
+			Job:        job,
+			URL:        job.URL,
+			Headers:    http.Header{},
+		}
+		// Set a cookie so the jar is populated for the second request.
+		resp.Headers.Set("Set-Cookie", "tok=xyz; Path=/")
+		return resp, nil
+	})
+
+	cj := middleware.NewCookies()
+	fetcher := cj.Wrap(inner)
+
+	// First request: seeds the cookie jar.
+	job1 := &foxhound.Job{URL: "https://clone-test.com/a", Domain: "clone-test.com", Headers: make(http.Header)}
+	_, _ = fetcher.Fetch(context.Background(), job1)
+
+	// Second request: the middleware will inject the stored cookie.
+	// We snapshot the original headers map pointer before the call.
+	originalHeaders := job1.Headers
+	job2 := &foxhound.Job{URL: "https://clone-test.com/b", Domain: "clone-test.com", Headers: make(http.Header)}
+	_, _ = fetcher.Fetch(context.Background(), job2)
+
+	// The original job2 headers must not have been modified.
+	if job2.Headers.Get("Cookie") != "" {
+		t.Error("cookies middleware must not mutate the original job.Headers")
+	}
+	// Sanity: the snapshot for job1 is also untouched.
+	if originalHeaders.Get("Cookie") != "" {
+		t.Error("original job1 headers must not have been mutated")
+	}
+}
+
+// TestCookiesNoRaceOnConcurrentRetry verifies there is no data race when
+// the same Job is dispatched concurrently (simulating retry behaviour).
+// Run with: go test -race ./middleware/...
+func TestCookiesNoRaceOnConcurrentRetry(t *testing.T) {
+	inner := foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
+		// Read and write the headers map that was passed in; with cloning this
+		// should always be a fresh copy, so no race is possible.
+		_ = job.Headers.Get("Cookie")
+		return okResponse(job), nil
+	})
+
+	cj := middleware.NewCookies()
+	fetcher := cj.Wrap(inner)
+
+	sharedJob := &foxhound.Job{
+		URL:     "https://race-test.com/",
+		Domain:  "race-test.com",
+		Headers: make(http.Header),
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = fetcher.Fetch(context.Background(), sharedJob)
+		}()
+	}
+	wg.Wait()
+}
+
+// --- Referer clone / race-safety tests (M7) ---
+
+// TestRefererDoesNotMutateOriginalJobHeaders verifies that the referer
+// middleware clones the job before setting the Referer header, leaving the
+// caller's original Job.Headers unchanged.
+func TestRefererDoesNotMutateOriginalJobHeaders(t *testing.T) {
+	inner := foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
+		return okResponse(job), nil
+	})
+
+	ref := middleware.NewReferer()
+	fetcher := ref.Wrap(inner)
+
+	originalHeaders := make(http.Header)
+	job := &foxhound.Job{
+		URL:     "https://referer-clone.com/page",
+		Domain:  "referer-clone.com",
+		Headers: originalHeaders,
+	}
+	_, _ = fetcher.Fetch(context.Background(), job)
+
+	// The original headers map must not have been written to.
+	if originalHeaders.Get("Referer") != "" {
+		t.Error("referer middleware must not mutate the original job.Headers")
+	}
+}
+
+// TestRefererNoRaceOnConcurrentRetry verifies there is no data race when
+// the same Job pointer is dispatched concurrently.
+func TestRefererNoRaceOnConcurrentRetry(t *testing.T) {
+	inner := foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
+		_ = job.Headers.Get("Referer")
+		return okResponse(job), nil
+	})
+
+	ref := middleware.NewReferer()
+	fetcher := ref.Wrap(inner)
+
+	sharedJob := &foxhound.Job{
+		URL:     "https://referer-race.com/",
+		Domain:  "referer-race.com",
+		Headers: make(http.Header),
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = fetcher.Fetch(context.Background(), sharedJob)
+		}()
+	}
+	wg.Wait()
+}

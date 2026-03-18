@@ -1,37 +1,30 @@
-package fetch
+//go:build !playwright
 
-// camoufox.go — Camoufox browser fetcher (Phase 1 stub).
+// camoufox.go — Camoufox browser fetcher stub (default build, no playwright).
 //
-// This file contains the correct types and interface for the Camoufox browser
-// fetcher. The real implementation requires playwright-go and a Camoufox
-// (Firefox fork) binary, neither of which is wired up in Phase 1.
+// This file is compiled when the "playwright" build tag is NOT present.
+// It provides the correct public types, option functions, and a CamoufoxFetcher
+// whose Fetch method returns a clear, actionable error so callers know exactly
+// what is missing.
 //
-// Real implementation plan (Phase 2):
-//   1. Import "github.com/playwright-community/playwright-go".
-//   2. In NewCamoufox, call playwright.Run() to install/launch Camoufox via:
-//        pw, err := playwright.Run()
-//        browser, err := pw.Firefox.Launch(playwright.BrowserTypeLaunchOptions{
-//            ExecutablePath: camoufoxBinaryPath(),
-//            Headless:       playwright.Bool(headless == "true"),
-//            Args: []string{"--juggler=9222"},  // Juggler, NOT CDP
-//        })
-//   3. For each Fetch call, create a BrowserContext using CAMOU_CONFIG env vars
-//      from identity.Profile.CamoufoxEnv (screen, locale, timezone, GPU etc.),
-//      then open a Page, navigate, wait for networkidle, extract content.
-//   4. Block images/media via route interception when blockImages=true.
-//   5. Use a context pool to avoid re-launching for every request.
-//   6. In Close, call browser.Close() then pw.Stop().
+// To use the real playwright-go implementation, compile with:
+//
+//	go build -tags playwright ./...
+//	go test  -tags playwright ./fetch/...
 //
 // Why Camoufox over Chromium:
 //   - Juggler protocol is far less targeted by anti-bot systems than CDP.
-//   - Firefox source is open for C++ patching (CAMOU_CONFIG env vars control
-//     screen, locale, hardware, GPU — all sent in navigator APIs).
+//   - Firefox source is open for C++ patching; CAMOU_CONFIG env vars control
+//     screen, locale, hardware, and GPU — all surfaced through navigator APIs.
 //   - Reference: https://camoufox.com
+
+package fetch
 
 import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	foxhound "github.com/foxhound-scraper/foxhound"
 	"github.com/foxhound-scraper/foxhound/identity"
@@ -39,8 +32,8 @@ import (
 
 // errPlaywrightNotConfigured is returned by the stub Fetch implementation.
 var errPlaywrightNotConfigured = errors.New(
-	"camoufox: playwright-go not configured, install with: " +
-		"go run github.com/playwright-community/playwright-go/cmd/playwright install firefox",
+	"camoufox: playwright-go not configured — rebuild with: go build -tags playwright ./...\n" +
+		"  Then install the browser: go run github.com/playwright-community/playwright-go/cmd/playwright install firefox",
 )
 
 // CamoufoxOption is a functional option for configuring a CamoufoxFetcher.
@@ -55,51 +48,63 @@ func WithBrowserIdentity(p *identity.Profile) CamoufoxOption {
 }
 
 // WithBlockImages controls whether the browser route handler intercepts and
-// aborts image/media requests. Reduces bandwidth and speeds up navigation for
-// content-only scraping.
+// aborts image/media/font requests. Reduces bandwidth and speeds up navigation
+// for content-only scraping.
 func WithBlockImages(block bool) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.blockImages = block
 	}
 }
 
-// WithHeadless sets the headless mode for the Camoufox browser.
-//   - "virtual":  use Xvfb virtual display (recommended for servers without GPU)
+// WithHeadless sets the display mode for the Camoufox browser:
+//   - "virtual":  Xvfb virtual display (recommended on servers without a GPU)
 //   - "true":     native headless mode
-//   - "false":    full visible browser (useful for debugging)
+//   - "false":    full visible browser (useful for local debugging)
 func WithHeadless(mode string) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.headless = mode
 	}
 }
 
+// WithBrowserTimeout overrides the default per-navigation timeout.
+func WithBrowserTimeout(d time.Duration) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.timeout = d
+	}
+}
+
+// WithMaxBrowserRequests configures the browser instance to be restarted
+// after serving n requests. This clears accumulated state (cookies, cache,
+// memory leaks) and rotates the browser fingerprint.
+//
+// Set n=0 to disable automatic restarts (not recommended for long-running
+// hunts). The default is 300.
+func WithMaxBrowserRequests(n int) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.maxRequests = n
+	}
+}
+
 // CamoufoxFetcher drives a Camoufox (Firefox fork) browser instance via the
 // Juggler protocol using playwright-go.
 //
-// Phase 1: stub — Fetch always returns errPlaywrightNotConfigured.
-// Phase 2: real implementation wires in playwright.Playwright + playwright.Browser.
+// Stub build (!playwright tag): Fetch always returns errPlaywrightNotConfigured.
+// Real build  ( playwright tag): see camoufox_playwright.go.
 type CamoufoxFetcher struct {
 	identity    *identity.Profile
 	blockImages bool
-	// headless controls display mode: "virtual", "true", or "false".
-	headless string
-
-	// TODO(phase2): add the following fields once playwright-go is available:
-	//   pw      *playwright.Playwright
-	//   browser playwright.Browser
+	headless    string
+	timeout     time.Duration
+	maxRequests int // restart browser after this many requests (0 = disabled)
 }
 
-// NewCamoufox creates a CamoufoxFetcher. In Phase 1 no browser is launched;
-// the constructor simply stores the configuration for when playwright-go is
-// wired in during Phase 2.
-//
-// In Phase 2 this function will:
-//   1. Call playwright.Run() to ensure Camoufox is installed.
-//   2. Launch a Firefox (Camoufox) browser instance with Juggler enabled.
-//   3. Return an error if the binary is not found.
+// NewCamoufox creates a CamoufoxFetcher. In the stub build no browser is
+// launched; the constructor stores the configuration and returns immediately.
 func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 	f := &CamoufoxFetcher{
-		headless: "virtual",
+		headless:    "virtual",
+		timeout:     60 * time.Second,
+		maxRequests: 300,
 	}
 	for _, opt := range opts {
 		opt(f)
@@ -109,58 +114,16 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 		"headless", f.headless,
 		"block_images", f.blockImages,
 	)
-
-	// TODO(phase2): launch Camoufox here.
-	// pw, err := playwright.Run()
-	// if err != nil {
-	//     return nil, fmt.Errorf("fetch/camoufox: launching playwright: %w", err)
-	// }
-	// browser, err := pw.Firefox.Launch(playwright.BrowserTypeLaunchOptions{...})
-	// if err != nil {
-	//     pw.Stop()
-	//     return nil, fmt.Errorf("fetch/camoufox: launching camoufox: %w", err)
-	// }
-	// f.pw = pw
-	// f.browser = browser
-
 	return f, nil
 }
 
-// Fetch navigates to job.URL using the Camoufox browser and returns the page
-// content. The response FetchMode is FetchBrowser.
-//
-// Phase 1 stub: always returns errPlaywrightNotConfigured.
-//
-// Phase 2 real implementation will:
-//  1. Create a BrowserContext with CAMOU_CONFIG env vars from identity.CamoufoxEnv.
-//  2. Set extra HTTP headers (User-Agent, Accept-Language) on the context.
-//  3. If blockImages=true, install a route handler to abort image/media requests.
-//  4. Open a Page and call page.Goto(job.URL, playwright.PageGotoOptions{
-//     WaitUntil: playwright.WaitUntilStateNetworkidle}).
-//  5. Extract page.Content() as the response body.
-//  6. Collect response status and headers from the network response event.
-//  7. Close the context (not the browser) to release resources.
+// Fetch always returns errPlaywrightNotConfigured in the stub build.
+// Rebuild with -tags playwright to enable real browser navigation.
 func (f *CamoufoxFetcher) Fetch(_ context.Context, _ *foxhound.Job) (*foxhound.Response, error) {
-	// TODO(phase2): implement real browser navigation.
-	// ctx, err := f.browser.NewContext(playwright.BrowserNewContextOptions{
-	//     UserAgent:   f.identity.UA,
-	//     Locale:      f.identity.Locale,
-	//     TimezoneId:  f.identity.Timezone,
-	//     Geolocation: &playwright.Geolocation{Latitude: f.identity.Lat, Longitude: f.identity.Lng},
-	//     ExtraHttpHeaders: map[string]string{
-	//         "Accept-Language": buildAcceptLanguage(f.identity.Languages),
-	//     },
-	// })
-	// ...
 	return nil, errPlaywrightNotConfigured
 }
 
-// Close releases browser resources. In Phase 1 this is a no-op.
-//
-// Phase 2 will call browser.Close() and pw.Stop().
+// Close is a no-op in the stub build; no resources were allocated.
 func (f *CamoufoxFetcher) Close() error {
-	// TODO(phase2): release playwright resources.
-	// if f.browser != nil { _ = f.browser.Close() }
-	// if f.pw != nil { _ = f.pw.Stop() }
 	return nil
 }

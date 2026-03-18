@@ -56,8 +56,13 @@ func (w *Walker) Run(ctx context.Context) error {
 // processJob executes a single job: fetch → process → pipeline → write →
 // enqueue discovered jobs. Retries are handled inline.
 func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
+	// Track this walker as in-flight so drainQueue does not cancel the context
+	// before discovered jobs are enqueued.
+	w.hunt.activeWalkers.Add(1)
+	defer w.hunt.activeWalkers.Add(-1)
+
 	var (
-		resp    *foxhound.Response
+		resp     *foxhound.Response
 		fetchErr error
 	)
 
