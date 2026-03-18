@@ -2,6 +2,32 @@
 
 The pipeline processes each `Item` after it is extracted by your `Processor`. Stages run left-to-right. If any stage returns `nil`, the item is dropped and subsequent stages are skipped. Items that survive the full chain are passed to all configured `Writer` instances.
 
+## Item Convenience Methods
+
+Before an item reaches any writer, your code can use these methods on `*foxhound.Item`:
+
+```go
+// Type-safe field access:
+title := item.GetString("title")   // "" if absent or not string
+price := item.GetFloat("price")    // 0 if absent or non-numeric
+count := item.GetInt("count")      // 0 if absent or non-numeric
+exists := item.Has("email")        // false if absent, nil, or ""
+
+// Sorted field keys (deterministic output):
+keys := item.Keys()                // []string, alphabetically sorted
+
+// Serialisation:
+data, err := item.ToJSON()                           // compact JSON bytes
+data, err := item.ToJSONPretty()                     // indented JSON bytes
+m := item.ToMap()                                    // shallow copy of Fields
+row := item.ToCSVRow([]string{"title", "price"})     // []string in column order
+
+// Text representations:
+md := item.ToMarkdown()   // "- **firstVal** — val2 — val3"
+txt := item.ToText()      // "title: Go\nprice: 12.99"
+str := item.String()      // compact JSON (fallback to ToText on marshal error)
+```
+
 ## Built-in Pipeline Stages
 
 All stages are in the `pipeline` package (`github.com/sadewadee/foxhound/pipeline`).
@@ -17,8 +43,6 @@ stage := &pipeline.Validate{
 ```
 
 If any field in `Required` is absent from `item.Fields`, the item is dropped (returns `nil`).
-
-Config:
 
 ```yaml
 pipeline:
@@ -37,8 +61,6 @@ stage := &pipeline.Clean{
 }
 ```
 
-Config:
-
 ```yaml
 pipeline:
   - clean:
@@ -48,7 +70,7 @@ pipeline:
 
 ### Dedup
 
-Drops items with a duplicate field value (e.g. duplicate URLs within the pipeline run).
+Drops items with a duplicate field value within the pipeline run.
 
 ```go
 stage := &pipeline.Dedup{
@@ -90,11 +112,9 @@ type Writer interface {
 }
 ```
 
-Writers are passed to `HuntConfig.Writers`. The engine calls `Flush` on all writers after all walkers finish, then the caller is responsible for calling `Close`.
+Writers are passed to `HuntConfig.Writers`. The engine calls `Flush` on all writers after all walkers finish. Call `Close` in a defer.
 
 ### CSV
-
-Writes a CSV file with one item per row.
 
 ```go
 // With explicit column headers (determines column order):
@@ -103,10 +123,6 @@ w, err := export.NewCSV("output.csv", "title", "price", "url")
 // Without explicit headers (inferred alphabetically from first item):
 w, err := export.NewCSV("output.csv")
 ```
-
-If headers are not provided, they are inferred from the first item's field keys, sorted alphabetically. Missing field values are written as empty strings.
-
-Config:
 
 ```yaml
 pipeline:
@@ -117,19 +133,12 @@ pipeline:
 
 ### JSON / JSONL
 
-Writes items as JSON.
-
 ```go
-// JSON array (single file):
-w, err := export.NewJSON("output.json", export.JSONArray)
-
-// JSON Lines — one object per line, streaming-friendly:
-w, err := export.NewJSON("output.jsonl", export.JSONLines)
+w, err := export.NewJSON("output.json", export.JSONArray)  // single JSON array
+w, err := export.NewJSON("output.jsonl", export.JSONLines) // one object per line
 ```
 
-JSONL (JSON Lines) is recommended for large datasets because it can be streamed and processed line-by-line without loading the entire file.
-
-Config:
+JSONL is recommended for large datasets — it can be processed line-by-line without loading the entire file.
 
 ```yaml
 pipeline:
@@ -140,12 +149,76 @@ pipeline:
         path: output/results.json
 ```
 
-### Webhook
+### Markdown
 
-POSTs items (or batches of items) to an HTTP endpoint.
+Three format options:
 
 ```go
-// Single-item POST:
+// GFM pipe table — header row from first item's sorted keys:
+w, err := export.NewMarkdown("output.md", export.MarkdownTable)
+
+// Bullet list — first field bolded, rest dash-separated:
+// - **Go Programming** — $12.99 — Five
+w, err := export.NewMarkdown("output.md", export.MarkdownList)
+
+// Cards — H2 heading (first field) + bullet-key fields:
+// ## Go Programming
+// - **price**: $12.99
+// - **rating**: Five
+w, err := export.NewMarkdown("output.md", export.MarkdownCards)
+```
+
+### Text
+
+Two format options:
+
+```go
+// One line per item: key=value key2=value2
+w, err := export.NewText("output.txt", export.TextLines)
+
+// Labelled blocks with separator lines:
+// ────────────────────────────
+// Price:    $12.99
+// Title:    Go Programming
+// ────────────────────────────
+w, err := export.NewText("output.txt", export.TextPretty)
+```
+
+### XML
+
+```go
+// rootElement defaults to "items", itemElement defaults to "item"
+w, err := export.NewXML("output.xml", "products", "product")
+```
+
+Output format:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<products>
+  <product>
+    <price>$12.99</price>
+    <title>Go Programming</title>
+  </product>
+</products>
+```
+
+Fields are emitted in sorted key order for determinism.
+
+### SQLite
+
+```go
+// dbPath is created if it does not exist; table defaults to "items"
+w, err := export.NewSQLite("results.db", "books")
+```
+
+- Table is created automatically from the first item's fields
+- New fields on subsequent items trigger `ALTER TABLE ADD COLUMN`
+- WAL journal mode enabled for concurrent writes
+
+### Webhook
+
+```go
 w := export.NewWebhook("https://api.example.com/items")
 
 // Batched POST (sends array of N items per request):
@@ -153,8 +226,6 @@ w := export.NewWebhook("https://api.example.com/items",
     export.WithBatchSize(50),
 )
 ```
-
-Config:
 
 ```yaml
 pipeline:
@@ -166,10 +237,7 @@ pipeline:
 
 ### PostgreSQL
 
-Inserts or upserts items into a PostgreSQL table.
-
 ```go
-// Simple insert:
 w, err := export.NewPostgres("postgres://user:pass@host:5432/db", "items")
 
 // Upsert on a unique key:
@@ -179,9 +247,7 @@ w, err := export.NewPostgres("postgres://user:pass@host:5432/db", "items",
 )
 ```
 
-The connection string can also be set via the `FOXHOUND_EXPORT_DB` environment variable, which takes precedence over the `path` config field.
-
-Config:
+The connection string can also be set via `FOXHOUND_EXPORT_DB`:
 
 ```yaml
 pipeline:
@@ -191,8 +257,6 @@ pipeline:
         upsert_key: url
         batch_size: 100
 ```
-
-Set `FOXHOUND_EXPORT_DB=postgres://user:pass@host:5432/db?sslmode=disable` in your environment.
 
 ## Complete Pipeline Example
 
@@ -205,6 +269,8 @@ import (
 // Writers.
 csvWriter, _ := export.NewCSV("books.csv", "title", "price", "rating", "url")
 jsonlWriter, _ := export.NewJSON("books.jsonl", export.JSONLines)
+mdWriter, _ := export.NewMarkdown("books.md", export.MarkdownTable)
+sqliteWriter, _ := export.NewSQLite("books.db", "books")
 
 // Pipeline chain (applied inline in Processor).
 chain := pipeline.NewChain(
@@ -212,28 +278,19 @@ chain := pipeline.NewChain(
     &pipeline.Clean{TrimWhitespace: true, NormalizePrice: true},
 )
 
-// In HuntConfig:
 h := engine.NewHunt(engine.HuntConfig{
-    Writers: []foxhound.Writer{csvWriter, jsonlWriter},
-    // Pipeline stages applied in Processor:
-    // processed, _ := chain.Process(ctx, item)
+    Writers: []foxhound.Writer{csvWriter, jsonlWriter, mdWriter, sqliteWriter},
     // ...
 })
 ```
 
 ## Custom Writer
 
-Implement `foxhound.Writer` for any custom destination:
-
 ```go
 type StdoutWriter struct{}
 
 func (w *StdoutWriter) Write(_ context.Context, item *foxhound.Item) error {
-    data, err := json.Marshal(item.Fields)
-    if err != nil {
-        return err
-    }
-    fmt.Println(string(data))
+    fmt.Println(item.String()) // compact JSON
     return nil
 }
 
@@ -243,29 +300,16 @@ func (w *StdoutWriter) Close() error                  { return nil }
 
 ## Custom Pipeline Stage
 
-Implement `foxhound.Pipeline` or use `foxhound.PipelineFunc`:
-
 ```go
-// Inline using PipelineFunc:
-dedupeByURL := foxhound.PipelineFunc(func(ctx context.Context, item *foxhound.Item) (*foxhound.Item, error) {
-    url, _ := item.Get("url")
-    if url == "" {
-        return nil, nil  // drop items without URL
-    }
-    return item, nil
-})
-
-// Named type for reusable stages:
-type EnrichStage struct {
-    DB *sql.DB
+type PriceFilterStage struct {
+    MinPrice float64
 }
 
-func (s *EnrichStage) Process(ctx context.Context, item *foxhound.Item) (*foxhound.Item, error) {
-    url, _ := item.Get("url")
-    // Look up metadata from a database.
-    var category string
-    _ = s.DB.QueryRowContext(ctx, "SELECT category FROM urls WHERE url = $1", url).Scan(&category)
-    item.Set("category", category)
+func (p *PriceFilterStage) Process(ctx context.Context, item *foxhound.Item) (*foxhound.Item, error) {
+    price := item.GetFloat("price")
+    if price < p.MinPrice {
+        return nil, nil // drop items below minimum price
+    }
     return item, nil
 }
 ```
@@ -274,8 +318,8 @@ func (s *EnrichStage) Process(ctx context.Context, item *foxhound.Item) (*foxhou
 
 There are two places to apply pipeline stages:
 
-**Inside the Processor (inline):** Call `chain.Process(ctx, item)` inside your `ProcessorFunc`. Items are processed before being added to the result. This is the pattern used in the ecommerce example.
+**Inside the Processor (inline):** Call `chain.Process(ctx, item)` inside your `ProcessorFunc`. Items are processed before being added to the result.
 
-**Via HuntConfig.Pipelines:** Pass stages to `HuntConfig.Pipelines`. The engine applies them to all items returned from every `Processor.Process` call. Items that survive are passed to `HuntConfig.Writers`.
+**Via HuntConfig.Pipelines:** Pass stages to `HuntConfig.Pipelines`. The engine applies them to all items returned from every `Processor.Process` call before passing to writers.
 
-Both approaches can be combined. The `HuntConfig.Pipelines` path is useful when you want a consistent post-processing stage applied across all processors.
+Both can be combined. `HuntConfig.Pipelines` is useful for a consistent post-processing stage applied across all processors.

@@ -4,7 +4,7 @@ The `proxy` package manages HTTP/SOCKS proxy pools, health checking, and rotatio
 
 ## Proxy Pool
 
-`proxy.NewPool` accepts one or more `Provider` instances. Providers are queried once during construction.
+`proxy.NewPool` accepts one or more `Provider` instances:
 
 ```go
 import "github.com/sadewadee/foxhound/proxy"
@@ -12,7 +12,7 @@ import "github.com/sadewadee/foxhound/proxy"
 pool := proxy.NewPool(
     proxy.Static([]string{
         "http://user:pass@host1:3128",
-        "socks5://user:pass@host2:1080",
+        "socks5://host2:1080",
     }),
 )
 ```
@@ -20,35 +20,19 @@ pool := proxy.NewPool(
 ### Pool methods
 
 ```go
-// Get next proxy according to rotation strategy:
-px, err := pool.Get(ctx)
+px, err := pool.Get(ctx)                      // next proxy per rotation strategy
+px, err := pool.GetForSession(ctx, "walker-0") // sticky proxy for a session ID
+px, err := pool.GetForDomain(ctx, "example.com") // sticky proxy for a domain
 
-// Sticky proxy for a session ID:
-px, err := pool.GetForSession(ctx, "walker-0")
+pool.Release(px, success bool)        // report result after use
+pool.Ban(px, "example.com")           // put proxy on cooldown for that domain
 
-// Sticky proxy for a domain:
-px, err := pool.GetForDomain(ctx, "example.com")
+health := pool.Health(px)             // ProxyHealth snapshot
+pool.SetRotation(proxy.PerRequest)    // configure rotation strategy
+pool.SetCooldown(10 * time.Minute)    // configure cooldown duration
+pool.SetMaxRequests(200)              // max requests before auto-cooldown (0 = unlimited)
 
-// Report result after use:
-pool.Release(px, success bool)
-
-// Ban a proxy from a domain (triggers cooldown):
-pool.Ban(px, "example.com")
-
-// Get health snapshot:
-health := pool.Health(px)
-
-// Configure rotation strategy:
-pool.SetRotation(proxy.PerRequest)
-
-// Configure cooldown duration:
-pool.SetCooldown(10 * time.Minute)
-
-// Configure max requests before auto-cooldown (0 = unlimited):
-pool.SetMaxRequests(200)
-
-// Total pool size (including proxies on cooldown):
-n := pool.Len()
+n := pool.Len()                       // total pool size (including proxies on cooldown)
 ```
 
 ## Rotation Strategies
@@ -64,8 +48,6 @@ n := pool.Len()
 pool.SetRotation(proxy.PerSession)
 ```
 
-Config:
-
 ```yaml
 proxy:
   rotation: per_session  # per_request | per_session | per_domain | on_block
@@ -79,8 +61,8 @@ Each proxy has a `ProxyHealth` snapshot:
 type ProxyHealth struct {
     Alive         bool
     Latency       time.Duration
-    SuccessRate   float64    // 0.0–1.0
-    BlockRate     float64    // 0.0–1.0
+    SuccessRate   float64    // 0.0-1.0
+    BlockRate     float64    // 0.0-1.0
     BanCount      int
     CooldownUntil time.Time  // zero if not on cooldown
     Score         float64    // 0.0 (dead) to 1.0 (perfect)
@@ -97,7 +79,7 @@ The `OnBlock` strategy always selects the proxy with the highest current score.
 
 ### Cooldown
 
-When a proxy is banned (`pool.Ban`) or reaches `max_requests_per_proxy`, it is placed on cooldown for the configured duration. The pool waits precisely until the earliest cooldown expiry before retrying, rather than busy-waiting.
+When a proxy is banned or reaches `max_requests_per_proxy`, it is placed on cooldown for the configured duration:
 
 ```yaml
 proxy:
@@ -110,21 +92,18 @@ proxy:
 
 ### Static
 
-A hardcoded list of proxy URL strings.
+A hardcoded list of proxy URL strings. Foxhound parses 6 formats:
 
 ```go
 provider := proxy.Static([]string{
-    "http://user:pass@1.2.3.4:3128",
-    "socks5://user:pass@5.6.7.8:1080",
-    "https://proxy.example.com:443",
+    "http://user:pass@1.2.3.4:3128",      // HTTP with auth
+    "https://proxy.example.com:443",       // HTTPS without auth
+    "socks5://user:pass@5.6.7.8:1080",    // SOCKS5 with auth
+    "socks5://5.6.7.8:1080",              // SOCKS5 without auth
+    "1.2.3.4:3128",                       // host:port (assumed HTTP, no auth)
+    "user:pass@1.2.3.4:3128",             // user:pass@host:port (assumed HTTP)
 })
 ```
-
-Supported URL formats:
-- `http://user:pass@host:port`
-- `https://host:port`
-- `socks5://user:pass@host:port`
-- `host:port` (assumed HTTP, no auth)
 
 ```yaml
 proxy:
@@ -132,7 +111,7 @@ proxy:
     - type: static
       list:
         - http://user:pass@1.2.3.4:3128
-        - socks5://user:pass@5.6.7.8:1080
+        - socks5://5.6.7.8:1080
 ```
 
 ### BrightData
@@ -195,7 +174,6 @@ type Provider interface {
 type MyProvider struct{ APIKey string }
 
 func (p *MyProvider) Proxies(ctx context.Context) ([]*proxy.Proxy, error) {
-    // fetch from your proxy service API
     raw := []string{"http://user:pass@host:3128"}
     var out []*proxy.Proxy
     for _, r := range raw {
@@ -211,6 +189,41 @@ func (p *MyProvider) Proxies(ctx context.Context) ([]*proxy.Proxy, error) {
 
 pool := proxy.NewPool(&MyProvider{APIKey: "..."})
 ```
+
+## Proxy Parsing
+
+Parse a raw proxy string into a `Proxy` struct:
+
+```go
+px, err := proxy.Parse("http://user:pass@host:3128")
+// px.Protocol == "http"
+// px.Host     == "host"
+// px.Port     == "3128"
+// px.Username == "user"
+// px.Password == "pass"
+```
+
+## Using Proxies with the Fetcher
+
+Pass a proxy URL to the stealth fetcher:
+
+```go
+fetcher := fetch.NewStealth(
+    fetch.WithIdentity(profile),
+    fetch.WithProxy("http://user:pass@host:3128"),
+)
+```
+
+For browser mode use `fetch.WithBrowserProxy`:
+
+```go
+camoufox, _ := fetch.NewCamoufox(
+    fetch.WithBrowserIdentity(profile),
+    fetch.WithBrowserProxy("http://user:pass@proxy.example.com:3128"),
+)
+```
+
+Note: Playwright's Firefox implementation does not support SOCKS5 proxies with authentication credentials. Use HTTP proxies with auth, or SOCKS5 without credentials.
 
 ## GeoIP Matching
 
@@ -247,38 +260,5 @@ func (r *MaxMindResolver) Resolve(ip string) (identity.GeoInfo, error) {
 profile := identity.Generate(
     identity.WithProxy("203.0.113.42"),
     identity.WithGeoResolver(&MaxMindResolver{db: myDB}),
-)
-```
-
-## Proxy Parsing
-
-Parse a raw proxy string into a `Proxy` struct:
-
-```go
-px, err := proxy.Parse("http://user:pass@host:3128")
-// px.Protocol == "http"
-// px.Host     == "host"
-// px.Port     == "3128"
-// px.Username == "user"
-// px.Password == "pass"
-```
-
-## Using Proxies with the Fetcher
-
-Pass a proxy URL to the stealth fetcher via `fetch.WithProxy`:
-
-```go
-fetcher := fetch.NewStealth(
-    fetch.WithIdentity(profile),
-    fetch.WithProxy("http://user:pass@host:3128"),
-)
-```
-
-For browser mode use `fetch.WithBrowserProxy`:
-
-```go
-camoufox, _ := fetch.NewCamoufox(
-    fetch.WithBrowserIdentity(profile),
-    fetch.WithBrowserProxy("socks5://user:pass@host:1080"),
 )
 ```

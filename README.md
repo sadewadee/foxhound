@@ -8,141 +8,101 @@
 
 # Foxhound v0.0.1
 
-Go scraping framework with native Camoufox (Firefox fork) anti-detection and dual-mode fetching.
+Go scraping framework with native Camoufox (Firefox fork) anti-detection, dual-mode fetching, and 13-layer middleware.
 
-## Features
+## Highlights
 
-- **Dual-mode fetching**: TLS-impersonating HTTP client (~5-50ms) + Camoufox browser via playwright-go (~500ms-5s)
-- **Smart auto-escalation**: starts static, escalates to browser on 401/403/407/429/503
-- **60+ consistent device profiles**: UA + TLS fingerprint + header order + OS + hardware + screen + locale all match
-- **Human behavior simulation**: log-normal timing, Bezier mouse curves, realistic scroll/keyboard patterns
-- **11-layer middleware chain**: metrics, rate limit, robots.txt, delta-fetch, dedup, autothrottle, cookies, referer, redirect, depth limit, retry
-- **Multiple export formats**: JSON, JSONL, CSV, webhook, PostgreSQL
-- **Pluggable queue backends**: memory, Redis, SQLite
+- **Dual-mode fetching**: TLS-impersonating HTTP client (~5-50ms) + Camoufox browser via playwright-go (~500ms-5s), with automatic escalation on block detection
+- **Consistent identity profiles**: UA + TLS fingerprint + header order + OS + hardware + screen + locale all match — randomness without consistency causes instant blocks
+- **13-layer middleware chain**: concurrency, metrics, rate limit, robots.txt, delta-fetch, dedup, autothrottle, cookies, referer, blocked detector, redirect, depth limit, retry
+- **9 export formats**: JSON, JSONL, CSV, Markdown (Table/List/Cards), Text (Lines/Pretty), XML, SQLite, PostgreSQL, Webhook
+- **Adaptive parsing**: CSS selectors with automatic similarity-based fallback when page structure changes
+- **Streaming API**: `Hunt.Stream(ctx)` and `Hunt.StreamWithStats(ctx, interval)` for real-time item processing
+- **Checkpoint/resume**: auto-save hunt state every N items; `engine.LoadCheckpoint` to inspect
+- **37,003 lines of Go across 24 packages, 700+ tests**
 
 ## Quick Start
-
-**Install:**
 
 ```bash
 git clone https://github.com/sadewadee/foxhound.git
 cd foxhound
 go build -o foxhound ./cmd/foxhound/
-```
-
-**Scaffold a project:**
-
-```bash
-foxhound init myproject
-cd myproject
+foxhound init myproject && cd myproject
 go mod tidy
-foxhound run --config config.yaml
 ```
 
-**Go API (books.toscrape.com):**
+Scrape books.toscrape.com in under 20 lines:
 
 ```go
-package main
-
-import (
-    "context"
-    "time"
-
-    foxhound "github.com/sadewadee/foxhound"
-    "github.com/sadewadee/foxhound/engine"
-    "github.com/sadewadee/foxhound/fetch"
-    "github.com/sadewadee/foxhound/identity"
-    "github.com/sadewadee/foxhound/parse"
-    "github.com/sadewadee/foxhound/queue"
-    "github.com/sadewadee/foxhound/pipeline/export"
-    "github.com/PuerkitoBio/goquery"
-)
-
-func main() {
-    profile := identity.Generate(
-        identity.WithBrowser(identity.BrowserFirefox),
-        identity.WithOS(identity.OSWindows),
-        identity.WithLocale("en-US", "en-US", "en"),
-        identity.WithTimezone("America/New_York"),
-    )
-
-    fetcher := fetch.NewStealth(
-        fetch.WithIdentity(profile),
-        fetch.WithTimeout(30*time.Second),
-    )
-    defer fetcher.Close()
-
-    q := queue.NewMemoryQueue()
-    defer q.Close()
-
-    csvWriter, _ := export.NewCSV("books.csv", "title", "price", "url")
-    defer csvWriter.Close()
-
-    processor := foxhound.ProcessorFunc(func(ctx context.Context, resp *foxhound.Response) (*foxhound.Result, error) {
+h := engine.NewHunt(engine.HuntConfig{
+    Name:    "books",
+    Domain:  "books.toscrape.com",
+    Walkers: 3,
+    Fetcher: fetch.NewStealth(fetch.WithIdentity(identity.Generate())),
+    Queue:   queue.NewMemoryQueue(),
+    Processor: foxhound.ProcessorFunc(func(ctx context.Context, resp *foxhound.Response) (*foxhound.Result, error) {
         doc, _ := parse.NewDocument(resp)
-        var items []*foxhound.Item
-        doc.Each("article.product_pod", func(i int, s *goquery.Selection) {
-            item := foxhound.NewItem()
-            title, _ := s.Find("h3 a").Attr("title")
-            item.Set("title", title)
-            item.Set("price", s.Find("p.price_color").Text())
-            item.Set("url", resp.URL)
-            items = append(items, item)
-        })
-        return &foxhound.Result{Items: items}, nil
-    })
-
-    h := engine.NewHunt(engine.HuntConfig{
-        Name:      "books-toscrape",
-        Domain:    "books.toscrape.com",
-        Walkers:   2,
-        Fetcher:   fetcher,
-        Processor: processor,
-        Queue:     q,
-        Writers:   []foxhound.Writer{csvWriter},
-        Seeds: []*foxhound.Job{{
-            ID:        "seed",
-            URL:       "http://books.toscrape.com/",
-            FetchMode: foxhound.FetchStatic,
-            Priority:  foxhound.PriorityHigh,
-        }},
-    })
-
-    h.Run(context.Background())
-}
+        item := foxhound.NewItem()
+        item.Set("title", doc.Text("h1"))
+        return &foxhound.Result{Items: []*foxhound.Item{item}}, nil
+    }),
+    Seeds: []*foxhound.Job{{URL: "http://books.toscrape.com/", FetchMode: foxhound.FetchStatic}},
+})
+h.Run(context.Background())
 ```
+
+## Real Results
+
+| Target | Mode | Items | Time | Notes |
+|--------|------|-------|------|-------|
+| books.toscrape.com | Static | 1000 books | ~8s | 50 pages, 2 walkers |
+| quotes.toscrape.com | Static | 100 quotes | ~3s | 10 pages, 2 walkers |
+| Google Maps listing | Browser | 1 place | ~4s | FetchBrowser, Camoufox |
 
 ## Documentation
 
-Full documentation: [docs/](docs/)
+| File | Contents |
+|------|----------|
+| [docs/getting-started.md](docs/getting-started.md) | Install, first scrape, running modes |
+| [docs/configuration.md](docs/configuration.md) | Full config.yaml reference |
+| [docs/cli.md](docs/cli.md) | All CLI commands and flags |
+| [docs/api.md](docs/api.md) | Go types, interfaces, Hunt/Stream API |
+| [docs/anti-detection.md](docs/anti-detection.md) | Identity system, TLS, behavior simulation |
+| [docs/middleware.md](docs/middleware.md) | All 13 middleware, chain order |
+| [docs/pipeline.md](docs/pipeline.md) | Pipeline stages and all 9 export formats |
+| [docs/proxy.md](docs/proxy.md) | Proxy pool, rotation, providers, geo matching |
+| [docs/browser.md](docs/browser.md) | Camoufox setup, options, human simulation |
+| [docs/examples.md](docs/examples.md) | E-commerce, Maps, adaptive parsing, streaming |
+| [docs/deployment.md](docs/deployment.md) | Docker, scaling, environment variables |
 
-- [Getting Started](docs/getting-started.md)
-- [Configuration](docs/configuration.md)
-- [CLI Reference](docs/cli.md)
-- [Go API](docs/api.md)
-- [Anti-Detection](docs/anti-detection.md)
-- [Middleware](docs/middleware.md)
-- [Pipeline & Export](docs/pipeline.md)
-- [Proxy Management](docs/proxy.md)
-- [Browser Mode](docs/browser.md)
-- [Examples](docs/examples.md)
-- [Deployment](docs/deployment.md)
+## Export Formats
 
-## Real Scraping Results
+| Format | Constructor | Notes |
+|--------|-------------|-------|
+| JSON array | `export.NewJSON(path, export.JSONArray)` | Single file, full array |
+| JSON Lines | `export.NewJSON(path, export.JSONLines)` | One object per line, streaming-friendly |
+| CSV | `export.NewCSV(path, cols...)` | Fixed or auto-inferred columns |
+| Markdown table | `export.NewMarkdown(path, export.MarkdownTable)` | GFM pipe table |
+| Markdown list | `export.NewMarkdown(path, export.MarkdownList)` | Bullet list, first field bolded |
+| Markdown cards | `export.NewMarkdown(path, export.MarkdownCards)` | H2 heading + bullet fields |
+| Plain text lines | `export.NewText(path, export.TextLines)` | `key=value` per line |
+| Plain text pretty | `export.NewText(path, export.TextPretty)` | Labelled blocks with separators |
+| XML | `export.NewXML(path, root, item)` | Configurable root/item element names |
+| SQLite | `export.NewSQLite(dbPath, table)` | Auto-creates and extends schema |
+| PostgreSQL | `export.NewPostgres(dsn, table)` | Upsert support, batch inserts |
+| Webhook | `export.NewWebhook(url)` | HTTP POST, optional batch size |
 
-| Target | Items | Mode | Duration |
-|--------|-------|------|----------|
-| books.toscrape.com | 1000 books | static | ~45s |
-| Google Maps | 10 villa listings | browser | ~120s |
-| Alibaba | 10 products | auto (escalated) | ~90s |
+## Architecture
 
-## Build Tags
-
-| Tag | Effect |
-|-----|--------|
-| *(default)* | Standard net/http with correct header ordering |
-| `-tags tls` | Real JA3/JA4 TLS impersonation via azuretls-client |
-| `-tags playwright` | Real Camoufox browser via playwright-go |
+```
+Job → rate limit → dedup → behavior timing → header enrichment
+  → Smart Fetcher (static TLS or Camoufox browser)
+    → Block detection (9 vendor patterns) → retry with backoff
+  → Parser (CSS / XPath / JSON / Regex / Adaptive / Similarity)
+  → User Process() → Result{Items, NextJobs}
+  → Pipeline (validate, clean, dedup) → Writers (9 formats)
+  → Queue (memory / Redis / SQLite)
+```
 
 ## License
 

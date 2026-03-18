@@ -14,10 +14,12 @@ When building a hunt from code, middlewares are passed as a slice in `HuntConfig
 
 ```
 Request flow:
-Metrics → RateLimit → Dedup → Cookies → Referer → Retry → Fetcher
+Concurrency → Metrics → RateLimit → RobotsTxt → DeltaFetch → Dedup
+  → AutoThrottle → Cookies → Referer → BlockDetector → Redirect → DepthLimit → Retry → Fetcher
 
 Response flow:
-Fetcher → Retry → Referer → Cookies → Dedup → RateLimit → Metrics
+Fetcher → Retry → DepthLimit → Redirect → BlockDetector → Referer → Cookies
+  → AutoThrottle → Dedup → DeltaFetch → RobotsTxt → RateLimit → Metrics → Concurrency
 ```
 
 ### Composing the chain manually
@@ -26,12 +28,14 @@ Fetcher → Retry → Referer → Cookies → Dedup → RateLimit → Metrics
 import "github.com/sadewadee/foxhound/middleware"
 
 mws := []foxhound.Middleware{
-    middleware.NewMetrics("foxhound"),           // 1. outermost
-    middleware.NewRateLimit(2.0, 5),             // 2.
-    middleware.NewDedup(),                        // 3.
-    middleware.NewCookies(),                      // 4.
-    middleware.NewReferer(),                      // 5.
-    middleware.NewRetry(3, 500*time.Millisecond), // 6. innermost
+    middleware.NewConcurrency(2),                    // 1. outermost — per-domain semaphore
+    middleware.NewMetrics("foxhound"),               // 2.
+    middleware.NewRateLimit(2.0, 5),                 // 3.
+    middleware.NewDedup(),                           // 4.
+    middleware.NewCookies(),                         // 5.
+    middleware.NewReferer(),                         // 6.
+    middleware.NewBlockDetector(3, time.Second),     // 7.
+    middleware.NewRetry(3, 500*time.Millisecond),    // 8. innermost
 }
 
 h := engine.NewHunt(engine.HuntConfig{
@@ -40,7 +44,7 @@ h := engine.NewHunt(engine.HuntConfig{
 })
 ```
 
-Use `middleware.Chain(...)` to compose multiple middlewares into a single middleware value:
+Use `middleware.Chain(...)` to compose multiple middlewares into a single value:
 
 ```go
 chain := middleware.Chain(
@@ -50,25 +54,43 @@ chain := middleware.Chain(
 // chain is a single foxhound.Middleware
 ```
 
-## Full 11-Middleware Chain (CLI default)
+## Full 13-Middleware Chain (CLI default)
 
 The CLI `run` command assembles this chain from the config (in order, outermost first):
 
 | # | Middleware | Always On | Config Key |
 |---|-----------|-----------|------------|
-| 1 | Metrics | no | `monitor.metrics.enabled: true` |
-| 2 | RateLimit | no | `middleware.ratelimit.enabled: true` |
-| 3 | RobotsTxt | no | `middleware.robots_txt.enabled: true` |
-| 4 | DeltaFetch | no | `middleware.deltafetch.enabled: true` |
-| 5 | Dedup | yes | always added |
-| 6 | AutoThrottle | no | `middleware.autothrottle.enabled: true` |
-| 7 | Cookies | yes | always added |
-| 8 | Referer | yes | always added |
-| 9 | Redirect | yes | always added (max 10 hops) |
-| 10 | DepthLimit | no | `middleware.depth_limit.max > 0` |
-| 11 | Retry | yes | always added (3 retries, 500ms base) |
+| 1 | Concurrency | no | `middleware.concurrency.per_domain > 0` |
+| 2 | Metrics | no | `monitor.metrics.enabled: true` |
+| 3 | RateLimit | no | `middleware.ratelimit.enabled: true` |
+| 4 | RobotsTxt | no | `middleware.robots_txt.enabled: true` |
+| 5 | DeltaFetch | no | `middleware.deltafetch.enabled: true` |
+| 6 | Dedup | yes | always added |
+| 7 | AutoThrottle | no | `middleware.autothrottle.enabled: true` |
+| 8 | Cookies | yes | always added |
+| 9 | Referer | yes | always added |
+| 10 | BlockDetector | yes | always added with default patterns |
+| 11 | Redirect | yes | always added (max 10 hops) |
+| 12 | DepthLimit | no | `middleware.depth_limit.max > 0` |
+| 13 | Retry | yes | always added (3 retries, 500ms base) |
 
 ## Middleware Reference
+
+### NewConcurrency
+
+Per-domain semaphore. Limits the number of concurrent in-flight requests for a single domain. A separate semaphore is created lazily per unique domain.
+
+```go
+mw := middleware.NewConcurrency(perDomain int)
+```
+
+Intended as the outermost middleware so it caps parallelism before rate-limit or dedup checks.
+
+```yaml
+middleware:
+  concurrency:
+    per_domain: 2   # default: 2
+```
 
 ### NewMetrics
 
@@ -78,13 +100,11 @@ Records Prometheus counters and histograms for every request/response.
 mw := middleware.NewMetrics("foxhound")
 ```
 
-Registers three instruments under `namespace`:
+Registers under `namespace`:
 
 - `<ns>_requests_total{domain, status}` — request counter
 - `<ns>_request_duration_seconds{domain}` — latency histogram
 - `<ns>_errors_total{domain, error_type}` — error counter
-
-Instruments are registered with the default Prometheus registry. Enable the metrics endpoint via config:
 
 ```yaml
 monitor:
@@ -101,7 +121,7 @@ Per-domain token bucket rate limiter.
 mw := middleware.NewRateLimit(requestsPerSec float64, burstSize int)
 ```
 
-A separate `rate.Limiter` is created lazily per unique domain. The `Wait` method blocks until a token is available or the context is cancelled.
+A separate `rate.Limiter` is created lazily per unique domain. Blocks until a token is available or the context is cancelled.
 
 ```yaml
 middleware:
@@ -129,7 +149,7 @@ middleware:
 
 ### NewDeltaFetch
 
-Skips URLs that were already scraped in a previous run. Backed by a persistent store.
+Skips URLs that were already scraped in a previous run.
 
 ```go
 mw := middleware.NewDeltaFetch(strategy DeltaStrategy, store DeltaStore, ttl time.Duration)
@@ -137,31 +157,24 @@ mw := middleware.NewDeltaFetch(strategy DeltaStrategy, store DeltaStore, ttl tim
 
 Two strategies:
 
-- `DeltaSkipSeen` — skip any URL ever fetched, regardless of when
-- `DeltaSkipRecent` — skip only if fetched within `ttl`; re-fetch after TTL expires
+- `DeltaSkipSeen` — skip any URL ever fetched
+- `DeltaSkipRecent` — skip only if fetched within `ttl`
 
 Three store backends:
 
 ```go
-// In-memory (lost on restart — useful for testing)
 store := middleware.NewMemoryDeltaStore()
-
-// SQLite (persistent across restarts)
 store, err := middleware.NewSQLiteDeltaStore("foxhound_delta.db")
-
-// Redis (distributed, shared across workers)
 store, err := middleware.NewRedisDeltaStore("localhost:6379", "", 0, "foxhound:delta")
 ```
-
-Skipped requests return a zero-value Response (StatusCode 0) without calling the underlying fetcher.
 
 ```yaml
 middleware:
   deltafetch:
     enabled: true
-    strategy: skip_seen     # "skip_seen" | "skip_recent"
+    strategy: skip_seen
     ttl: 24h
-    store: sqlite           # "memory" | "redis" | "sqlite"
+    store: sqlite
 ```
 
 ### NewDedup
@@ -172,11 +185,9 @@ In-run URL deduplication. Prevents the same URL from being fetched twice within 
 mw := middleware.NewDedup()
 ```
 
-Canonicalisation before storing/checking:
+Canonicalisation before storing:
 - Only scheme + host + path + query are compared (fragment dropped)
 - Query parameters are sorted alphabetically
-
-Duplicate requests return a zero-value Response (StatusCode 0, empty body) without calling the fetcher.
 
 ### NewAutoThrottle
 
@@ -193,11 +204,10 @@ mw := middleware.NewAutoThrottle(middleware.AutoThrottleConfig{
 
 Algorithm:
 
-1. After each response, update an exponential moving average (EMA, alpha=0.3) of response latency for the domain
+1. After each response, update EMA (alpha=0.3) of response latency for the domain
 2. Compute: `delay = EMA(latency) / TargetConcurrency`
 3. Clamp to `[MinDelay, MaxDelay]`
 4. On 429 or 503: spike immediately to `MaxDelay`
-5. Sleep the computed delay before the next request to that domain
 
 ```yaml
 middleware:
@@ -217,11 +227,7 @@ Persists HTTP cookies across requests within the same session.
 mw := middleware.NewCookies()
 ```
 
-Uses Go's standard `net/http/cookiejar`. On each request:
-1. Injects stored cookies from the jar for the target domain
-2. After the response, stores any `Set-Cookie` headers
-
-Critical for sites that set session tokens or CSRF tokens on the first page and verify them on subsequent pages. Always active in the CLI default chain.
+Uses Go's standard `net/http/cookiejar`. Injects stored cookies on each request and stores `Set-Cookie` headers from responses. Always active in the CLI default chain.
 
 ### NewReferer
 
@@ -236,7 +242,44 @@ Behaviour:
 - First request to a domain: `Referer: https://www.google.com/search?q=<domain>` (organic search simulation)
 - Subsequent requests: the previous URL fetched for that domain
 
-Always active in the CLI default chain. Critical for anti-bot bypass on sites that verify Referer consistency.
+Always active in the CLI default chain.
+
+### NewBlockDetector
+
+Detects soft blocks based on HTTP status codes and body content heuristics. Retries with exponential backoff when a block is detected.
+
+```go
+mw := middleware.NewBlockDetector(maxRetries int, baseDelay time.Duration, patterns ...BlockPattern)
+```
+
+If no patterns are provided, `DefaultBlockPatterns()` is used. The 9 default patterns are:
+
+| Name | Trigger |
+|------|---------|
+| `cloudflare` | Body contains: "checking your browser", "just a moment", "challenge-platform" |
+| `rate-limit` | Status 429 + body contains: "rate limit", "too many requests" |
+| `access-denied` | Status 403 + body contains: "access denied", "forbidden", "blocked" |
+| `bot-detection` | Body contains: "bot detected", "automated access", "unusual traffic" |
+| `empty-trap` | Status 200 + body smaller than 500 bytes + no `<html` tag |
+| `akamai` | Body contains: "akamai", "security challenge", "reference #" |
+| `datadome` | Body contains: "datadome", "dd.js" |
+| `perimeterx` | Body contains: "perimeterx", "px-captcha" |
+| `login-wall` | Body contains: "login", "sign in" |
+
+Custom patterns:
+
+```go
+patterns := []middleware.BlockPattern{
+    {
+        Name:         "my-site-block",
+        StatusCode:   200,
+        BodyContains: []string{"access restricted"},
+    },
+}
+mw := middleware.NewBlockDetector(3, time.Second, patterns...)
+```
+
+Backoff formula: `baseDelay * 2^attempt * (1 ± 25% jitter)`
 
 ### NewRedirect
 
@@ -246,7 +289,7 @@ Follows HTTP redirects (301, 302, 303, 307, 308).
 mw := middleware.NewRedirect(maxRedirects int)
 ```
 
-Up to `maxRedirects` hops are followed. Returns an error if the chain exceeds the limit. The CLI default uses 10 hops. A value of 0 disables redirect following.
+Up to `maxRedirects` hops are followed. Returns an error if the chain exceeds the limit. The CLI default uses 10 hops.
 
 ### NewDepthLimit
 
@@ -256,7 +299,7 @@ Aborts requests whose `Job.Depth` exceeds the configured limit.
 mw := middleware.NewDepthLimit(maxDepth int)
 ```
 
-Returns an error for any job with `Depth > maxDepth`, preventing the underlying fetcher from being called. Only active when `max > 0` in config.
+Returns an error for any job with `Depth > maxDepth`. Only active when `max > 0` in config.
 
 ```yaml
 middleware:
@@ -301,14 +344,13 @@ func (m *TimingMiddleware) Wrap(next foxhound.Fetcher) foxhound.Fetcher {
         m.log.Info("fetch timing",
             "url", job.URL,
             "duration", time.Since(start),
-            "status", statusCode(resp),
         )
         return resp, err
     })
 }
 ```
 
-Important when writing middleware that modifies job headers: always clone the job first to avoid mutating shared state (the retry middleware re-uses the same `*Job` pointer across multiple attempts):
+When modifying job headers, always clone the job first to avoid mutating shared state across retry attempts:
 
 ```go
 cloned := *job
