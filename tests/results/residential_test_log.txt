@@ -1,0 +1,83 @@
+══════════════════════════════════════════════════════════════
+  FOXHOUND — Rotating Residential Proxy Test
+  Proxy:  socks5://***-rotate@REDACTED_HOST:80
+  UA:     Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1; rv:148.0) Gecko/20100101 Firefox/148.0
+══════════════════════════════════════════════════════════════
+time=2026-03-18T11:25:33.224+08:00 level=INFO msg="fetch/camoufox: browser launching with proxy" server=http://REDACTED_HOST:80
+time=2026-03-18T11:25:35.701+08:00 level=INFO msg="fetch/camoufox: browser launched" headless=false block_images=false timeout=1m30s
+
+[1/4] Google SERP — wisata alam jawa timur
+time=2026-03-18T11:25:52.942+08:00 level=INFO msg="fetch/camoufox: reCAPTCHA detected, attempting to solve..."
+time=2026-03-18T11:25:55.505+08:00 level=INFO msg="fetch/camoufox: reCAPTCHA checkbox clicked, waiting for verification..."
+time=2026-03-18T11:25:58.674+08:00 level=INFO msg="fetch/camoufox: reCAPTCHA checkbox clicked but not solved (may need image challenge)"
+time=2026-03-18T11:25:58.892+08:00 level=INFO msg=fetched target="Google SERP" status=200 bytes=6791 duration=11.579958541s
+time=2026-03-18T11:25:58.893+08:00 level=WARN msg="CAPTCHA in response" target="Google SERP" type=recaptcha
+time=2026-03-18T11:25:58.894+08:00 level=INFO msg=retrying target="Google SERP" attempt=1
+time=2026-03-18T11:26:20.590+08:00 level=INFO msg="fetch/camoufox: reCAPTCHA detected, attempting to solve..."
+time=2026-03-18T11:26:25.022+08:00 level=INFO msg="fetch/camoufox: reCAPTCHA checkbox clicked, waiting for verification..."
+time=2026-03-18T11:26:30.259+08:00 level=INFO msg="fetch/camoufox: reCAPTCHA checkbox clicked but not solved (may need image challenge)"
+time=2026-03-18T11:26:30.324+08:00 level=INFO msg=fetched target="Google SERP" status=200 bytes=6793 duration=10.575940125s
+time=2026-03-18T11:26:30.324+08:00 level=WARN msg="CAPTCHA in response" target="Google SERP" type=recaptcha
+time=2026-03-18T11:26:30.324+08:00 level=INFO msg=retrying target="Google SERP" attempt=2
+time=2026-03-18T11:26:50.928+08:00 level=INFO msg="fetch/camoufox: reCAPTCHA detected, attempting to solve..."
+time=2026-03-18T11:26:53.691+08:00 level=INFO msg="fetch/camoufox: reCAPTCHA checkbox clicked, waiting for verification..."
+time=2026-03-18T11:26:58.772+08:00 level=INFO msg="fetch/camoufox: reCAPTCHA checkbox clicked but not solved (may need image challenge)"
+time=2026-03-18T11:26:58.906+08:00 level=INFO msg=fetched target="Google SERP" status=200 bytes=6792 duration=9.188585166s
+time=2026-03-18T11:26:58.907+08:00 level=WARN msg="CAPTCHA in response" target="Google SERP" type=recaptcha
+  ✗ 0 items after 3 attempts
+time=2026-03-18T11:26:58.912+08:00 level=INFO msg=pause delay=7.798s
+
+[2/4] Google Maps — villa di bali
+time=2026-03-18T11:27:20.125+08:00 level=INFO msg=fetched target="Google Maps" status=200 bytes=405319 duration=8.07207275s
+  ✓ 10 items extracted on attempt 1
+  [1] Sanur Art Villas @ VillaVillaSleeps 10 • 6 bedrooms • 5 bathroomsSleeps 10 • 6 bedrooms • 5 bathrooms
+  [2] Madani Antique Villas - Wooden Suite with Pool Access @ VillaVillaSleeps 2 • 1 bedroom • 1 bedSleeps 2 • 1 bedroom • 1 bed
+  [3] Rouge - Loft Mango - Villa with Private Pool @ VillaVillaSleeps 4 • 2 bedrooms • 2 bedsSleeps 4 • 2 bedrooms • 2 beds
+  [4] Pondok Gadri Villa Ubud @ VillaVillaSleeps 10 • 5 bedrooms • 5 bathroomsSleeps 10 • 5 bedrooms • 5 bathrooms
+  [5] Waterfall Jungle 4BR Family Villa w/ Pool in Ubud @ VillaVillaSleeps 8 • 4 bedrooms • 4 bedsSleeps 8 • 4 bedrooms • 4 beds
+  [6] Villa Pantulan Bali - Five-Bedroom Villa with Private Pool @ VillaVillaSleeps 10 • 5 bedrooms • 6 bedsSleeps 10 • 5 bedrooms • 6 beds
+  [7] The Barari Villas @ VillaVillaSleeps 3Sleeps 3
+  [8] Montana 6BR Family Villa | Gym & Infinity Pool @ VillaVillaSleeps 12 • 6 bedrooms • 6 bedsSleeps 12 • 6 bedrooms • 6 beds
+  [9] Taluh Bebek Ubud Private Villas - One Bedroom Private Pool Villa with Free Benefit @ VillaVillaSleeps 3 • 1 bedroom • 2 bedsSleeps 3 • 1 bedroom • 2 beds
+  [10] Dewi Sri Private Villa @ VillaVillaSleeps 2 • 1 bedroom • 1 bedSleeps 2 • 1 bedroom • 1 bed
+time=2026-03-18T11:27:20.143+08:00 level=INFO msg=pause delay=4.892s
+
+[3/4] Alibaba — yoga mat (10 products)
+time=2026-03-18T11:27:56.591+08:00 level=INFO msg=fetched target=Alibaba status=200 bytes=1978285 duration=27.616134542s
+  ✓ 10 items extracted on attempt 1
+  [1] Sansd Custom Print Tpe Arch 68cm Yoga Mats Eco Friendly Private Label Non Slip Widen Tpe Yoga Mat Set Oval Yoga Fitness Mat — $2.90-3.20 [Sansd (jiangsu) Environmental Technology Co., Ltd]
+  [2] Pro Custom Eco Friendly PVC Yoga Mat Pilates Travel Fitness Non Slip Yoga Mat — $4.98-27.43 [Nanjing Tropical International Co., Ltd.]
+  [3] Custom Print High Resiliency Eco-Friendly Natural Rubber Yoga Mat Thick TPE Waterproof Non-Slip Exercise Fitness Mat Oval Shape — $3.99 [Guangzhou Kelida Plastic Products Co., Ltd.]
+  [4] Non-Slip Double-Layer Yoga Mat Thick High Density Anti-Skid Mat For Yoga Pilates Fitness Training — $3.62-6.20 [Yiwu Shengxiang Sports Goods Co., Ltd.]
+  [5] Hot Sell Maillard Color Yoga Mat Non-slip Shock Absorption Arch Half Round PU Natural Rubber Exercise Mat For Home Gym — $11.90-15.20 [ECOMERFIT TECH SL]
+  [6] Low Price Sale Of Fitness Equipment Exercise Tropical Black Cork Yoga Mat Natural Rubber — $2.30-8 [Nanjing Tropical International Co., Ltd.]
+  [7] Eco Friendly 10mm 13mm 15mm Rubber Large Yoga Mat Gray Nbr Pilates Travel Fitness Non Slip Yoga Mat — $2.30-3.55 [Shijiazhuang Aofeite Imp & Exp Co., Ltd.]
+  [8] Micro Flaw TPE Floor Mat Thickened Non-Slip Dance Carpet Children's Shock Absorption Mat Camping Fitness Jump Rope Yoga Mat — $4.62-5.88 [Yiwu Shengxiang Sports Goods Co., Ltd.]
+  [9] Customized Wholesale TPE Single Layer Yoga Mat 68mm Thick 720g Weight Thickened Widened Lengthened Non-slip Rectangle Mat — $2.86-4.60 [Beijing Huanxiang Shengshi Technology Co., Ltd.]
+  [10] Dream Health Gym Non Glue Eco Friendly Pu Rubber 3-6mm Best Quality Adult Extra Wide Infrared Heat Print Yoga Mat — $4.98-19 [Nanjing Tropical International Co., Ltd.]
+time=2026-03-18T11:27:56.636+08:00 level=INFO msg=pause delay=5.242s
+
+[4/4] Yoga Alliance — 10 schools
+time=2026-03-18T11:28:20.218+08:00 level=INFO msg=fetched target="Yoga Alliance" status=200 bytes=388755 duration=14.707575292s
+time=2026-03-18T11:28:20.225+08:00 level=WARN msg="CAPTCHA in response" target="Yoga Alliance" type=recaptcha
+time=2026-03-18T11:28:20.225+08:00 level=INFO msg=retrying target="Yoga Alliance" attempt=1
+time=2026-03-18T11:28:43.507+08:00 level=INFO msg=fetched target="Yoga Alliance" status=200 bytes=388755 duration=13.541318667s
+time=2026-03-18T11:28:43.535+08:00 level=WARN msg="CAPTCHA in response" target="Yoga Alliance" type=recaptcha
+time=2026-03-18T11:28:43.535+08:00 level=INFO msg=retrying target="Yoga Alliance" attempt=2
+time=2026-03-18T11:29:10.089+08:00 level=INFO msg=fetched target="Yoga Alliance" status=200 bytes=388755 duration=16.7869175s
+time=2026-03-18T11:29:10.097+08:00 level=WARN msg="CAPTCHA in response" target="Yoga Alliance" type=recaptcha
+  ✗ 0 items after 3 attempts
+
+
+══════════════════════════════════════════════════════════════════
+FINAL REPORT — Rotating Residential Proxy
+══════════════════════════════════════════════════════════════════
+Target               | Reqs |   OK | Block |  CAPT | Items | Avoidance
+─────────────────────────────────────────────────────────────────
+Google SERP          |    3 |    3 |     0 |     3 |     0 | 100%
+Google Maps          |    1 |    1 |     0 |     0 |    10 | 100%
+Alibaba              |    1 |    1 |     0 |     0 |    10 | 100%
+Yoga Alliance        |    3 |    3 |     0 |     3 |     0 | 100%
+─────────────────────────────────────────────────────────────────
+TOTAL                |    8 |    8 |     0 |     6 |    20 | 100%
+══════════════════════════════════════════════════════════════════

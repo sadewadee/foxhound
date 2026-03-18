@@ -1,0 +1,54 @@
+══════════════════════════════════════════════════════════════
+  FOXHOUND — Visible Browser + SOCKS5 Proxy Test
+  Headless: FALSE (you will see the browser window)
+  Proxy:    socks5://***@REDACTED_HOST:6418
+  UA:       Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1; rv:148.0) Gecko/20100101 Firefox/148.0
+══════════════════════════════════════════════════════════════
+time=2026-03-18T11:18:51.449+08:00 level=INFO msg="launching visible Camoufox with proxy..."
+time=2026-03-18T11:18:52.420+08:00 level=INFO msg="fetch/camoufox: browser launching with proxy" server=http://REDACTED_HOST:6418
+time=2026-03-18T11:18:54.860+08:00 level=INFO msg="fetch/camoufox: browser launched" headless=false block_images=false timeout=1m0s
+time=2026-03-18T11:18:54.860+08:00 level=INFO msg="Camoufox visible browser ready with proxy"
+
+[1/4] Google SERP — wisata alam jawa timur
+time=2026-03-18T11:19:17.513+08:00 level=ERROR msg="fetch failed" target="Google SERP" err="fetch/camoufox: navigating to https://www.google.com/search?q=wisata+alam+jawa+timur&hl=id&gl=id&num=10: Frame.Goto https://www.google.com/search?q=wisata+alam+jawa+timur&hl=id&gl=id&num=10: playwright: NS_ERROR_PROXY_BAD_GATEWAY"
+  Status: 1 req, 0 OK, 1 blocked, 0 CAPTCHA | 0 items | avoidance 0%
+time=2026-03-18T11:19:17.523+08:00 level=INFO msg="human pause" delay=4.595s
+
+[2/4] Google Maps — villa di bali
+time=2026-03-18T11:19:44.076+08:00 level=INFO msg=fetched target="Google Maps" status=200 bytes=442968 duration=16.382321416s
+  Status: 1 req, 1 OK, 0 blocked, 0 CAPTCHA | 10 items | avoidance 100%
+  [1] Show the Input Tools menu
+  [2] Delu Villas Suite - One-Bedroom Villa with Private Pool
+  [3] Delu Villas Suite - One-Bedroom Villa with Private Pool
+  [4] Pondok Sebatu Villa
+  [5] Pondok Sebatu Villa
+  [6] Exceptional 3brd with pool and breakfast
+  [7] Exceptional 3brd with pool and breakfast
+  [8] Madani Antique Villas - Wooden Suite with Pool Access
+  [9] Madani Antique Villas - Wooden Suite with Pool Access
+  [10] Sanur Art Villas
+time=2026-03-18T11:19:44.093+08:00 level=INFO msg="human pause" delay=4.54s
+
+[3/4] Alibaba — yoga mat
+time=2026-03-18T11:20:11.199+08:00 level=INFO msg=fetched target=Alibaba status=200 bytes=118151 duration=17.862253709s
+  Status: 1 req, 1 OK, 0 blocked, 0 CAPTCHA | 0 items | avoidance 100%
+time=2026-03-18T11:20:11.204+08:00 level=INFO msg="human pause" delay=4.418s
+
+[4/4] Yoga Alliance — school directory
+time=2026-03-18T11:20:31.719+08:00 level=INFO msg=fetched target="Yoga Alliance" status=200 bytes=388755 duration=12.952734083s
+time=2026-03-18T11:20:31.722+08:00 level=WARN msg="CAPTCHA detected" target="Yoga Alliance" type=recaptcha sitekey=""
+  Status: 1 req, 1 OK, 0 blocked, 1 CAPTCHA | 0 items | avoidance 100%
+
+
+══════════════════════════════════════════════════════════════════════════
+BENCHMARK REPORT — Visible Browser + SOCKS5 Proxy
+══════════════════════════════════════════════════════════════════════════
+Target               | Reqs |   OK | Block | CAPTCHA |   Items | Avoidance
+──────────────────────────────────────────────────────────────────────────
+Google SERP          |    1 |    0 |     1 |     0   |       0 | 0%
+Google Maps          |    1 |    1 |     0 |     0   |      10 | 100%
+Alibaba              |    1 |    1 |     0 |     0   |       0 | 100%
+Yoga Alliance        |    1 |    1 |     0 |     1   |       0 | 100%
+──────────────────────────────────────────────────────────────────────────
+TOTAL                |    4 |    3 |     1 |     1   |      10 | 75%
+══════════════════════════════════════════════════════════════════════════
