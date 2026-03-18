@@ -157,8 +157,21 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 
 	browser, err := pw.Firefox.Launch(launchOpts)
 	if err != nil {
-		_ = pw.Stop()
-		return nil, fmt.Errorf("fetch/camoufox: launching firefox/camoufox: %w", err)
+		// Auto-install Firefox if not found. This covers first-run scenarios
+		// so users never need to run `playwright install firefox` manually.
+		slog.Info("fetch/camoufox: Firefox not found, auto-installing...")
+		if installErr := playwright.Install(&playwright.RunOptions{
+			Browsers: []string{"firefox"},
+		}); installErr != nil {
+			_ = pw.Stop()
+			return nil, fmt.Errorf("fetch/camoufox: auto-install firefox failed: %w (original launch error: %v)", installErr, err)
+		}
+		slog.Info("fetch/camoufox: Firefox installed successfully, retrying launch")
+		browser, err = pw.Firefox.Launch(launchOpts)
+		if err != nil {
+			_ = pw.Stop()
+			return nil, fmt.Errorf("fetch/camoufox: launching firefox after auto-install: %w", err)
+		}
 	}
 
 	f.pw = pw
