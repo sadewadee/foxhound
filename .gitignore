@@ -5,6 +5,14 @@ full_test
 proxy_test
 visible_proxy_test
 residential_test
+ecommerce
+realtime
+travel
+camoufox_final
+maps_benchmark
+maps_contacts
+maps_contacts_test
+debug_html
 *.exe
 *.dll
 *.so
@@ -12,6 +20,9 @@ residential_test
 
 # Test binaries
 *.test
+
+# Test results (generated, not source)
+tests/results/
 
 # Coverage
 *.out
