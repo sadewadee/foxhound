@@ -1,0 +1,107 @@
+# github.com/foxhound-scraper/foxhound/tests.test
+ld: warning: '/private/var/folders/t9/4j754wc9319ftr_1xfrn5z7m0000gn/T/go-link-3671552463/000013.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+=== RUN   TestFullPipeline_IdentityToExport
+    integration_test.go:65: Identity: firefox windows, UA=Mozilla/5.0 (Windows NT 11.0; Win64; x64; rv:148.0) Gecko/20...
+    integration_test.go:88: Fetch: status=200, bytes=180, duration=1.017333ms
+    integration_test.go:108: Parsed: name=Widget Pro, price=$29.99, sku=WP-001
+    integration_test.go:128: Pipeline output: map[name:Widget Pro price:29.99 sku:WP-001]
+    integration_test.go:148: CSV output:
+        name,price,sku
+        Widget Pro,29.99,WP-001
+    integration_test.go:166: JSONL output: {"name":"Widget Pro","price":29.99,"sku":"WP-001"}
+--- PASS: TestFullPipeline_IdentityToExport (0.02s)
+=== RUN   TestEngineHunt_LocalCrawl
+2026/03/18 08:30:54 INFO hunt started component=hunt hunt=test-crawl walkers=2 seeds=1 domain=localhost
+2026/03/18 08:30:54 INFO hunt complete component=hunt hunt=test-crawl stats="elapsed=0s requests=4 success=4 errors=0 blocked=0 items=4 escalated=0 bytes=563 [localhost: req=4 err=0 blocked=0 avg=0s]"
+    integration_test.go:283: Hunt stats: elapsed=0s requests=4 success=4 errors=0 blocked=0 items=4 escalated=0 bytes=563 [localhost: req=4 err=0 blocked=0 avg=0s]
+    integration_test.go:284: Items extracted: 4
+    integration_test.go:285: HTTP requests to server: 4
+    integration_test.go:298: JSONL lines: 4
+--- PASS: TestEngineHunt_LocalCrawl (0.07s)
+=== RUN   TestSmartFetcher_BlockEscalation
+2026/03/18 08:30:54 INFO fetch/smart: block detected, escalating to browser fetcher status=403 url=http://127.0.0.1:57819 job_id=test
+    integration_test.go:351: Smart fetch: escalated after 403, final status=200
+--- PASS: TestSmartFetcher_BlockEscalation (0.00s)
+=== RUN   TestIdentityConsistency
+=== RUN   TestIdentityConsistency/firefox_windows
+    integration_test.go:410: OK: UA=Mozilla/5.0 (Windows NT 11.0; Win64; x64; rv:148.0..., Platform=Win32, TLS=firefox_148.0, Screen=1920x1080, Locale=en-US, TZ=America/New_York
+=== RUN   TestIdentityConsistency/firefox_macos
+    integration_test.go:410: OK: UA=Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0; rv:14..., Platform=MacIntel, TLS=firefox_148.0, Screen=2560x1600, Locale=en-US, TZ=America/New_York
+=== RUN   TestIdentityConsistency/firefox_linux
+    integration_test.go:410: OK: UA=Mozilla/5.0 (X11; Linux x86_64; rv:148.0) Gecko/20..., Platform=Linux x86_64, TLS=firefox_148.0, Screen=1920x1080, Locale=de-DE, TZ=Europe/Berlin
+=== RUN   TestIdentityConsistency/chrome_windows
+    integration_test.go:410: OK: UA=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb..., Platform=Win32, TLS=chrome_131.0.0.0, Screen=1920x1080, Locale=en-US, TZ=America/New_York
+=== RUN   TestIdentityConsistency/chrome_macos
+    integration_test.go:410: OK: UA=Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1) Apple..., Platform=MacIntel, TLS=chrome_131.0.0.0, Screen=3024x1964, Locale=en-US, TZ=America/Los_Angeles
+=== RUN   TestIdentityConsistency/chrome_linux
+    integration_test.go:410: OK: UA=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36..., Platform=Linux x86_64, TLS=chrome_131.0.0.0, Screen=2560x1440, Locale=de-DE, TZ=Europe/Berlin
+--- PASS: TestIdentityConsistency (0.00s)
+    --- PASS: TestIdentityConsistency/firefox_windows (0.00s)
+    --- PASS: TestIdentityConsistency/firefox_macos (0.00s)
+    --- PASS: TestIdentityConsistency/firefox_linux (0.00s)
+    --- PASS: TestIdentityConsistency/chrome_windows (0.00s)
+    --- PASS: TestIdentityConsistency/chrome_macos (0.00s)
+    --- PASS: TestIdentityConsistency/chrome_linux (0.00s)
+=== RUN   TestMiddlewareChain
+    integration_test.go:474: Middleware chain: 3 requests → 2 server hits (dedup filtered 1)
+--- PASS: TestMiddlewareChain (0.00s)
+=== RUN   TestProxyPool_RotationAndHealth
+2026/03/18 08:30:54 INFO proxy: pool initialised count=3
+    integration_test.go:517: Round-robin: map[http://user:pass@proxy1.example.com:8080:2 http://user:pass@proxy2.example.com:8080:2 http://user:pass@proxy3.example.com:8080:2]
+--- PASS: TestProxyPool_RotationAndHealth (0.00s)
+=== RUN   TestMemoryQueue_PriorityOrdering
+    integration_test.go:546: Priority ordering: high → normal → low ✓
+--- PASS: TestMemoryQueue_PriorityOrdering (0.00s)
+=== RUN   TestMemoryCache_LRUAndTTL
+    integration_test.go:589: LRU eviction + TTL expiry ✓
+--- PASS: TestMemoryCache_LRUAndTTL (0.10s)
+=== RUN   TestBehaviorTiming_LogNormal
+    integration_test.go:619: Log-normal: n=1000, mean=3.847720155s
+--- PASS: TestBehaviorTiming_LogNormal (0.00s)
+=== RUN   TestBehaviorRhythm_BurstPause
+    integration_test.go:649: Rhythm: 27 burst delays, pause reached: true
+--- PASS: TestBehaviorRhythm_BurstPause (0.00s)
+=== RUN   TestCaptchaDetection
+=== RUN   TestCaptchaDetection/cloudflare_turnstile
+    integration_test.go:695: Detected: cloudflare_turnstile (sitekey="0x4AAAA")
+=== RUN   TestCaptchaDetection/recaptcha
+    integration_test.go:695: Detected: recaptcha (sitekey="6Le")
+=== RUN   TestCaptchaDetection/hcaptcha
+    integration_test.go:695: Detected: hcaptcha (sitekey="abc")
+=== RUN   TestCaptchaDetection/no_captcha
+    integration_test.go:695: Detected:  (sitekey="")
+--- PASS: TestCaptchaDetection (0.00s)
+    --- PASS: TestCaptchaDetection/cloudflare_turnstile (0.00s)
+    --- PASS: TestCaptchaDetection/recaptcha (0.00s)
+    --- PASS: TestCaptchaDetection/hcaptcha (0.00s)
+    --- PASS: TestCaptchaDetection/no_captcha (0.00s)
+=== RUN   TestParseAllModes
+    integration_test.go:732: CSS: found 2 products: [Widget Gadget]
+    integration_test.go:742: Regex: [$19.99 $39.99]
+    integration_test.go:758: Structured: map[first_product:Widget title:Test]
+    integration_test.go:774: JSONPath: [map[name:A] map[name:B]]
+--- PASS: TestParseAllModes (0.00s)
+=== RUN   TestSQLiteQueue_Persistence
+    integration_test.go:812: SQLite persistence: 2 jobs survived close/reopen, popped j1 first
+--- PASS: TestSQLiteQueue_Persistence (0.02s)
+=== RUN   TestGeoIP_CountryLookup
+=== RUN   TestGeoIP_CountryLookup/US
+    integration_test.go:846: US: tz=America/New_York, locale=en-US, lat=40.71, lng=-74.01
+=== RUN   TestGeoIP_CountryLookup/GB
+    integration_test.go:846: GB: tz=Europe/London, locale=en-GB, lat=51.51, lng=-0.13
+=== RUN   TestGeoIP_CountryLookup/JP
+    integration_test.go:846: JP: tz=Asia/Tokyo, locale=ja-JP, lat=35.68, lng=139.65
+=== RUN   TestGeoIP_CountryLookup/DE
+    integration_test.go:846: DE: tz=Europe/Berlin, locale=de-DE, lat=52.52, lng=13.40
+=== NAME  TestGeoIP_CountryLookup
+    integration_test.go:862: WithCountry(JP): tz=Asia/Tokyo, locale=ja-JP
+--- PASS: TestGeoIP_CountryLookup (0.00s)
+    --- PASS: TestGeoIP_CountryLookup/US (0.00s)
+    --- PASS: TestGeoIP_CountryLookup/GB (0.00s)
+    --- PASS: TestGeoIP_CountryLookup/JP (0.00s)
+    --- PASS: TestGeoIP_CountryLookup/DE (0.00s)
+=== RUN   TestConfigLoading
+    integration_test.go:927: Config: domain=test.example.com, walkers=5, browser=chrome, rps=3.0, depth=4
+--- PASS: TestConfigLoading (0.00s)
+PASS
+ok  	github.com/foxhound-scraper/foxhound/tests	1.932s
