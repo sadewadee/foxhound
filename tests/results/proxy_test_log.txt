@@ -1,0 +1,50 @@
+time=2026-03-18T09:08:30.671+08:00 level=INFO msg="identity generated" ua="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20..."
+
+══════════════════════════════════════════════════════
+STATIC MODE (StealthFetcher) — Testing proxy protocols
+══════════════════════════════════════════════════════
+
+--- Proxy: socks5 ---
+  IP Check (httpbin)        [socks5] 200 OK | 3267ms | 33 bytes | IP: 50.114.243.177
+  IP Check (ipinfo)         [socks5] 200 OK | 2210ms | 353 bytes | IP: 50.114.243.177
+  TLS Check                 [socks5] 200 OK | 3004ms | 8201 bytes | IP: 50.114.243.177:54799
+  Google SERP               [socks5] 200 OK | 2457ms | 89428 bytes
+  Alibaba                   [socks5] 200 OK | 7992ms | 991225 bytes
+
+--- Proxy: https ---
+  IP Check (httpbin)        [https] 200 OK | 2080ms | 33 bytes | IP: 50.114.243.177
+  IP Check (ipinfo)         [https] 200 OK | 1444ms | 353 bytes | IP: 50.114.243.177
+  TLS Check                 [https] 200 OK | 1797ms | 8202 bytes | IP: 50.114.243.177:43389
+  Google SERP               [https] 200 OK | 1833ms | 89515 bytes
+  Alibaba                   [https] 200 OK | 5397ms | 967359 bytes
+
+══════════════════════════════════════════════════════
+BROWSER MODE (Camoufox) — Testing with SOCKS5 proxy
+══════════════════════════════════════════════════════
+time=2026-03-18T09:09:22.171+08:00 level=INFO msg="launching Camoufox with proxy..."
+time=2026-03-18T09:09:25.530+08:00 level=INFO msg="fetch/camoufox: browser launched" headless=true block_images=true timeout=45s
+  IP Check (httpbin)        [direct] 200 OK | 3370ms | 157 bytes
+  Google Maps               [direct] 200 OK | 6091ms | 397061 bytes
+
+
+══════════════════════════════════════════════════════════════════════════
+PROXY TEST SUMMARY
+══════════════════════════════════════════════════════════════════════════
+Mode     | Proxy    | Target                    | Status | Latency  | Result
+─────────────────────────────────────────────────────────────────────────
+static   | socks5   | https://httpbin.org/ip    | 200    | 3267    ms | OK (IP: 50.114.243.177)
+static   | socks5   | https://ipinfo.io/json    | 200    | 2210    ms | OK (IP: 50.114.243.177)
+static   | socks5   | https://tls.peet.ws/api/a | 200    | 3004    ms | OK (IP: 50.114.243.177:54799)
+static   | socks5   | https://www.google.com/se | 200    | 2457    ms | OK (IP: -)
+static   | socks5   | https://www.alibaba.com/t | 200    | 7992    ms | OK (IP: -)
+static   | https    | https://httpbin.org/ip    | 200    | 2080    ms | OK (IP: 50.114.243.177)
+static   | https    | https://ipinfo.io/json    | 200    | 1444    ms | OK (IP: 50.114.243.177)
+static   | https    | https://tls.peet.ws/api/a | 200    | 1797    ms | OK (IP: 50.114.243.177:43389)
+static   | https    | https://www.google.com/se | 200    | 1833    ms | OK (IP: -)
+static   | https    | https://www.alibaba.com/t | 200    | 5397    ms | OK (IP: -)
+camoufox | direct   | https://httpbin.org/ip    | 200    | 3370    ms | OK (IP: -)
+camoufox | direct   | https://www.google.com/ma | 200    | 6091    ms | OK (IP: -)
+─────────────────────────────────────────────────────────────────────────
+Total: 12 requests | OK: 12 | Blocked/Error: 0 | Block Avoidance: 100.0%
+══════════════════════════════════════════════════════════════════════════
+time=2026-03-18T09:09:41.520+08:00 level=INFO msg="results saved" path=tests/results/proxy_test.json

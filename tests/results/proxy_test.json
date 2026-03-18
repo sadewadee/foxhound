@@ -1,0 +1,116 @@
+[
+  {
+    "mode": "static",
+    "proxy_type": "socks5",
+    "target_url": "https://httpbin.org/ip",
+    "status": 200,
+    "proxy_ip": "50.114.243.177",
+    "bytes": 33,
+    "latency_ms": 3267,
+    "blocked": false
+  },
+  {
+    "mode": "static",
+    "proxy_type": "socks5",
+    "target_url": "https://ipinfo.io/json",
+    "status": 200,
+    "proxy_ip": "50.114.243.177",
+    "bytes": 353,
+    "latency_ms": 2210,
+    "blocked": false
+  },
+  {
+    "mode": "static",
+    "proxy_type": "socks5",
+    "target_url": "https://tls.peet.ws/api/all",
+    "status": 200,
+    "proxy_ip": "50.114.243.177:54799",
+    "bytes": 8201,
+    "latency_ms": 3004,
+    "blocked": false
+  },
+  {
+    "mode": "static",
+    "proxy_type": "socks5",
+    "target_url": "https://www.google.com/search?q=wisata+alam+jawa+timur\u0026hl=id\u0026num=10",
+    "status": 200,
+    "bytes": 89428,
+    "latency_ms": 2457,
+    "blocked": false
+  },
+  {
+    "mode": "static",
+    "proxy_type": "socks5",
+    "target_url": "https://www.alibaba.com/trade/search?SearchText=yoga+mat",
+    "status": 200,
+    "bytes": 991225,
+    "latency_ms": 7992,
+    "blocked": false
+  },
+  {
+    "mode": "static",
+    "proxy_type": "https",
+    "target_url": "https://httpbin.org/ip",
+    "status": 200,
+    "proxy_ip": "50.114.243.177",
+    "bytes": 33,
+    "latency_ms": 2080,
+    "blocked": false
+  },
+  {
+    "mode": "static",
+    "proxy_type": "https",
+    "target_url": "https://ipinfo.io/json",
+    "status": 200,
+    "proxy_ip": "50.114.243.177",
+    "bytes": 353,
+    "latency_ms": 1444,
+    "blocked": false
+  },
+  {
+    "mode": "static",
+    "proxy_type": "https",
+    "target_url": "https://tls.peet.ws/api/all",
+    "status": 200,
+    "proxy_ip": "50.114.243.177:43389",
+    "bytes": 8202,
+    "latency_ms": 1797,
+    "blocked": false
+  },
+  {
+    "mode": "static",
+    "proxy_type": "https",
+    "target_url": "https://www.google.com/search?q=wisata+alam+jawa+timur\u0026hl=id\u0026num=10",
+    "status": 200,
+    "bytes": 89515,
+    "latency_ms": 1833,
+    "blocked": false
+  },
+  {
+    "mode": "static",
+    "proxy_type": "https",
+    "target_url": "https://www.alibaba.com/trade/search?SearchText=yoga+mat",
+    "status": 200,
+    "bytes": 967359,
+    "latency_ms": 5397,
+    "blocked": false
+  },
+  {
+    "mode": "camoufox",
+    "proxy_type": "direct",
+    "target_url": "https://httpbin.org/ip",
+    "status": 200,
+    "bytes": 157,
+    "latency_ms": 3370,
+    "blocked": false
+  },
+  {
+    "mode": "camoufox",
+    "proxy_type": "direct",
+    "target_url": "https://www.google.com/maps/search/villa+di+bali/",
+    "status": 200,
+    "bytes": 397061,
+    "latency_ms": 6091,
+    "blocked": false
+  }
+]
