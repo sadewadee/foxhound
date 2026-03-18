@@ -18,11 +18,15 @@ import (
 // priority tier, FIFO order is preserved by incorporating a microsecond
 // timestamp into the score:
 //
-//	score = -(priority * 1_000_000_000 + created_at_micros)
+//	score = -(priority * 1_000_000_000) + created_at_micros
 //
-// The negation makes ZPOPMIN return the job with the highest effective
-// priority.  Distributed workers can safely share the same key because
-// ZPOPMIN is atomic.
+// ZPOPMIN selects the member with the lowest score. Negating the priority
+// component ensures higher-priority jobs have a more-negative base score and
+// are therefore selected first. Adding (not subtracting) the microsecond
+// timestamp as a positive offset means an older job (smaller micros) produces
+// a lower overall score than a newer job within the same priority tier, giving
+// correct FIFO ordering. Distributed workers can safely share the same key
+// because ZPOPMIN is atomic.
 type RedisQueue struct {
 	client *redis.Client
 	key    string
@@ -64,10 +68,12 @@ func (q *RedisQueue) Push(ctx context.Context, job *foxhound.Job) error {
 		return fmt.Errorf("queue: redis push: marshal job: %w", err)
 	}
 
-	// Score: negate so lower score = higher priority in ZPOPMIN.
-	// Multiply priority by a large factor and add microseconds for FIFO tiebreak.
+	// Score: negate the priority component so that higher-priority jobs receive
+	// a more-negative (i.e. lower) score, which ZPOPMIN selects first. Within
+	// the same priority tier, older jobs (smaller micros) produce a lower score
+	// than newer jobs, preserving FIFO order.
 	micros := job.CreatedAt.UnixMicro()
-	score := -(float64(job.Priority)*1_000_000_000 - float64(micros))
+	score := -(float64(job.Priority)*1_000_000_000) + float64(micros)
 
 	if err := q.client.ZAdd(ctx, q.key, redis.Z{
 		Score:  score,

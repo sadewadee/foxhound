@@ -26,6 +26,9 @@ type BehaviorProfile struct {
 	Scroll     ScrollConfig
 	Keyboard   KeyboardConfig
 	Navigation NavigationConfig
+	// Rhythm controls the burst/pause cadence of a virtual user session.
+	// It is initialised from DefaultRhythmConfig and tuned per preset.
+	Rhythm *Rhythm
 }
 
 // GetProfile returns the named profile.  Falls back to ModerateProfile for
@@ -86,6 +89,16 @@ func CarefulProfile() *BehaviorProfile {
 			UselessPageProb: 0.20,
 			SearchProb:      0.25,
 		},
+
+		Rhythm: NewRhythm(RhythmConfig{
+			BurstMin:      5,
+			BurstMax:      10,
+			PauseMin:      30 * time.Second,
+			PauseMax:      90 * time.Second,
+			LongPauseMin:  3 * time.Minute,
+			LongPauseMax:  8 * time.Minute,
+			LongPauseProb: 0.25, // more frequent long breaks — very human
+		}),
 	}
 }
 
@@ -108,6 +121,8 @@ func ModerateProfile() *BehaviorProfile {
 		Keyboard: DefaultKeyboardConfig(),
 
 		Navigation: DefaultNavigationConfig(),
+
+		Rhythm: NewRhythm(DefaultRhythmConfig()),
 	}
 }
 
@@ -156,5 +171,15 @@ func AggressiveProfile() *BehaviorProfile {
 			UselessPageProb: 0.05,
 			SearchProb:      0.10,
 		},
+
+		Rhythm: NewRhythm(RhythmConfig{
+			BurstMin:      8,
+			BurstMax:      20,
+			PauseMin:      5 * time.Second,
+			PauseMax:      20 * time.Second,
+			LongPauseMin:  30 * time.Second,
+			LongPauseMax:  2 * time.Minute,
+			LongPauseProb: 0.08, // fewer long pauses — faster throughput
+		}),
 	}
 }

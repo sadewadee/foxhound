@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	foxhound "github.com/foxhound-scraper/foxhound"
@@ -81,14 +82,15 @@ func (s HuntState) String() string {
 //	    log.Fatal(err)
 //	}
 type Hunt struct {
-	config  HuntConfig
-	fetcher foxhound.Fetcher // middleware-wrapped fetcher
-	state   HuntState
-	stats   *Stats
-	cancel  context.CancelFunc
-	walkers []*Walker
-	mu      sync.RWMutex
-	logger  *slog.Logger
+	config        HuntConfig
+	fetcher       foxhound.Fetcher // middleware-wrapped fetcher
+	state         HuntState
+	stats         *Stats
+	cancel        context.CancelFunc
+	walkers       []*Walker
+	mu            sync.RWMutex
+	logger        *slog.Logger
+	activeWalkers atomic.Int32
 }
 
 // NewHunt creates a Hunt from cfg. It does not start any goroutines; call
@@ -190,8 +192,17 @@ func (h *Hunt) Run(ctx context.Context) error {
 // drainPollInterval is how often Hunt checks whether the queue is empty.
 var drainPollInterval = 10 * time.Millisecond
 
-// drainQueue polls the queue until it is empty, then cancels the run context
-// so walkers exit cleanly after finishing their current job.
+// drainSettleDelay is a brief pause applied once both the queue is empty and
+// all walkers are idle.  It covers the tiny window between a walker's
+// queue.Pop return and its activeWalkers increment.
+var drainSettleDelay = 50 * time.Millisecond
+
+// drainQueue polls the queue until it is empty AND no walkers are actively
+// processing a job, then cancels the run context so walkers exit cleanly.
+//
+// The double condition prevents premature cancellation when the last job has
+// been popped but the processing walker has not yet enqueued its discovered
+// jobs.
 func (h *Hunt) drainQueue(ctx context.Context, cancel context.CancelFunc) {
 	for {
 		select {
@@ -199,10 +210,24 @@ func (h *Hunt) drainQueue(ctx context.Context, cancel context.CancelFunc) {
 			return
 		default:
 		}
-		if h.config.Queue.Len() == 0 {
-			cancel()
-			return
+
+		if h.config.Queue.Len() == 0 && h.activeWalkers.Load() == 0 {
+			// Both conditions met.  Apply a short settling delay to handle the
+			// tiny window between Pop returning and activeWalkers being
+			// incremented by the walker goroutine.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(drainSettleDelay):
+			}
+			// Re-check after the settle delay — a walker may have incremented
+			// activeWalkers or pushed a new job during that window.
+			if h.config.Queue.Len() == 0 && h.activeWalkers.Load() == 0 {
+				cancel()
+				return
+			}
 		}
+
 		select {
 		case <-ctx.Done():
 			return

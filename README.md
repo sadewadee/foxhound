@@ -58,9 +58,9 @@ foxhound resume --hunt-id <id> --queue redis://localhost:6379
 package main
 
 import (
-	"github.com/foxhound-scraper/foxhound"
-	"github.com/foxhound-scraper/foxhound/engine"
-	"github.com/foxhound-scraper/foxhound/parse"
+	"github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/engine"
+	"github.com/sadewadee/foxhound/parse"
 )
 
 func main() {

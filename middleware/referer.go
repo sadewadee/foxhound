@@ -32,9 +32,15 @@ func NewReferer() foxhound.Middleware {
 // Wrap returns a Fetcher that populates the Referer header.
 func (r *refererMiddleware) Wrap(next foxhound.Fetcher) foxhound.Fetcher {
 	return foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
-		if job.Headers == nil {
-			job.Headers = make(http.Header)
+		// Clone the job to avoid mutating shared state. Retry middleware may
+		// pass the same Job pointer on multiple attempts; mutating headers
+		// in-place causes a data race.
+		clonedJob := *job
+		clonedJob.Headers = job.Headers.Clone()
+		if clonedJob.Headers == nil {
+			clonedJob.Headers = make(http.Header)
 		}
+		job = &clonedJob
 
 		// Do not override a manually set Referer.
 		if job.Headers.Get("Referer") == "" {

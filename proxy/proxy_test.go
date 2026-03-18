@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -234,5 +235,223 @@ func TestHealthCheckerMarksBrokenProxy(t *testing.T) {
 	h := checker.Check(context.Background(), p)
 	if h.Alive {
 		t.Errorf("expected proxy to be dead for unreachable address")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// H4: HealthChecker must route traffic through the proxy under test
+// ---------------------------------------------------------------------------
+
+// TestHealthChecker_RoutesRequestThroughProxy verifies that Check uses the
+// proxy URL when making the health-check request.  We spin up a local proxy
+// server that records whether it received a CONNECT/GET and assert it was
+// actually called.
+func TestHealthChecker_RoutesRequestThroughProxy(t *testing.T) {
+	var proxyHit atomic.Bool
+
+	// Minimal proxy server: accepts any connection, records the hit, then
+	// responds 200 so the check reads a valid HTTP response.
+	proxySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyHit.Store(true)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer proxySrv.Close()
+
+	// Target server that should be reached via the proxy above.
+	targetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer targetSrv.Close()
+
+	checker := proxy.NewHealthChecker(targetSrv.URL, 500*time.Millisecond)
+	p := &proxy.Proxy{
+		URL:      proxySrv.URL,
+		Protocol: "http",
+		Host:     "127.0.0.1",
+		Port:     "0",
+	}
+	checker.Check(context.Background(), p)
+
+	if !proxyHit.Load() {
+		t.Error("HealthChecker did not route the health-check request through the proxy")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// M1: Pool.selectBest must respect maxRequests and auto-cooldown
+// ---------------------------------------------------------------------------
+
+// TestPool_MaxRequests_SkipsExhaustedProxy verifies that when a proxy has
+// handled maxRequests it is no longer returned by Get, and that after Release
+// pushes it onto cooldown it is unavailable within a short timeout.
+func TestPool_MaxRequests_SkipsExhaustedProxy(t *testing.T) {
+	provider := proxy.Static([]string{"http://1.2.3.4:8080"})
+	pool := proxy.NewPool(provider)
+	pool.SetMaxRequests(2)
+	pool.SetCooldown(10 * time.Second)
+	defer pool.Close()
+
+	// Consume the 2 allowed requests.
+	p1, err := pool.Get(context.Background())
+	if err != nil {
+		t.Fatalf("Get #1: %v", err)
+	}
+	pool.Release(p1, true)
+
+	p2, err := pool.Get(context.Background())
+	if err != nil {
+		t.Fatalf("Get #2: %v", err)
+	}
+	pool.Release(p2, true) // this release hits maxRequests — should trigger cooldown
+
+	// Now the proxy should be on cooldown; Get with short deadline must fail.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err = pool.Get(ctx)
+	if err == nil {
+		t.Fatal("expected Get to fail after proxy reached maxRequests, but it succeeded")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// M2: Pool rotation strategies
+// ---------------------------------------------------------------------------
+
+// TestPool_PerRequest_RoundRobin verifies that successive Get calls with
+// PerRequest rotation cycle through different proxies rather than always
+// returning the highest-score one.
+func TestPool_PerRequest_RoundRobin(t *testing.T) {
+	provider := proxy.Static([]string{
+		"http://1.1.1.1:8080",
+		"http://2.2.2.2:8080",
+		"http://3.3.3.3:8080",
+	})
+	pool := proxy.NewPool(provider)
+	pool.SetRotation(proxy.PerRequest)
+	defer pool.Close()
+
+	seen := map[string]int{}
+	for i := 0; i < 9; i++ {
+		p, err := pool.Get(context.Background())
+		if err != nil {
+			t.Fatalf("Get #%d: %v", i, err)
+		}
+		seen[p.URL]++
+		pool.Release(p, true)
+	}
+
+	// With 3 proxies and 9 requests each proxy should be used at least twice.
+	for url, count := range seen {
+		if count < 2 {
+			t.Errorf("proxy %s used only %d times in 9 round-robin calls — not cycling", url, count)
+		}
+	}
+	if len(seen) < 3 {
+		t.Errorf("only %d distinct proxies seen in 9 calls — expected all 3 to be used", len(seen))
+	}
+}
+
+// TestPool_GetForSession_StickyProxy verifies that two calls with the same
+// sessionID return the same proxy.
+func TestPool_GetForSession_StickyProxy(t *testing.T) {
+	provider := proxy.Static([]string{
+		"http://1.1.1.1:8080",
+		"http://2.2.2.2:8080",
+	})
+	pool := proxy.NewPool(provider)
+	defer pool.Close()
+
+	ctx := context.Background()
+	p1, err := pool.GetForSession(ctx, "session-abc")
+	if err != nil {
+		t.Fatalf("GetForSession #1: %v", err)
+	}
+	p2, err := pool.GetForSession(ctx, "session-abc")
+	if err != nil {
+		t.Fatalf("GetForSession #2: %v", err)
+	}
+	if p1.URL != p2.URL {
+		t.Errorf("GetForSession returned different proxies for same session: %s vs %s", p1.URL, p2.URL)
+	}
+}
+
+// TestPool_GetForDomain_StickyProxy verifies that two calls with the same
+// domain return the same proxy.
+func TestPool_GetForDomain_StickyProxy(t *testing.T) {
+	provider := proxy.Static([]string{
+		"http://1.1.1.1:8080",
+		"http://2.2.2.2:8080",
+	})
+	pool := proxy.NewPool(provider)
+	defer pool.Close()
+
+	ctx := context.Background()
+	p1, err := pool.GetForDomain(ctx, "example.com")
+	if err != nil {
+		t.Fatalf("GetForDomain #1: %v", err)
+	}
+	p2, err := pool.GetForDomain(ctx, "example.com")
+	if err != nil {
+		t.Fatalf("GetForDomain #2: %v", err)
+	}
+	if p1.URL != p2.URL {
+		t.Errorf("GetForDomain returned different proxies for same domain: %s vs %s", p1.URL, p2.URL)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// M5: Pool.Get must sleep until earliest cooldown expiry, not busy-wait
+// ---------------------------------------------------------------------------
+
+// TestPool_Get_SleepsUntilCooldownExpiry verifies that when the only proxy is
+// on a short cooldown, Get blocks until the cooldown expires rather than
+// returning an error or spinning in a tight loop.  We use a 100 ms cooldown
+// and assert that Get returns the proxy within a 500 ms window.
+func TestPool_Get_SleepsUntilCooldownExpiry(t *testing.T) {
+	provider := proxy.Static([]string{"http://1.2.3.4:8080"})
+	pool := proxy.NewPool(provider)
+	pool.SetCooldown(100 * time.Millisecond)
+	defer pool.Close()
+
+	// Ban to trigger a 100 ms cooldown.
+	p, err := pool.Get(context.Background())
+	if err != nil {
+		t.Fatalf("initial Get: %v", err)
+	}
+	pool.Ban(p, "example.com")
+
+	// Now the only proxy is on cooldown; Get should block ~100 ms then succeed.
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	p2, err := pool.Get(ctx)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("Get after cooldown: %v", err)
+	}
+	if p2 == nil {
+		t.Fatal("expected non-nil proxy after cooldown expired")
+	}
+	// The proxy should have been returned reasonably close to the 100 ms mark.
+	if elapsed < 80*time.Millisecond {
+		t.Errorf("Get returned too quickly (%v) — cooldown may not have been respected", elapsed)
+	}
+}
+
+// TestPool_Get_EmptyPoolReturnsError verifies that Get returns ErrNoProxy
+// immediately when the pool has no proxies at all (M5 edge case: no earliest
+// expiry to compute).
+func TestPool_Get_EmptyPoolReturnsError(t *testing.T) {
+	pool := proxy.NewPool()
+	defer pool.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := pool.Get(ctx)
+	if err == nil {
+		t.Fatal("expected error from empty pool, got nil")
 	}
 }
