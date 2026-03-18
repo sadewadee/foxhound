@@ -32,6 +32,10 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	neturl "net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -152,7 +156,8 @@ func WithBrowserProxy(proxyURL string) CamoufoxOption {
 // Firefox (Camoufox) browser, and returns a ready-to-use CamoufoxFetcher.
 //
 // The browser is kept alive until Close is called. If the playwright runtime or
-// the Firefox binary is not installed, NewCamoufox returns a descriptive error.
+// the Camoufox binary is not installed, NewCamoufox auto-downloads it via
+// `python3 -m camoufox fetch`. No manual setup is required.
 func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 	f := &CamoufoxFetcher{
 		headless:    "virtual",
@@ -163,62 +168,171 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 		opt(f)
 	}
 
-	// Start the playwright runtime. playwright.Run() downloads the driver on
-	// first call; subsequent calls reuse the already-installed driver.
+	// Start the playwright runtime.
 	pw, err := playwright.Run()
 	if err != nil {
 		return nil, fmt.Errorf("fetch/camoufox: starting playwright runtime: %w", err)
 	}
 
-	// Build CAMOU_CONFIG environment overrides from the identity profile so
-	// Camoufox reports the correct screen size, locale, GPU, and hardware.
-	env := camoufoxEnvFromProfile(f.identity)
+	// Locate or auto-install the Camoufox binary.
+	// Camoufox is a C++ patched Firefox with built-in anti-fingerprinting:
+	// canvas, WebGL, audio, font, navigator — all spoofed at engine level.
+	execPath, err := findOrInstallCamoufox()
+	if err != nil {
+		slog.Warn("fetch/camoufox: Camoufox binary not available, falling back to plain Firefox",
+			"err", err)
+		// Fall back to plain Firefox (playwright's bundled version)
+		execPath = ""
+	}
 
 	headlessBool := f.headless != "false"
 
 	launchOpts := playwright.BrowserTypeLaunchOptions{
 		Headless: playwright.Bool(headlessBool),
-		Env:      env,
-		// Juggler is the Firefox-specific remote-debugging protocol used by
-		// Camoufox.  Passing an empty Args slice keeps defaults; Juggler is
-		// automatically selected by playwright-go for Firefox.
 	}
 
-	// Set proxy at browser launch level — Firefox requires this for SOCKS5.
+	// Use Camoufox binary if found — this enables ALL C++ level anti-detection:
+	// canvas spoofing, WebGL spoofing, font spoofing, navigator.webdriver=false,
+	// WebRTC IP protection, audio context spoofing, BrowserForge fingerprints.
+	if execPath != "" {
+		launchOpts.ExecutablePath = playwright.String(execPath)
+		slog.Info("fetch/camoufox: using Camoufox binary", "path", execPath)
+	} else {
+		slog.Warn("fetch/camoufox: using plain Firefox — anti-fingerprint features disabled")
+	}
+
+	// Set proxy at browser launch level.
 	if f.proxyURL != "" {
 		proxyOpt := parsePlaywrightProxy(f.proxyURL)
 		launchOpts.Proxy = proxyOpt
-		slog.Info("fetch/camoufox: browser launching with proxy", "server", proxyOpt.Server)
+		slog.Info("fetch/camoufox: proxy configured", "server", proxyOpt.Server)
 	}
 
 	browser, err := pw.Firefox.Launch(launchOpts)
 	if err != nil {
-		// Auto-install Firefox if not found. This covers first-run scenarios
-		// so users never need to run `playwright install firefox` manually.
-		slog.Info("fetch/camoufox: Firefox not found, auto-installing...")
-		if installErr := playwright.Install(&playwright.RunOptions{
-			Browsers: []string{"firefox"},
-		}); installErr != nil {
-			_ = pw.Stop()
-			return nil, fmt.Errorf("fetch/camoufox: auto-install firefox failed: %w (original launch error: %v)", installErr, err)
+		// If Camoufox binary failed, try plain Firefox as last resort.
+		if execPath != "" {
+			slog.Warn("fetch/camoufox: Camoufox binary launch failed, trying plain Firefox", "err", err)
+			launchOpts.ExecutablePath = nil
+			browser, err = pw.Firefox.Launch(launchOpts)
 		}
-		slog.Info("fetch/camoufox: Firefox installed successfully, retrying launch")
-		browser, err = pw.Firefox.Launch(launchOpts)
 		if err != nil {
-			_ = pw.Stop()
-			return nil, fmt.Errorf("fetch/camoufox: launching firefox after auto-install: %w", err)
+			// Auto-install playwright Firefox if nothing works.
+			slog.Info("fetch/camoufox: installing playwright Firefox...")
+			if installErr := playwright.Install(&playwright.RunOptions{
+				Browsers: []string{"firefox"},
+			}); installErr != nil {
+				_ = pw.Stop()
+				return nil, fmt.Errorf("fetch/camoufox: all browser launch attempts failed: %w", err)
+			}
+			browser, err = pw.Firefox.Launch(launchOpts)
+			if err != nil {
+				_ = pw.Stop()
+				return nil, fmt.Errorf("fetch/camoufox: launch failed after install: %w", err)
+			}
 		}
 	}
 
 	f.pw = pw
 	f.browser = browser
 
-	slog.Info("fetch/camoufox: browser launched",
+	browserType := "plain Firefox"
+	if execPath != "" {
+		browserType = "Camoufox"
+	}
+	slog.Info("fetch/camoufox: browser ready",
+		"browser", browserType,
 		"headless", f.headless,
 		"block_images", f.blockImages,
 		"timeout", f.timeout,
 	)
 	return f, nil
+}
+
+// findOrInstallCamoufox locates the Camoufox binary on the system.
+// If not found, it attempts to auto-install via `python3 -m camoufox fetch`.
+// Returns the executable path or an error.
+func findOrInstallCamoufox() (string, error) {
+	// Check known paths per OS.
+	path := findCamoufoxBinary()
+	if path != "" {
+		slog.Debug("fetch/camoufox: binary found", "path", path)
+		return path, nil
+	}
+
+	// Not found — try auto-install.
+	slog.Info("fetch/camoufox: binary not found, auto-downloading...")
+
+	// Try python3 first, then python.
+	for _, py := range []string{"python3", "python"} {
+		// First ensure the camoufox package is installed.
+		installCmd := exec.Command(py, "-m", "pip", "install", "-q", "camoufox")
+		installCmd.Stdout = os.Stderr
+		installCmd.Stderr = os.Stderr
+		if err := installCmd.Run(); err != nil {
+			continue
+		}
+
+		// Download the browser binary.
+		fetchCmd := exec.Command(py, "-m", "camoufox", "fetch")
+		fetchCmd.Stdout = os.Stderr
+		fetchCmd.Stderr = os.Stderr
+		if err := fetchCmd.Run(); err != nil {
+			slog.Warn("fetch/camoufox: download failed", "python", py, "err", err)
+			continue
+		}
+
+		// Re-check after install.
+		path = findCamoufoxBinary()
+		if path != "" {
+			slog.Info("fetch/camoufox: auto-install successful", "path", path)
+			return path, nil
+		}
+	}
+
+	return "", fmt.Errorf("camoufox binary not found and auto-install failed (is Python installed?)")
+}
+
+// findCamoufoxBinary checks known locations for the Camoufox executable.
+func findCamoufoxBinary() string {
+	home, _ := os.UserHomeDir()
+
+	var candidates []string
+	switch runtime.GOOS {
+	case "darwin":
+		// macOS: installed via pip
+		cacheDir := filepath.Join(home, "Library", "Caches", "camoufox")
+		candidates = []string{
+			filepath.Join(cacheDir, "Camoufox.app", "Contents", "MacOS", "camoufox"),
+		}
+	case "linux":
+		candidates = []string{
+			filepath.Join(home, ".cache", "camoufox", "camoufox"),
+			filepath.Join(home, ".local", "share", "camoufox", "camoufox"),
+			"/usr/local/bin/camoufox",
+		}
+	case "windows":
+		appData := os.Getenv("LOCALAPPDATA")
+		if appData == "" {
+			appData = filepath.Join(home, "AppData", "Local")
+		}
+		candidates = []string{
+			filepath.Join(appData, "camoufox", "camoufox.exe"),
+		}
+	}
+
+	// PATH check is LAST — the `camoufox` in PATH is usually the Python CLI
+	// wrapper, not the actual browser binary. Prefer the cache directory.
+	if path, err := exec.LookPath("camoufox"); err == nil {
+		candidates = append(candidates, path)
+	}
+
+	for _, p := range candidates {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 // Fetch navigates to job.URL inside a fresh, isolated BrowserContext, waits
@@ -903,11 +1017,9 @@ func (f *CamoufoxFetcher) buildContextOptions() playwright.BrowserNewContextOpti
 	return opts
 }
 
-// camoufoxEnvFromProfile returns the CAMOU_CONFIG environment map from the
-// identity profile, or an empty map when profile is nil.
-// BrowserTypeLaunchOptions.Env takes map[string]string, which matches the
-// Profile.CamoufoxEnv field directly — no copy is needed because the map is
-// only ever read after the browser has been launched.
+// camoufoxEnvFromProfile is kept for backward compatibility but is no longer
+// used in the launch path. Camoufox handles fingerprint injection internally
+// via BrowserForge when launched with its own binary.
 func camoufoxEnvFromProfile(p *identity.Profile) map[string]string {
 	if p == nil || len(p.CamoufoxEnv) == 0 {
 		return map[string]string{}
