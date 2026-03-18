@@ -42,6 +42,9 @@ type HuntConfig struct {
 	// Walker: "careful", "moderate", or "aggressive". Defaults to "moderate"
 	// when empty so walkers always apply timing and rhythm delays.
 	BehaviorProfile string
+	// Checkpoint controls automatic state saving. Optional — checkpointing is
+	// inactive when Checkpoint.Enabled is false (the zero value).
+	Checkpoint CheckpointConfig
 }
 
 // HuntState represents the lifecycle state of a Hunt.
@@ -99,6 +102,9 @@ type Hunt struct {
 	logger        *slog.Logger
 	activeWalkers atomic.Int32
 	sem           chan struct{} // global concurrency limiter
+	// itemCh is non-nil only when Stream or StreamWithStats has been called.
+	// Walkers send each processed item here; Run closes it when done.
+	itemCh chan *foxhound.Item
 }
 
 // NewHunt creates a Hunt from cfg. It does not start any goroutines; call
@@ -189,6 +195,16 @@ func (h *Hunt) Run(ctx context.Context) error {
 
 	// Wait for all walkers to exit.
 	wg.Wait()
+
+	// Close the streaming channel now that all walkers have stopped producing
+	// items. Must happen before writer flush so StreamWithStats sees the final
+	// stats snapshot after all items have been forwarded.
+	h.mu.Lock()
+	if h.itemCh != nil {
+		close(h.itemCh)
+		h.itemCh = nil
+	}
+	h.mu.Unlock()
 
 	// Flush writers.
 	for _, w := range h.config.Writers {
@@ -284,8 +300,142 @@ func (h *Hunt) Stats() *Stats {
 }
 
 // ---------------------------------------------------------------------------
+// Streaming API
+// ---------------------------------------------------------------------------
+
+// StreamEvent is emitted on the channel returned by StreamWithStats.
+// Exactly one of Item or Stats is non-nil per event.
+type StreamEvent struct {
+	// Item is non-nil for item events.
+	Item *foxhound.Item
+	// Stats is non-nil for periodic stats snapshot events.
+	Stats *Stats
+}
+
+// Stream starts the hunt in a background goroutine and returns a channel that
+// receives each item as it is produced. The channel is closed when the hunt
+// completes or the context is cancelled, making it safe to use in a range loop:
+//
+//	for item := range hunt.Stream(ctx) { ... }
+//
+// Stream returns an error only when the hunt configuration is invalid.
+// The channel is buffered (100 items) so that slow consumers do not block
+// walkers; items are dropped with a warning log when the buffer is full.
+func (h *Hunt) Stream(ctx context.Context) (<-chan *foxhound.Item, error) {
+	if err := h.validateConfig(); err != nil {
+		return nil, fmt.Errorf("invalid hunt config: %w", err)
+	}
+
+	ch := make(chan *foxhound.Item, 100)
+
+	h.mu.Lock()
+	h.itemCh = ch
+	h.mu.Unlock()
+
+	// Run closes h.itemCh (which aliases ch) when all walkers have stopped.
+	// Do NOT close ch here — Run is the sole closer to avoid double-close.
+	go func() {
+		if err := h.Run(ctx); err != nil {
+			h.logger.Error("stream hunt error", "err", err)
+		}
+	}()
+
+	return ch, nil
+}
+
+// StreamWithStats starts the hunt and returns a channel of StreamEvent values.
+// Item events arrive as items are scraped; Stats events are emitted every
+// statsInterval. The channel is closed when the hunt finishes.
+//
+// A statsInterval of 0 disables periodic stats events (only item events are
+// sent). Use Stream instead when stats events are not needed.
+func (h *Hunt) StreamWithStats(ctx context.Context, statsInterval time.Duration) (<-chan StreamEvent, error) {
+	if err := h.validateConfig(); err != nil {
+		return nil, fmt.Errorf("invalid hunt config: %w", err)
+	}
+
+	itemCh := make(chan *foxhound.Item, 100)
+	eventCh := make(chan StreamEvent, 128)
+
+	h.mu.Lock()
+	h.itemCh = itemCh
+	h.mu.Unlock()
+
+	go func() {
+		defer close(eventCh)
+
+		// Start periodic stats ticker (optional).
+		var ticker *time.Ticker
+		var tickC <-chan time.Time
+		if statsInterval > 0 {
+			ticker = time.NewTicker(statsInterval)
+			tickC = ticker.C
+			defer ticker.Stop()
+		}
+
+		// Fan-out: forward item events and inject stats events.
+		// itemCh is closed by Run when the hunt completes.
+		for {
+			select {
+			case item, ok := <-itemCh:
+				if !ok {
+					// Hunt finished; emit one final stats snapshot.
+					select {
+					case eventCh <- StreamEvent{Stats: h.stats}:
+					default:
+					}
+					return
+				}
+				select {
+				case eventCh <- StreamEvent{Item: item}:
+				case <-ctx.Done():
+					return
+				}
+
+			case <-tickC:
+				select {
+				case eventCh <- StreamEvent{Stats: h.stats}:
+				default:
+					h.logger.Warn("stream: stats event channel full, dropping stats event")
+				}
+
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	go func() {
+		if err := h.Run(ctx); err != nil {
+			h.logger.Error("stream hunt error", "err", err)
+		}
+		// itemCh is closed inside Run (after wg.Wait). The fan-out goroutine
+		// above will detect the close and emit the final stats event.
+	}()
+
+	return eventCh, nil
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+// streamItem sends item to the streaming channel when streaming is active.
+// It uses a non-blocking send so that a slow consumer never blocks walkers.
+// A warning is logged when the channel buffer is full and the item is dropped.
+func (h *Hunt) streamItem(item *foxhound.Item) {
+	h.mu.RLock()
+	ch := h.itemCh
+	h.mu.RUnlock()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- item:
+	default:
+		h.logger.Warn("stream: item channel full, dropping item")
+	}
+}
 
 // buildFetcher wraps h.config.Fetcher in all configured middlewares.
 // Middlewares are applied so that the first middleware in the slice is the
