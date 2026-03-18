@@ -1,0 +1,121 @@
+2026/03/18 12:19:25 INFO fetch/camoufox: using Camoufox binary path=/Users/sadewadee/Library/Caches/camoufox/Camoufox.app/Contents/MacOS/camoufox
+2026/03/18 12:19:27 INFO fetch/camoufox: browser ready browser=Camoufox headless=false block_images=false timeout=1m0s
+
+══════════════════════════════════════════
+TEST 1: bot.sannysoft.com
+══════════════════════════════════════════
+Status: 200, Bytes: 37419
+
+Detection Results:
+─────────────────────────────────────────
+  User Agent (Old)                    Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6; rv:148.0) Gecko/20100101 Firefox/148.0 [PASS]
+  WebDriver (New)                     missing (passed)     [PASS]
+  WebDriver Advanced                  passed               [PASS]
+  Chrome (New)                        missing (failed)     [FAIL]
+  Permissions (New)                   denied               [PASS]
+  Plugins Length (Old)                5                    [PASS]
+  Plugins is of type PluginArray      passed               [PASS]
+  Languages (Old)                     en-US                [PASS]
+  WebGL Vendor                        Apple                [PASS]
+  WebGL Renderer                      Apple M1, or similar [PASS]
+  Broken Image Dimensions             24x24                [PASS]
+  PHANTOM_UA                          ok                   [PASS]
+  PHANTOM_PROPERTIES                  ok                   [PASS]
+  PHANTOM_ETSL                        ok                   [PASS]
+  PHANTOM_LANGUAGE                    ok                   [PASS]
+  PHANTOM_WEBSOCKET                   ok                   [PASS]
+  MQ_SCREEN                           ok                   [PASS]
+  PHANTOM_OVERFLOW                    ok                   [PASS]
+  PHANTOM_WINDOW_HEIGHT               ok                   [PASS]
+  HEADCHR_UA                          ok                   [PASS]
+  HEADCHR_CHROME_OBJ                  ok                   [PASS]
+  HEADCHR_PERMISSIONS                 ok                   [PASS]
+  HEADCHR_PLUGINS                     ok                   [PASS]
+  HEADCHR_IFRAME                      ok                   [PASS]
+  CHR_DEBUG_TOOLS                     ok                   [PASS]
+  SELENIUM_DRIVER                     ok                   [PASS]
+  CHR_BATTERY                         ok                   [PASS]
+  CHR_MEMORY                          ok                   [PASS]
+  TRANSPARENT_PIXEL                   ok                   [PASS]
+  SEQUENTUM                           ok                   [PASS]
+  VIDEO_CODECS                        ok                   [PASS]
+  navigator.cookieEnabled             document.write(navigator.cookieEnabled);
+            true [?]
+  navigator.doNotTrack                document.write(navigator.doNotTrack);
+            unspecified [?]
+  navigator.msDoNotTrack              document.write(navigator.msDoNotTrack);
+            undefined [?]
+  navigator.sendBeacon                document.write(navigator.sendBeacon()); [?]
+  navigator.cookieEnabled             document.write(navigator.cookieEnabled);
+            true [?]
+  navigator.userAgent                 document.write(navigator.userAgent);
+            Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6; rv:148.0) Gecko/20100101 Firefox/148.0 [?]
+  navigator.appName                   document.write(navigator.appName);
+            Netscape [?]
+  navigator.vendor                    document.write(navigator.vendor); [?]
+  navigator.appCodeName               document.write(navigator.appCodeName);
+            Mozilla [?]
+  navigator.getUserMedia              document.write(navigator.getUserMedia()); [?]
+  navigator.sayswho                   document.write(navigator.sayswho);
+            undefined [?]
+  navigator.javaEnabled               document.write(navigator.javaEnabled());
+            false [PASS]
+  navigator.plugins                   document.write(JSON.stringify(navigator.plugins));
+            {"0":{"0":{},"1":{}},"1":{"0":{},"1":{}},"2":{"0":{},"1":{}},"3":{"0":{},"1":{}},"4":{"0":{},"1":{}}} [?]
+  screen.width                        document.write(screen.width);
+            1440 [?]
+  screen.height                       document.write(screen.height);
+            900 [?]
+  screen.colorDepth                   document.write(screen.colorDepth);
+            30 [?]
+  navigator.language                  document.write(navigator.language);
+            en-US [?]
+  navigator.loadPurpose               document.write(navigator.loadPurpose);
+            undefined [?]
+  navigator.platform                  document.write(navigator.platform);
+            MacIntel [?]
+  navigator.mediaDevices              audioinput:  id = videoinput:  id = [?]
+  navigator.getBattery details        const battery1 = document.getElementById('battery1');
+              ( async () => {
+                const b = await navigator.getBattery();
+                battery1.innerHTML = "Charging: " + b.charging + "<br/>Level: " + b.level;
+              } )(); [?]
+  Canvas1                             Hash: 1919378703     [?]
+  Canvas2                             Hash: 1919378703     [?]
+  Canvas3 (iframe sandbox)            Hash: 1713924159     [?]
+  Canvas4 (iframe sandbox)            Hash: 1713924159     [?]
+  Canvas5 (iframe)                    Hash: 1713924159     [?]
+
+══════════════════════════════════════════
+TEST 2: browserleaks.com/javascript
+══════════════════════════════════════════
+Status: 200, Bytes: 37938
+
+Key Browser Properties:
+─────────────────────────────────────────
+
+══════════════════════════════════════════
+TEST 3: abrahamjuliot.github.io/creepjs
+══════════════════════════════════════════
+Status: 200, Bytes: 239066
+
+  high
+  high
+
+══════════════════════════════════════════
+TEST 4: tls.peet.ws/api/all (TLS fingerprint)
+══════════════════════════════════════════
+ERR: fetch/camoufox: navigating to https://tls.peet.ws/api/all: Frame.Goto https://tls.peet.ws/api/all: playwright: NS_ERROR_NET_PARTIAL_TRANSFER
+
+══════════════════════════════════════════
+TEST 5: nowsecure.nl (Cloudflare)
+══════════════════════════════════════════
+2026/03/18 12:20:01 INFO fetch/camoufox: Cloudflare challenge detected type=js_challenge
+2026/03/18 12:20:01 INFO fetch/camoufox: waiting for Cloudflare JS challenge to resolve...
+2026/03/18 12:20:13 WARN fetch/camoufox: Cloudflare JS challenge did not resolve in time
+Status: 200, Bytes: 179944
+  RESULT: CHALLENGED — Cloudflare challenge page
+
+══════════════════════════════════════════
+All detection test HTMLs saved to tests/results/detection/
+══════════════════════════════════════════

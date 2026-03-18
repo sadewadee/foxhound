@@ -1,0 +1,370 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="format-detection" content="telephone=no">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JavaScript Browser Information - BrowserLeaks</title>
+<meta name="description" content="JavaScript and Web APIs can provide vast amounts of data about the user's system, including User-Agent, screen resolution, system language, local time, CPU architecture, logical core count, battery status, network information, and installed plugins.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://browserleaks.com/javascript">
+<meta property="og:site_name" content="BrowserLeaks">
+<meta property="og:title" content="JavaScript Browser Information">
+<meta property="og:description" content="JavaScript and Web APIs can provide vast amounts of data about the user's system, including User-Agent, screen resolution, system language, local time, CPU architecture, logical core count, battery status, network information, and installed plugins.">
+<link type="text/css" rel="stylesheet" media="all" href="/css/style.css?v=63246769">
+<noscript><style type="text/css">.script{opacity:.5}.js-hide-block{display:block}</style></noscript>
+<script>(function(){var a='.doscript{display:block}.noscript{display:none!important}.script{opacity:1}',b=document.head||document.getElementsByTagName('head')[0],c=document.createElement('style');c.type='text/css';c.styleSheet?c.styleSheet.cssText=a:c.appendChild(document.createTextNode(a));b.appendChild(c)})()</script><style type="text/css">.doscript{display:block}.noscript{display:none!important}.script{opacity:1}</style>
+<script src="/js/default.js?v=63246769"></script>
+<link rel="icon" sizes="32x32" href="https://browserleaks.com/favicon.ico">
+<link rel="icon" sizes="196x196" href="https://browserleaks.com/img/favicons/icon-196x196.png?v=39295881">
+<link rel="apple-touch-icon" sizes="180x180" href="https://browserleaks.com/img/favicons/apple-touch-icon.png?v=39295881">
+<link rel="manifest" href="https://browserleaks.com/manifest.json?v=39295881">
+<meta name="msapplication-config" content="https://browserleaks.com/browserconfig.xml?v=39295881">
+</head>
+<body spellcheck="false"><div id="viewport"></div>
+<div id="logo" class="n-640"><a href="/" title="Home" tabindex="-1"><strong>BrowserLeaks</strong></a></div>
+
+<nav aria-haspopup="true">
+<div id="nav">
+  <div id="nav-pin" class="n-640">
+    <form name="nav-pin-form" id="nav-pin-form" method="POST" action="/javascript" onsubmit="return false">
+    <input type="submit" id="nav-pin-submit" name="nav-pin-submit" value="1" title="Toggle Menu">
+    </form>
+  </div>
+  <div id="nav-hover">
+    <div id="nav-menu">
+      <input id="nav-checkbox" type="checkbox" autocomplete="off" aria-label="Menu" title="Menu">
+      <span class="nav-hb"></span><span class="nav-hb"></span><span class="nav-hb"></span>
+      <ul>
+      <li><div class="nav-close"></div></li>
+        <li class="margin"><a class="ico-index" href="/" title="Home Page" rel="nofollow">Home Page</a></li>
+        <li><a class="ico-ip" href="/ip" title="What Is My IP Address">IP Address</a></li>
+        <li><a class="this ico-javascript" href="/javascript" title="JavaScript Browser Information" rel="nofollow">JavaScript</a></li>
+        <li><a class="ico-webrtc" href="/webrtc" title="WebRTC Leak Test">WebRTC Leak Test</a></li>
+        <li><a class="ico-canvas" href="/canvas" title="HTML5 Canvas Fingerprinting">Canvas Fingerprint</a></li>
+        <li><a class="ico-webgl" href="/webgl" title="WebGL Browser Report">WebGL Report</a></li>
+        <li><a class="ico-fonts" href="/fonts" title="Font Fingerprinting">Font Fingerprinting</a></li>
+        <li><a class="ico-geo" href="/geo" title="HTML5 Geolocation API and Reverse Geocoding">Geolocation API</a></li>
+        <li><a class="ico-features" href="/features" title="HTML5 Features Detection">Features Detection</a></li>
+        <li><a class="ico-tls" href="/tls" title="TLS Client Security Test">TLS Client Test</a></li>
+        <li class="margin-less"><a class="ico-proxy" href="/proxy" title="Content Filtering Proxy Software Detection">Content Filters</a></li>
+        <li class="margin-less"><a class="ico-more" href="https://browserleaks.com/#more" title="More Tools" rel="nofollow">More Tools</a></li>
+        <li><a class="ico-settings" href="/settings" title="Site Settings" rel="nofollow">Settings</a></li>
+      </ul>
+      <div class="nav-dark"></div>
+    </div>
+  </div>
+</div>
+</nav>
+
+<div class="responsive-header responsive-show">
+  <div class="responsive-home"><a href="/" title="Home"><div class="svg-icon svg-fingerprint"></div></a></div>
+  <div class="responsive-search"><div class="responsive-search-icon svg-icon svg-search"></div></div>
+  <div class="responsive-search-form n"><input type="search" id="responsive-search-input" maxlength="512" aria-label="Enter IP Address or Domain Name" placeholder="Enter IP Address or Domain Name"><input type="button" class="responsive-search-submit n" value=""></div>
+</div>
+
+<div id="content">
+  <div id="lookup-form" class="n-640">
+    <form action="/search" method="POST">
+    <ul>
+      <li><input tabindex="2" aria-label="IP Address Lookup" placeholder="IP Address Lookup" type="text" id="lookup-input" class="placeholder" name="data" title="Enter IP Address or Domain Name" maxlength="512"></li>
+      <li><input tabindex="3" type="submit" id="lookup-submit" class="svg-search" name="lookup-submit" value="" title="Submit"></li>
+    </ul>
+    </form>
+  </div>
+
+<header><h1><a href="/javascript">JavaScript Browser Information</a></h1><div data-html2canvas-ignore="" id="screenshot" class="svg-photo" title="Take a screenshot of the entire page"></div></header>
+
+<div id="jspick" class="script"><button id="jspick1" class="chk">window</button> <button id="jspick2">iframe.contentWindow</button></div>
+
+<table id="js-detect" class="js-table">
+  <tbody><tr class="thead"><td colspan="2"><h3>JavaScript Detection</h3></td></tr>
+  <tr><td>JavaScript Enabled</td><td><span id="js-enabled"><span class="true">✔</span> True</span><noscript><span class="false">✖</span> False<style type="text/css">#js-enabled{display:none}</style></noscript></td></tr>
+  <tr><td>Inline Scripts</td><td id="js-inline"><span class="true">✔</span> True</td></tr>
+  <tr><td>Same-Origin Scripts</td><td id="js-self"><span class="true">✔</span> True</td></tr>
+  <tr><td>Third-Party Scripts</td><td id="js-third"><span class="true">✔</span> True</td></tr>
+</tbody></table>
+
+<table class="js-table script">
+  <tbody><tr class="thead"><td colspan="2"><h3>Document Object</h3></td></tr>
+  <tr><td>Document Referrer</td><td id="js-referrer" class="wball"><i>empty</i> <a href="/javascript" data-html2canvas-ignore="">[recheck]</a></td></tr>
+  <tr class="thead"><td colspan="2"><h3>Screen Object</h3></td></tr>
+  <tr><td>Screen Resolution</td><td id="screen-more" class="more"><div class="more-container"><span class="more-inline">1440<span class="symbol">×</span>900 16:10 30-bit TrueColor (viewport: 1440<span class="symbol">×</span>900)</span><input data-html2canvas-ignore="" class="more-button" type="submit" value="more"></div></td></tr>
+
+</tbody><tbody id="screen-tbody" class="n">
+  <tr><td>Fullscreen Leak Test</td><td id="js-fullscreen"><span data-html2canvas-ignore="" href="#" class="href">[click to test] <span></span></span></td></tr>
+  <tr><td>width</td><td id="js-width">1440</td></tr>
+  <tr><td>height</td><td id="js-height">900</td></tr>
+  <tr><td>availWidth</td><td id="js-availWidth">1440</td></tr>
+  <tr><td>availHeight</td><td id="js-availHeight">900</td></tr>
+  <tr><td>colorDepth</td><td id="js-colorDepth">30</td></tr>
+  <tr><td>pixelDepth</td><td id="js-pixelDepth">30</td></tr><tr><td>left</td><td id="js-left">0</td></tr><tr><td>top</td><td id="js-top">0</td></tr>
+  <tr><td>availTop</td><td id="js-availTop">0</td></tr>
+  <tr><td>availLeft</td><td id="js-availLeft">0</td></tr><tr><td>mozOrientation</td><td id="js-mozOrientation">landscape-primary</td></tr>
+  <tr><td>orientation.type</td><td id="js-orientation-type">portrait-primary</td></tr>
+  <tr><td>orientation.angle</td><td id="js-orientation-angle">0</td></tr>
+  <tr><td>window.devicePixelRatio</td><td id="js-devicePixelRatio">2</td></tr>
+  <tr><td>window.innerWidth</td><td id="js-innerWidth">1440</td></tr>
+  <tr><td>window.innerHeight</td><td id="js-innerHeight">900</td></tr>
+  <tr><td>window.outerWidth</td><td id="js-outerWidth">1440</td></tr>
+  <tr><td>window.outerHeight</td><td id="js-outerHeight">900</td></tr>
+  <tr><td>div.clientWidth</td><td id="js-clientWidth">1440</td></tr>
+  <tr><td>div.clientHeight</td><td id="js-clientHeight">900</td></tr>
+  <tr><td>isExtended</td><td id="js-isExtended"><i>undefined</i></td></tr>
+</tbody>
+
+  <tbody><tr class="thead"><td colspan="2"><h3>Date/Time</h3></td></tr>
+
+</tbody><tbody id="date-tbody">
+  <tr><td>System Time</td><td id="js-date">Tue Mar 17 2026 23:19:44 GMT-0500 (Central Daylight Time)</td></tr>
+  <tr><td>toLocaleString</td><td id="js-localeString">3/17/2026, 11:19:44 PM</td></tr>
+  <tr><td>toLocaleFormat</td><td id="js-localeFormat"><i>undefined</i></td></tr>
+</tbody>
+
+  <tbody><tr class="thead"><td colspan="2"><h3>Internationalization API</h3></td></tr>
+
+</tbody><tbody id="intl-tbody">
+  <tr><td>DateTimeFormat</td><td id="js-DateTimeFormat">Tuesday, March 17, 2026 at 11:19:44 PM Central Daylight Time</td></tr>
+  <tr><td>hourCycle</td><td id="js-hourCycle">h12</td></tr>
+  <tr><td>locale</td><td id="js-locale">en-US</td></tr>
+  <tr><td>calendar</td><td id="js-calendar">gregory</td></tr>
+  <tr><td>numberingSystem</td><td id="js-numberingSystem">latn</td></tr>
+  <tr><td>timeZone</td><td id="js-timeZone">America/Chicago</td></tr>
+  <tr><td>year</td><td id="js-year">numeric</td></tr>
+  <tr><td>month</td><td id="js-month">numeric</td></tr>
+  <tr><td>day</td><td id="js-day">numeric</td></tr>
+</tbody>
+
+  <tbody><tr class="thead"><td colspan="2"><h3>Navigator Object</h3></td></tr>
+
+</tbody><tbody id="navigator-tbody">
+  <tr><td>userAgent</td><td id="js-userAgent">Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6; rv:148.0) Gecko/20100101 Firefox/148.0</td></tr>
+  <tr><td>appVersion</td><td id="js-appVersion">5.0 (Macintosh)</td></tr>
+  <tr><td>appName</td><td id="js-appName">Netscape</td></tr>
+  <tr><td>appCodeName</td><td id="js-appCodeName">Mozilla</td></tr>
+  <tr><td>product</td><td id="js-product">Gecko</td></tr>
+  <tr><td>productSub</td><td id="js-productSub">20100101</td></tr>
+  <tr><td>vendor</td><td id="js-vendor"><i>empty</i></td></tr>
+  <tr><td>vendorSub</td><td id="js-vendorSub"><i>empty</i></td></tr>
+  <tr><td>buildID</td><td id="js-buildID">20181001000000</td></tr>
+  <tr><td>platform</td><td id="js-platform">MacIntel</td></tr>
+  <tr><td>oscpu</td><td id="js-oscpu">Intel Mac OS X 10.15</td></tr>
+  <tr><td>hardwareConcurrency</td><td id="js-hardwareConcurrency">8</td></tr>
+  <tr><td>deviceMemory</td><td id="js-deviceMemory"><i>undefined</i></td></tr>
+  <tr><td>devicePosture.type</td><td id="js-devicePosture"><i>undefined</i></td></tr>
+  <tr><td>language</td><td id="js-language">en-US</td></tr>
+  <tr><td>languages</td><td id="js-languages">["en-US"]</td></tr>
+  <tr><td>onLine</td><td id="js-onLine">true</td></tr>
+  <tr><td>doNotTrack</td><td id="js-doNotTrack">unspecified</td></tr>
+  <tr><td>cookieEnabled</td><td id="js-cookieEnabled">true</td></tr>
+  <tr><td>maxTouchPoints</td><td id="js-maxTouchPoints">0</td></tr>
+  <tr><td>webdriver</td><td id="js-webdriver">false</td></tr>
+  <tr><td>pdfViewerEnabled</td><td id="js-pdfViewerEnabled">true</td></tr>
+  <tr><td>globalPrivacyControl</td><td id="js-globalPrivacyControl">false</td></tr>
+</tbody>
+
+  <tbody><tr id="userAgentData" class="thead"><td colspan="2"><h3><a href="/client-hints" class="dot">navigator.userAgentData (Client Hints)</a></h3></td></tr>
+  <tr><td>API Status</td><td id="js-uadata"><span class="false">✖</span> Disabled / Not Supported</td></tr>
+
+</tbody><tbody id="uadata-tbody" class="tbody-follow n">
+  <tr><td>brands</td><td id="js-uadata-brands"><i>undefined</i></td></tr>
+  <tr><td>mobile</td><td id="js-uadata-mobile"><i>undefined</i></td></tr>
+  <tr><td>platform</td><td id="js-uadata-platform"><i>undefined</i></td></tr>
+  <tr><td>platformVersion</td><td id="js-uadata-platformVersion"><i>undefined</i></td></tr>
+  <tr><td>architecture</td><td id="js-uadata-architecture"><i>undefined</i></td></tr>
+  <tr><td>bitness</td><td id="js-uadata-bitness"><i>undefined</i></td></tr>
+  <tr><td>wow64</td><td id="js-uadata-wow64"><i>undefined</i></td></tr>
+  <tr><td>model</td><td id="js-uadata-model"><i>undefined</i></td></tr>
+  <tr><td>uaFullVersion</td><td id="js-uadata-uaFullVersion"><i>undefined</i></td></tr>
+  <tr><td>fullVersionList</td><td id="js-uadata-fullVersionList"><i>undefined</i></td></tr>
+  <tr><td>formFactors</td><td id="js-uadata-formFactors"><i>undefined</i></td></tr>
+</tbody>
+
+  <tbody><tr class="thead"><td colspan="2"><h3>navigator.plugins</h3></td></tr>
+
+</tbody><tbody id="plugins-tbody">
+  <tr><td class="n-640">plugins</td><td id="js-plugins" colspan="2">PDF Viewer, internal-pdf-viewer, Portable Document Format<br>Chrome PDF Viewer, internal-pdf-viewer, Portable Document Format<br>Chromium PDF Viewer, internal-pdf-viewer, Portable Document Format<br>Microsoft Edge PDF Viewer, internal-pdf-viewer, Portable Document Format<br>WebKit built-in PDF, internal-pdf-viewer, Portable Document Format</td></tr>
+  <tr class="thead responsive-show"><td colspan="2"><h3>Mime Types</h3></td></tr>
+  <tr><td class="n-640">mimeTypes</td><td id="js-mimeTypes" colspan="2">application/pdf, pdf, Portable Document Format<br>text/pdf, pdf, Portable Document Format</td></tr>
+</tbody>
+
+  <tbody><tr id="battery" class="thead"><td colspan="2"><h3><a href="#battery" class="dot" title="#battery">Battery Status API</a></h3></td></tr>
+  <tr><td>API Status</td><td id="js-battery"><span class="false">✖</span> Disabled / Not Supported</td></tr>
+
+</tbody><tbody id="battery-tbody" class="tbody-follow n">
+  <tr><td>charging</td><td id="js-charging"><i>undefined</i></td></tr>
+  <tr><td>chargingTime</td><td id="js-chargingTime"><i>undefined</i></td></tr>
+  <tr><td>dischargingTime</td><td id="js-dischargingTime"><i>undefined</i></td></tr>
+  <tr><td>level</td><td id="js-level"><i>undefined</i></td></tr>
+</tbody>
+
+  <tbody><tr id="netinfo" class="thead"><td colspan="2"><h3><a href="#netinfo" class="dot" title="#netinfo">Network Information API</a></h3></td></tr>
+  <tr><td>API Status</td><td id="js-network"><span class="false">✖</span> Disabled / Not Supported</td></tr>
+
+</tbody><tbody id="network-tbody" class="tbody-follow n">
+  <tr><td>type</td><td id="js-type"><i>undefined</i></td></tr>
+  <tr><td>effectiveType</td><td id="js-effectiveType"><i>undefined</i></td></tr>
+  <tr><td>downlink</td><td id="js-downlink"><i>undefined</i></td></tr>
+  <tr><td>downlinkMax</td><td id="js-downlinkMax"><i>undefined</i></td></tr>
+  <tr><td>rtt</td><td id="js-rtt"><i>undefined</i></td></tr>
+  <tr><td>saveData</td><td id="js-saveData"><i>undefined</i></td></tr>
+</tbody>
+
+  <tbody><tr id="bluetooth" class="thead"><td colspan="2"><h3><a href="#bluetooth" class="dot" title="#bluetooth">Web Bluetooth API</a></h3></td></tr>
+  <tr><td>API Status</td><td id="js-bluetooth"><span class="false">✖</span> Disabled / Not Supported</td></tr>
+
+</tbody><tbody id="bluetooth-tbody" class="tbody-follow n">
+  <tr><td>Bluetooth Adapter</td><td id="js-isBluetoothAvailable"></td></tr>
+</tbody>
+
+  <tbody><tr id="audio" class="thead"><td colspan="2"><h3><a href="#audio" class="dot" title="#audio">Web Audio API</a></h3></td></tr>
+  <tr><td>API Status</td><td id="js-audio"><span class="true">✔</span> Enabled</td></tr>
+
+</tbody><tbody id="audio-tbody" class="tbody-follow">
+  <tr><td>State</td><td id="js-state">suspended</td></tr>
+  <tr><td>Sample Rate</td><td id="js-sampleRate">44100</td></tr>
+  <tr><td>Max Channel Count</td><td id="js-maxChannelCount">2</td></tr>
+  <tr><td>Number of Inputs</td><td id="js-numberOfInputs">1</td></tr>
+  <tr><td>Number of Outputs</td><td id="js-numberOfOutputs">0</td></tr>
+  <tr><td>Channel Count</td><td id="js-channelCount">2</td></tr>
+  <tr><td>Channel Count Mode</td><td id="js-channelCountMode">explicit</td></tr>
+  <tr><td>Channel Interpretation</td><td id="js-channelInterpretation">speakers</td></tr>
+  <tr><td>FFT Size</td><td id="js-fftSize">2048</td></tr>
+  <tr><td>Frequency Bin Count</td><td id="js-frequencyBinCount">1024</td></tr>
+  <tr><td>Min Decibels</td><td id="js-minDecibels">-100</td></tr>
+  <tr><td>Max Decibels</td><td id="js-maxDecibels">-30</td></tr>
+  <tr><td>Smoothing Time Constant</td><td id="js-smoothingTimeConstant">0.8</td></tr>
+</tbody>
+
+  <tbody><tr id="speech" class="thead"><td colspan="2"><h3><a href="#speech" class="dot" title="#speech">SpeechSynthesis</a></h3></td></tr>
+  <tr><td>API Status</td><td id="js-speech"><span class="true">✔</span> Enabled</td></tr>
+
+</tbody><tbody id="speech-tbody" class="tbody-follow">
+  <tr><td class="n-640">Speech Voices</td><td id="js-voices" colspan="2"><div class="vertical-scroll webkit-scroll">urn:moz-tts:osx:com.apple.speech.synthesis.voice.Albert<br>urn:moz-tts:osx:com.apple.voice.compact.it-IT.Alice<br>urn:moz-tts:osx:com.apple.voice.compact.kn-IN.Alpana<br>urn:moz-tts:osx:com.apple.voice.compact.sv-SE.Alva<br>urn:moz-tts:osx:com.apple.voice.Aman<br>urn:moz-tts:osx:com.apple.voice.compact.fr-CA.Amelie<br>urn:moz-tts:osx:com.apple.voice.compact.ms-MY.Amira<br>urn:moz-tts:osx:com.apple.voice.compact.de-DE.Anna<br>urn:moz-tts:osx:com.apple.voice.Aru<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.BadNews<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Bahh<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Bells<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Boing<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Bubbles<br>urn:moz-tts:osx:com.apple.voice.compact.he-IL.Carmit<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Cellos<br>urn:moz-tts:osx:com.apple.voice.compact.id-ID.Damayanti<br>urn:moz-tts:osx:com.apple.voice.compact.en-GB.Daniel<br>urn:moz-tts:osx:com.apple.voice.compact.bg-BG.Daria<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Deranged<br>urn:moz-tts:osx:com.apple.eloquence.de-DE.Eddy<br>urn:moz-tts:osx:com.apple.eloquence.en-GB.Eddy<br>urn:moz-tts:osx:com.apple.eloquence.en-US.Eddy<br>urn:moz-tts:osx:com.apple.eloquence.es-ES.Eddy<br>urn:moz-tts:osx:com.apple.eloquence.es-MX.Eddy<br>urn:moz-tts:osx:com.apple.eloquence.fi-FI.Eddy<br>urn:moz-tts:osx:com.apple.eloquence.fr-CA.Eddy<br>urn:moz-tts:osx:com.apple.eloquence.fr-FR.Eddy<br>urn:moz-tts:osx:com.apple.eloquence.it-IT.Eddy<br>urn:moz-tts:osx:com.apple.eloquence.ja-JP.Eddy<br>urn:moz-tts:osx:com.apple.eloquence.ko-KR.Eddy<br>urn:moz-tts:osx:com.apple.eloquence.pt-BR.Eddy<br>urn:moz-tts:osx:com.apple.eloquence.zh-CN.Eddy<br>urn:moz-tts:osx:com.apple.eloquence.zh-TW.Eddy<br>urn:moz-tts:osx:com.apple.voice.compact.nl-BE.Ellen<br>urn:moz-tts:osx:com.apple.eloquence.de-DE.Flo<br>urn:moz-tts:osx:com.apple.eloquence.en-GB.Flo<br>urn:moz-tts:osx:com.apple.eloquence.en-US.Flo<br>urn:moz-tts:osx:com.apple.eloquence.es-ES.Flo<br>urn:moz-tts:osx:com.apple.eloquence.es-MX.Flo<br>urn:moz-tts:osx:com.apple.eloquence.fi-FI.Flo<br>urn:moz-tts:osx:com.apple.eloquence.fr-CA.Flo<br>urn:moz-tts:osx:com.apple.eloquence.fr-FR.Flo<br>urn:moz-tts:osx:com.apple.eloquence.it-IT.Flo<br>urn:moz-tts:osx:com.apple.eloquence.ja-JP.Flo<br>urn:moz-tts:osx:com.apple.eloquence.ko-KR.Flo<br>urn:moz-tts:osx:com.apple.eloquence.pt-BR.Flo<br>urn:moz-tts:osx:com.apple.eloquence.zh-CN.Flo<br>urn:moz-tts:osx:com.apple.eloquence.zh-TW.Flo<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Fred<br>urn:moz-tts:osx:com.apple.voice.compact.te-IN.Geeta<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.GoodNews<br>urn:moz-tts:osx:com.apple.eloquence.de-DE.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.en-GB.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.en-US.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.es-ES.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.es-MX.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.fi-FI.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.fr-CA.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.fr-FR.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.it-IT.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.ja-JP.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.ko-KR.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.pt-BR.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.zh-CN.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.zh-TW.Grandma<br>urn:moz-tts:osx:com.apple.eloquence.de-DE.Grandpa<br>urn:moz-tts:osx:com.apple.eloquence.en-GB.Grandpa<br>urn:moz-tts:osx:com.apple.eloquence.en-US.Grandpa<br>urn:moz-tts:osx:com.apple.eloquence.es-ES.Grandpa<br>urn:moz-tts:osx:com.apple.eloquence.es-MX.Grandpa<br>urn:moz-tts:osx:com.apple.eloquence.fi-FI.Grandpa<br>urn:moz-tts:osx:com.apple.eloquence.fr-CA.Grandpa<br>urn:moz-tts:osx:com.apple.eloquence.fr-FR.Grandpa<br>urn:moz-tts:osx:com.apple.eloquence.it-IT.Grandpa<br>urn:moz-tts:osx:com.apple.eloquence.ja-JP.Grandpa<br>urn:moz-tts:osx:com.apple.eloquence.ko-KR.Grandpa<br>urn:moz-tts:osx:com.apple.eloquence.pt-BR.Grandpa<br>urn:moz-tts:osx:com.apple.eloquence.zh-CN.Grandpa<br>urn:moz-tts:osx:com.apple.eloquence.zh-TW.Grandpa<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Hysterical<br>urn:moz-tts:osx:com.apple.voice.compact.ro-RO.Ioana<br>urn:moz-tts:osx:com.apple.eloquence.fr-FR.Jacques<br>urn:moz-tts:osx:com.apple.voice.compact.pt-PT.Joana<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Junior<br>urn:moz-tts:osx:com.apple.voice.compact.th-TH.Kanya<br>urn:moz-tts:osx:com.apple.voice.compact.en-AU.Karen<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Kathy<br>urn:moz-tts:osx:com.apple.voice.compact.ja-JP.Kyoko<br>urn:moz-tts:osx:com.apple.voice.compact.hr-HR.Lana<br>urn:moz-tts:osx:com.apple.voice.compact.sk-SK.Laura<br>urn:moz-tts:osx:com.apple.voice.compact.hi-IN.Lekha<br>urn:moz-tts:osx:com.apple.voice.compact.uk-UA.Lesya<br>urn:moz-tts:osx:com.apple.voice.compact.vi-VN.Linh<br>urn:moz-tts:osx:com.apple.voice.compact.pt-BR.Luciana<br>urn:moz-tts:osx:com.apple.voice.compact.ar-001.Maged<br>urn:moz-tts:osx:com.apple.voice.compact.hu-HU.Mariska<br>urn:moz-tts:osx:com.apple.voice.compact.zh-TW.Meijia<br>urn:moz-tts:osx:com.apple.voice.compact.el-GR.Melina<br>urn:moz-tts:osx:com.apple.voice.compact.ru-RU.Milena<br>urn:moz-tts:osx:com.apple.voice.compact.en-IE.Moira<br>urn:moz-tts:osx:com.apple.voice.compact.es-ES.Monica<br>urn:moz-tts:osx:com.apple.voice.compact.ca-ES.Montserrat<br>urn:moz-tts:osx:com.apple.voice.compact.nb-NO.Nora<br>urn:moz-tts:osx:com.apple.voice.Ona<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Organ<br>urn:moz-tts:osx:com.apple.voice.compact.es-MX.Paulina<br>urn:moz-tts:osx:com.apple.voice.compact.bn-IN.Paya<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Princess<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Ralph<br>urn:moz-tts:osx:com.apple.eloquence.de-DE.Reed<br>urn:moz-tts:osx:com.apple.eloquence.en-GB.Reed<br>urn:moz-tts:osx:com.apple.eloquence.en-US.Reed<br>urn:moz-tts:osx:com.apple.eloquence.es-ES.Reed<br>urn:moz-tts:osx:com.apple.eloquence.es-MX.Reed<br>urn:moz-tts:osx:com.apple.eloquence.fi-FI.Reed<br>urn:moz-tts:osx:com.apple.eloquence.fr-CA.Reed<br>urn:moz-tts:osx:com.apple.eloquence.it-IT.Reed<br>urn:moz-tts:osx:com.apple.eloquence.ja-JP.Reed<br>urn:moz-tts:osx:com.apple.eloquence.ko-KR.Reed<br>urn:moz-tts:osx:com.apple.eloquence.pt-BR.Reed<br>urn:moz-tts:osx:com.apple.eloquence.zh-CN.Reed<br>urn:moz-tts:osx:com.apple.eloquence.zh-TW.Reed<br>urn:moz-tts:osx:com.apple.voice.compact.en-IN.Rishi<br>urn:moz-tts:osx:com.apple.eloquence.de-DE.Rocko<br>urn:moz-tts:osx:com.apple.eloquence.en-GB.Rocko<br>urn:moz-tts:osx:com.apple.eloquence.en-US.Rocko<br>urn:moz-tts:osx:com.apple.eloquence.es-ES.Rocko<br>urn:moz-tts:osx:com.apple.eloquence.es-MX.Rocko<br>urn:moz-tts:osx:com.apple.eloquence.fi-FI.Rocko<br>urn:moz-tts:osx:com.apple.eloquence.fr-CA.Rocko<br>urn:moz-tts:osx:com.apple.eloquence.fr-FR.Rocko<br>urn:moz-tts:osx:com.apple.eloquence.it-IT.Rocko<br>urn:moz-tts:osx:com.apple.eloquence.ja-JP.Rocko<br>urn:moz-tts:osx:com.apple.eloquence.ko-KR.Rocko<br>urn:moz-tts:osx:com.apple.eloquence.pt-BR.Rocko<br>urn:moz-tts:osx:com.apple.eloquence.zh-CN.Rocko<br>urn:moz-tts:osx:com.apple.eloquence.zh-TW.Rocko<br>urn:moz-tts:osx:com.apple.voice.compact.en-US.Samantha<br>urn:moz-tts:osx:com.apple.eloquence.de-DE.Sandy<br>urn:moz-tts:osx:com.apple.eloquence.en-GB.Sandy<br>urn:moz-tts:osx:com.apple.eloquence.en-US.Sandy<br>urn:moz-tts:osx:com.apple.eloquence.es-ES.Sandy<br>urn:moz-tts:osx:com.apple.eloquence.es-MX.Sandy<br>urn:moz-tts:osx:com.apple.eloquence.fi-FI.Sandy<br>urn:moz-tts:osx:com.apple.eloquence.fr-CA.Sandy<br>urn:moz-tts:osx:com.apple.eloquence.fr-FR.Sandy<br>urn:moz-tts:osx:com.apple.eloquence.it-IT.Sandy<br>urn:moz-tts:osx:com.apple.eloquence.ja-JP.Sandy<br>urn:moz-tts:osx:com.apple.eloquence.ko-KR.Sandy<br>urn:moz-tts:osx:com.apple.eloquence.pt-BR.Sandy<br>urn:moz-tts:osx:com.apple.eloquence.zh-CN.Sandy<br>urn:moz-tts:osx:com.apple.eloquence.zh-TW.Sandy<br>urn:moz-tts:osx:com.apple.voice.compact.da-DK.Sara<br>urn:moz-tts:osx:com.apple.voice.compact.fi-FI.Satu<br>urn:moz-tts:osx:com.apple.eloquence.de-DE.Shelley<br>urn:moz-tts:osx:com.apple.eloquence.en-GB.Shelley<br>urn:moz-tts:osx:com.apple.eloquence.en-US.Shelley<br>urn:moz-tts:osx:com.apple.eloquence.es-ES.Shelley<br>urn:moz-tts:osx:com.apple.eloquence.es-MX.Shelley<br>urn:moz-tts:osx:com.apple.eloquence.fi-FI.Shelley<br>urn:moz-tts:osx:com.apple.eloquence.fr-CA.Shelley<br>urn:moz-tts:osx:com.apple.eloquence.fr-FR.Shelley<br>urn:moz-tts:osx:com.apple.eloquence.it-IT.Shelley<br>urn:moz-tts:osx:com.apple.eloquence.ja-JP.Shelley<br>urn:moz-tts:osx:com.apple.eloquence.ko-KR.Shelley<br>urn:moz-tts:osx:com.apple.eloquence.pt-BR.Shelley<br>urn:moz-tts:osx:com.apple.eloquence.zh-CN.Shelley<br>urn:moz-tts:osx:com.apple.eloquence.zh-TW.Shelley<br>urn:moz-tts:osx:com.apple.voice.compact.zh-HK.Sinji<br>urn:moz-tts:osx:com.apple.voice.Tara<br>urn:moz-tts:osx:com.apple.voice.compact.en-ZA.Tessa<br>urn:moz-tts:osx:com.apple.voice.compact.fr-FR.Thomas<br>urn:moz-tts:osx:com.apple.voice.compact.sl-SI.Tina<br>urn:moz-tts:osx:com.apple.voice.compact.zh-CN.Tingting<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Trinoids<br>urn:moz-tts:osx:com.apple.voice.compact.ta-IN.Vani<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Whisper<br>urn:moz-tts:osx:com.apple.voice.compact.nl-NL.Xander<br>urn:moz-tts:osx:com.apple.voice.compact.tr-TR.Yelda<br>urn:moz-tts:osx:com.apple.voice.compact.ko-KR.Yuna<br>urn:moz-tts:osx:com.apple.speech.synthesis.voice.Zarvox<br>urn:moz-tts:osx:com.apple.voice.compact.pl-PL.Zosia<br>urn:moz-tts:osx:com.apple.voice.compact.cs-CZ.Zuzana</div></td></tr>
+</tbody>
+
+  <tbody><tr class="thead"><td colspan="2"><h3>Rest of window.navigator</h3></td></tr>
+  
+</tbody><tbody id="navigator2-tbody"><tr><td>javaEnabled</td><td>function javaEnabled() {
+    [native code]
+}</td></tr><tr><td>getGamepads</td><td>function getGamepads() {
+    [native code]
+}</td></tr><tr><td>requestMIDIAccess</td><td>function requestMIDIAccess() {
+    [native code]
+}</td></tr><tr><td>mozGetUserMedia</td><td>function mozGetUserMedia() {
+    [native code]
+}</td></tr><tr><td>sendBeacon</td><td>function sendBeacon() {
+    [native code]
+}</td></tr><tr><td>requestMediaKeySystemAccess</td><td>function requestMediaKeySystemAccess() {
+    [native code]
+}</td></tr><tr><td>getAutoplayPolicy</td><td>function getAutoplayPolicy() {
+    [native code]
+}</td></tr><tr><td>registerProtocolHandler</td><td>function registerProtocolHandler() {
+    [native code]
+}</td></tr><tr><td>taintEnabled</td><td>function taintEnabled() {
+    [native code]
+}</td></tr><tr><td>mediaCapabilities</td><td>[object MediaCapabilities]</td></tr><tr><td>mediaDevices</td><td>[object MediaDevices]</td></tr><tr><td>serviceWorker</td><td>[object ServiceWorkerContainer]</td></tr><tr><td>credentials</td><td>[object CredentialsContainer]</td></tr><tr><td>clipboard</td><td>[object Clipboard]</td></tr><tr><td>mediaSession</td><td>[object MediaSession]</td></tr><tr><td>userActivation</td><td>[object UserActivation]</td></tr><tr><td>wakeLock</td><td>[object WakeLock]</td></tr><tr><td>geolocation</td><td>[object Geolocation]</td></tr><tr><td>locks</td><td>[object LockManager]</td></tr><tr><td>storage</td><td>[object StorageManager]</td></tr></tbody>
+</table>
+
+<div id="iecomp" class="n" style="behavior:url(#default#clientcaps)"></div>
+<div id="ie" class="n">
+<h3>Internet Explorer Features</h3>
+<table>
+<tbody>
+  <tr class="thead"><td colspan="3"><h3>IE Version</h3></td></tr>
+  <tr><td>Document Mode</td><td id="ie-dm" colspan="2">False</td></tr>
+  <tr><td>Conditional Comments via JavaScript</td><td id="ie-cc-js" colspan="2">False</td></tr>
+  <tr><td>Conditional Comments via HTML</td><td id="ie-cc-html" colspan="2">False</td></tr>
+  <tr><td>JavaScript Engine Version</td><td id="ie-se-js" colspan="2">False</td></tr>
+  <tr><td>VBScript Engine Version</td><td id="ie-se-vb" colspan="2">False</td></tr>
+  <tr class="thead"><td colspan="3"><h3>ActiveX</h3></td></tr>
+  <tr><td>ActiveX Supported</td><td id="ie-activex" colspan="2">False</td></tr>
+  <tr><td>ActiveX Plug-Ins</td><td id="ie-plugins-count" colspan="2">0</td></tr>
+  <tr class="ie-plugin n"><td></td><td id="AdobeReader" colspan="2">Adobe PDF Reader Plugin Detection</td></tr>
+  <tr class="ie-plugin n"><td></td><td id="DevalVR" colspan="2">DevalVR Plugin Detection</td></tr>
+  <tr class="ie-plugin n"><td></td><td id="Flash" colspan="2">Flash Player Plugin Detection</td></tr>
+  <tr class="ie-plugin n"><td></td><td id="Java" colspan="2">Java Plugin Detection</td></tr>
+  <tr class="ie-plugin n"><td></td><td id="PDFReader" colspan="2">Generic PDF Reader Detection</td></tr>
+  <tr class="ie-plugin n"><td></td><td id="QuickTime" colspan="2">QuickTime Plugin Detection</td></tr>
+  <tr class="ie-plugin n"><td></td><td id="RealPlayer" colspan="2">RealPlayer Plugin Detection</td></tr>
+  <tr class="ie-plugin n"><td></td><td id="Shockwave" colspan="2">Shockwave Player Plugin Detection</td></tr>
+  <tr class="ie-plugin n"><td></td><td id="Silverlight" colspan="2">Silverlight Plugin Detection</td></tr>
+  <tr class="ie-plugin n"><td></td><td id="WindowsMediaPlayer" colspan="2">Windows Media Player Plugin Detection</td></tr>
+  <tr class="ie-plugin n"><td></td><td id="VLC" colspan="2">VLC Media Player Plugin Detection</td></tr>
+  <tr class="thead"><td colspan="3"><h3>Client Capabilities</h3></td></tr>
+  <tr id="ie-cc-warn"><td colspan="3">Installable Components Not Found</td></tr>
+</tbody>
+<tbody id="ie-cc-tbody" class="n">
+  <tr><td>Internet Explorer Web Browser</td><td></td><td id="ic0">{89820200-ECBD-11CF-8B85-00AA005B4383}</td></tr>
+  <tr><td>Internet Explorer Help</td><td></td><td id="ic1">{45EA75A0-A269-11D1-B5BF-0000F8051515}</td></tr>
+  <tr><td>Internet Explorer Help Engine</td><td></td><td id="ic2">{DE5AED00-A4BF-11D1-9948-00C04F98BBC9}</td></tr>
+  <tr><td>Internet Explorer Browsing Enhancements</td><td></td><td id="ic3">{630B1DA0-B465-11D1-9948-00C04F98BBC9}</td></tr>
+  <tr><td>Internet Explorer Classes for Java</td><td></td><td id="ic4">{08B0E5C0-4FCB-11CF-AAA5-00401C608555}</td></tr>
+  <tr><td>Internet Connection Wizard</td><td></td><td id="ic5">{5A8D6EE0-3E18-11D0-821E-444553540000}</td></tr>
+  <tr><td>Address Book</td><td></td><td id="ic6">{7790769C-0471-11D2-AF11-00C04FA35D02}</td></tr>
+  <tr><td>AOL ART Image Format Support</td><td></td><td id="ic7">{47F67D00-9E55-11D1-BAEF-00C04FC2D130}</td></tr>
+  <tr><td>Arabic Text Display Support</td><td></td><td id="ic8">{76C19B38-F0C8-11CF-87CC-0020AFEECF20}</td></tr>
+  <tr><td>Chinese (Simplified) Text Display Support</td><td></td><td id="ic9">{76C19B34-F0C8-11CF-87CC-0020AFEECF20}</td></tr>
+  <tr><td>Chinese (Traditional) Text Display Support</td><td></td><td id="ic10">{76C19B33-F0C8-11CF-87CC-0020AFEECF20}</td></tr>
+  <tr><td>DirectAnimation</td><td></td><td id="ic11">{283807B5-2C60-11D0-A31D-00AA00B92C03}</td></tr>
+  <tr><td>DirectAnimation Java Classes</td><td></td><td id="ic12">{4F216970-C90C-11D1-B5C7-0000F8051515}</td></tr>
+  <tr><td>DirectShow</td><td></td><td id="ic13">{44BBA848-CC51-11CF-AAFA-00AA00B6015C}</td></tr>
+  <tr><td>Dynamic HTML Data Binding</td><td></td><td id="ic14">{9381D8F2-0288-11D0-9501-00AA00B911A5}</td></tr>
+  <tr><td>Dynamic HTML Data Binding for Java</td><td></td><td id="ic15">{36F8EC70-C29A-11D1-B5C7-0000F8051515}</td></tr>
+  <tr><td>Dynamic HTML Data Binding for Java</td><td></td><td id="ic16">{4F216970-C90C-11D1-B5C7-0000F8051515}</td></tr>
+  <tr><td>Hebrew Text Display Support</td><td></td><td id="ic17">{76C19B36-F0C8-11CF-87CC-0020AFEECF20}</td></tr>
+  <tr><td>Japanese Text Display Support</td><td></td><td id="ic18">{76C19B30-F0C8-11CF-87CC-0020AFEECF20}</td></tr>
+  <tr><td>Korean Text Display Support</td><td></td><td id="ic19">{76C19B31-F0C8-11CF-87CC-0020AFEECF20}</td></tr>
+  <tr><td>Language Auto-Selection</td><td></td><td id="ic20">{76C19B50-F0C8-11CF-87CC-0020AFEECF20}</td></tr>
+  <tr><td>Macromedia Flash</td><td></td><td id="ic21">{D27CDB6E-AE6D-11CF-96B8-444553540000}</td></tr>
+  <tr><td>Macromedia Shockwave Director</td><td></td><td id="ic22">{2A202491-F00D-11CF-87CC-0020AFEECF20}</td></tr>
+  <tr><td>Microsoft FrontPage Express</td><td></td><td id="ic23">{E4066320-E4AE-11CF-B1B0-00AA00BBAD66}</td></tr>
+  <tr><td>Microsoft NetMeeting</td><td></td><td id="ic24">{44BBA842-CC51-11CF-AAFA-00AA00B6015C}</td></tr>
+  <tr><td>Microsoft NetMeeting NT</td><td></td><td id="ic25">{44BBA842-CC51-11CF-AAFA-00AA00B6015B}</td></tr>
+  <tr><td>Microsoft Virtual Machine (MSJava)</td><td></td><td id="ic26">{08B0E5C0-4FCB-11CF-AAA5-00401C608500}</td></tr>
+  <tr><td>Microsoft Wallet (Active Payment)</td><td></td><td id="ic27">{1CDEE860-E95B-11CF-B1B0-00AA00BBAD66}</td></tr>
+  <tr><td>MSN Messenger Service</td><td></td><td id="ic28">{5945C046-LE7D-LLDL-BC44-00C04FD912BE}</td></tr>
+  <tr><td>MSN Messenger Service</td><td></td><td id="ic29">{5945C046-1E7D-11D1-BC44-00C04FD912BE}</td></tr>
+  <tr><td>Offline Browsing Pack</td><td></td><td id="ic30">{3AF36230-A269-11D1-B5BF-0000F8051515}</td></tr>
+  <tr><td>Outlook Express</td><td></td><td id="ic31">{44BBA840-CC51-11CF-AAFA-00AA00B6015C}</td></tr>
+  <tr><td>Pan-European Text Display Support</td><td></td><td id="ic32">{76C19B32-F0C8-11CF-87CC-0020AFEECF20}</td></tr>
+  <tr><td>Task Scheduler</td><td></td><td id="ic33">{CC2A9BA0-3BDD-11D0-821E-444553540000}</td></tr>
+  <tr><td>Thai Text Display Support</td><td></td><td id="ic34">{76C19B35-F0C8-11CF-87CC-0020AFEECF20}</td></tr>
+  <tr><td>Uniscribe</td><td></td><td id="ic35">{3BF42070-B3B1-11D1-B5C5-0000F8051515}</td></tr>
+  <tr><td>VDOLive Player</td><td></td><td id="ic36">{58A00AC3-777B-11CF-827D-0020AFF5FF72}</td></tr>
+  <tr><td>Vector Graphics Rendering (VML)</td><td></td><td id="ic37">{10072CEC-8CC1-11D1-986E-00A0C955B42F}</td></tr>
+  <tr><td>Vietnamese Text Display Support</td><td></td><td id="ic38">{76C19B37-F0C8-11CF-87CC-0020AFEECF20}</td></tr>
+  <tr><td>Visual Basic Scripting Support</td><td></td><td id="ic39">{4F645220-306D-11D2-995D-00C04F98BBC9}</td></tr>
+  <tr><td>VRML 2.0 Viewer</td><td></td><td id="ic40">{90A7533D-88FE-11D0-9DBE-0000C0411FC3}</td></tr>
+  <tr><td>Web Folders</td><td></td><td id="ic41">{73FA19D0-2D75-11D2-995D-00C04F98BBC9}</td></tr>
+  <tr><td>Windows Desktop Update</td><td></td><td id="ic42">{89820200-ECBD-11CF-8B85-00AA005B4395}</td></tr>
+  <tr><td>Windows Desktop Update NT</td><td></td><td id="ic43">{89820200-ECBD-11CF-8B85-00AA005B4340}</td></tr>
+  <tr><td>Windows Media Player</td><td></td><td id="ic44">{22D6F312-B0F6-11D0-94AB-0080C74C7E95}</td></tr>
+  <tr><td>Windows Media Player RealNetwork Support</td><td></td><td id="ic45">{23064720-C4F8-11D1-994D-00C04F98BBC9}</td></tr>
+  <tr><td>Media Player RealNetwork Codecs</td><td></td><td id="ic46">{11820EE0-B3C2-11D1-9948-00C04F98BBC9}</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 class="section nohistory" id="further-reading" name="further-reading"><a href="#further-reading" title="Click to expand">Further Reading</a></h3>
+<div class="none">
+<ul class="list">
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigator" rel="noopener" target="_blank">JavaScript Navigator Object – MDN</a></li>
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Battery_Status_API" rel="noopener" target="_blank">Battery Status API – MDN</a></li>
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Network_Information_API" rel="noopener" target="_blank">Network Information API – MDN</a></li>
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl" rel="noopener" target="_blank">Internationalization API – MDN</a></li>
+</ul>
+</div>
+
+<iframe id="sandboxed" sandbox="allow-same-origin" style="display:none"></iframe>
+<script type="text/vbscript">vbver = ScriptEngineMajorVersion&"."&ScriptEngineMinorVersion&"."&ScriptEngineBuildVersion</script>
+<script>document.getElementById("js-inline").innerHTML = '<span class="true">✔</span> True';</script>
+<script src="/js/javascript.js?v=63246769"></script>
+<script src="https://permissions.browserleaks.org/third-party.js?v=63246769"></script>
+<h3 data-html2canvas-ignore="" id="comments"><span id="comments-title">Leave a Comment</span> (151)<span id="comments-nojs" class="noscript"></span></h3>
+<div data-html2canvas-ignore="" id="remark42"></div>
+
+<footer><div id="footer"><div>BrowserLeaks © 2011-2026 <span class="n-300">All Rights Reserved</span><br><span id="bdo"><bdo dir="rtl">m<!-- ` -->oc<span>.sk<!-- ` -->ae</span>lr<!-- ` -->es<span>wor<!-- ` -->b@t</span>ca<!-- ` -->tn<span>oc<!-- ` -->:ot</span>lia<!-- ` -->m</bdo></span></div></div></footer>
+
+</div>
+
+
+</body></html>
