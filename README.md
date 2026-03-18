@@ -8,39 +8,32 @@
 
 # Foxhound v0.0.2
 
-Go scraping framework — **24x faster than comparable Python framework** — with native Camoufox anti-detection, dual-mode fetching, and 13-layer middleware.
+High-performance Go scraping framework with native Camoufox anti-detection, dual-mode fetching, and 13-layer middleware.
 
 ## Highlights
 
-- **Dual-mode fetching**: TLS-impersonating HTTP client (~5-50ms) + Camoufox browser via playwright-go (~500ms-5s), with automatic escalation on block detection
+- **Dual-mode fetching**: TLS-impersonating HTTP client (~5-50ms) + Camoufox browser (~500ms-5s), with automatic escalation on block detection
 - **Consistent identity profiles**: UA + TLS fingerprint + header order + OS + hardware + screen + locale all match — randomness without consistency causes instant blocks
 - **13-layer middleware chain**: concurrency, metrics, rate limit, robots.txt, delta-fetch, dedup, autothrottle, cookies, referer, blocked detector, redirect, depth limit, retry
-- **9 export formats**: JSON, JSONL, CSV, Markdown (Table/List/Cards), Text (Lines/Pretty), XML, SQLite, PostgreSQL, Webhook
-- **Adaptive parsing**: CSS selectors with automatic similarity-based fallback when page structure changes
-- **Streaming API**: `Hunt.Stream(ctx)` and `Hunt.StreamWithStats(ctx, interval)` for real-time item processing
-- **Checkpoint/resume**: auto-save hunt state every N items; `engine.LoadCheckpoint` to inspect
-- **37,003 lines of Go across 24 packages, 700+ tests**
+- **9 export formats**: JSON, JSONL, CSV, Markdown, Text, XML, SQLite, PostgreSQL, Webhook
+- **Adaptive parsing**: CSS pseudo-selectors (`::text`, `::attr`), similarity matching, auto-selector generation
+- **Streaming API**: `Hunt.Stream(ctx)` for real-time item processing via Go channels
+- **Checkpoint/resume**: auto-save hunt state every N items
+- **37K+ lines of Go, 24 packages, 700+ tests**
 
-## Why Foxhound over comparable Python framework?
+## Key Capabilities
 
-Both use Camoufox + TLS fingerprinting. Here's what Foxhound adds:
-
-| Capability | Foxhound | comparable Python framework |
-|-----------|----------|-----------|
-| **Parse speed** | 8.6ms (Go) | 205ms (Python) — **24x faster** |
-| **Concurrency** | Goroutines + per-domain semaphores | Python async (GIL-limited) |
-| **Middleware** | 13-layer composable chain | None |
-| **Export formats** | 9 (JSON, CSV, MD, XML, SQLite, PG, Webhook, Text, JSONL) | 2 (JSON, JSONL) |
-| **Queue backends** | Memory, Redis, SQLite | In-memory only |
-| **Human simulation** | Log-normal timing, Bezier mouse, scroll rhythm | None |
-| **Identity consistency** | UA + TLS + headers + OS + GPU + screen matched | Random fingerprints |
-| **Block detection** | 9 vendor patterns (CF, Akamai, DataDome, PerimeterX) auto-retry | Basic |
-| **Monitoring** | Prometheus + webhook alerting | None |
-| **Checkpoint/resume** | Auto-save state every N items | Basic pause |
-| **Streaming** | `hunt.Stream(ctx)` real-time channel | `spider.stream()` async |
-| **Schema extraction** | Define fields → auto-extract | None |
-| **Adaptive parsing** | Similarity scoring (0.0-1.0) with normalization | Simpler matching |
-| **Docker scaling** | `docker compose --scale foxhound=4` | Single container |
+| Area | What you get |
+|------|-------------|
+| **Performance** | CSS parsing in ~8ms for 5K elements. Multi-core goroutines with per-domain concurrency control |
+| **Anti-detection** | Real Camoufox binary (C++ fingerprint spoofing), human behavior simulation (log-normal timing, Bezier mouse, scroll rhythm) |
+| **Block avoidance** | 9 vendor patterns (Cloudflare, Akamai, DataDome, PerimeterX) with auto-retry + reCAPTCHA checkbox click + Turnstile handler |
+| **Identity** | 60+ device profiles with consistent UA + TLS + headers + OS + GPU + screen + locale + geo matching |
+| **Parsing** | CSS + XPath + regex + JSON + structured schema + adaptive selectors + similarity matching + pseudo-selectors |
+| **Export** | 9 formats: JSON, JSONL, CSV, Markdown (table/list/cards), Text, XML, SQLite, PostgreSQL, Webhook |
+| **Queue** | Memory, Redis (distributed), SQLite (persistent) — checkpoint/resume across restarts |
+| **Monitoring** | Prometheus metrics + webhook alerting with error/block rate thresholds |
+| **Scaling** | `docker compose --scale foxhound=4` with shared Redis queue |
 
 ## Quick Start
 
@@ -84,17 +77,17 @@ h.Run(context.Background())
 
 ## Benchmarks
 
-### Foxhound vs comparable Python framework — CSS Selection (5,000 elements, Apple M1)
+### CSS Selection — 5,000 elements (Apple M1)
 
 | Library | Language | Time | vs Foxhound |
 |---------|----------|------|-------------|
 | **Foxhound CSS** | Go | **8.6ms** | **1.0x** |
 | Raw goquery | Go | 8.8ms | 1.0x |
 | Raw lxml | Python/C | 195.8ms | 22.8x slower |
-| **comparable Python framework CSS** | Python/C | **205.0ms** | **23.8x slower** |
+| Python CSS (lxml-based) | Python/C | 205.0ms | 23.8x slower |
 | BeautifulSoup | Python | 245.6ms | 28.6x slower |
 
-**Foxhound is ~24x faster than comparable Python framework** for CSS selector parsing on the same HTML and machine.
+Go's runtime + goquery CSS engine significantly outperforms Python-based parsers on the same HTML.
 
 ### Foxhound Internal Benchmarks
 
