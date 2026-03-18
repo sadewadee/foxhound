@@ -1,18 +1,18 @@
-# Binaries (all compiled outputs)
-foxhound
-browser_test
-full_test
-proxy_test
-visible_proxy_test
-residential_test
-ecommerce
-realtime
-travel
-camoufox_final
-maps_benchmark
-maps_contacts
-maps_contacts_test
-debug_html
+# Binaries (root-level compiled outputs only)
+/foxhound
+/browser_test
+/full_test
+/proxy_test
+/visible_proxy_test
+/residential_test
+/ecommerce
+/realtime
+/travel
+/camoufox_final
+/maps_benchmark
+/maps_contacts
+/maps_contacts_test
+/debug_html
 *.exe
 *.dll
 *.so
