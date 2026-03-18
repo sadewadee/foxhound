@@ -2,42 +2,45 @@
   FOXHOUND — Visible Browser + SOCKS5 Proxy Test
   Headless: FALSE (you will see the browser window)
   Proxy:    socks5://***@REDACTED_HOST:6418
-  UA:       Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1; rv:148.0) Gecko/20100101 Firefox/148.0
+  UA:       Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0; rv:148.0) Gecko/20100101 Firefox/148.0
 ══════════════════════════════════════════════════════════════
-time=2026-03-18T10:41:00.574+08:00 level=INFO msg="launching visible Camoufox with proxy..."
-time=2026-03-18T10:41:01.245+08:00 level=INFO msg="fetch/camoufox: browser launching with proxy" server=http://REDACTED_HOST:6418
-time=2026-03-18T10:41:03.038+08:00 level=INFO msg="fetch/camoufox: browser launched" headless=false block_images=false timeout=1m0s
-time=2026-03-18T10:41:03.038+08:00 level=INFO msg="Camoufox visible browser ready with proxy"
+time=2026-03-18T10:46:25.580+08:00 level=INFO msg="launching visible Camoufox with proxy..."
+time=2026-03-18T10:46:26.255+08:00 level=INFO msg="fetch/camoufox: browser launching with proxy" server=http://REDACTED_HOST:6418
+time=2026-03-18T10:46:28.798+08:00 level=INFO msg="fetch/camoufox: browser launched" headless=false block_images=false timeout=1m0s
+time=2026-03-18T10:46:28.798+08:00 level=INFO msg="Camoufox visible browser ready with proxy"
 
 [1/4] Google SERP — wisata alam jawa timur
-time=2026-03-18T10:41:19.815+08:00 level=INFO msg=fetched target="Google SERP" status=200 bytes=6513 duration=12.643370125s
-time=2026-03-18T10:41:19.816+08:00 level=WARN msg="CAPTCHA detected" target="Google SERP" type=recaptcha sitekey=6LdLLIMbAAAAAIl-KLj9p1ePhM-4LCCDbjtJLqRO
+time=2026-03-18T10:46:53.506+08:00 level=INFO msg="fetch/camoufox: reCAPTCHA detected, attempting to solve..."
+time=2026-03-18T10:46:57.505+08:00 level=INFO msg="fetch/camoufox: reCAPTCHA checkbox clicked, waiting for verification..."
+time=2026-03-18T10:47:00.852+08:00 level=INFO msg="fetch/camoufox: reCAPTCHA checkbox clicked but not solved (may need image challenge)"
+time=2026-03-18T10:47:00.870+08:00 level=INFO msg=fetched target="Google SERP" status=200 bytes=6793 duration=21.156713458s
+time=2026-03-18T10:47:00.870+08:00 level=WARN msg="CAPTCHA detected" target="Google SERP" type=recaptcha sitekey=6LdLLIMbAAAAAIl-KLj9p1ePhM-4LCCDbjtJLqRO
   Status: 1 req, 1 OK, 0 blocked, 1 CAPTCHA | 0 items | avoidance 100%
-time=2026-03-18T10:41:19.818+08:00 level=INFO msg="human pause" delay=6.69s
+time=2026-03-18T10:47:00.872+08:00 level=INFO msg="human pause" delay=4.896s
 
 [2/4] Google Maps — villa di bali
-time=2026-03-18T10:41:41.189+08:00 level=INFO msg=fetched target="Google Maps" status=200 bytes=441673 duration=10.45587075s
+time=2026-03-18T10:47:23.072+08:00 level=INFO msg=fetched target="Google Maps" status=200 bytes=465105 duration=13.725707375s
   Status: 1 req, 1 OK, 0 blocked, 0 CAPTCHA | 10 items | avoidance 100%
   [1] Show the Input Tools menu
   [2] Bali Home Immo Property - Head Office (4,8★)
   [3] Bali Home Immo Property - Head Office
-  [4] Reklam·Villa Sales·Trusted Real Estate Agency since 2009·Site·bali-home-immo.com
-  [5] Kima Surf Camp Bali Canggu (4,9★)
-  [6] Kima Surf Camp Bali Canggu
-  [7] Delu Villas Suite - One-Bedroom Villa with Private Pool (4,7★)
-  [8] Delu Villas Suite - One-Bedroom Villa with Private Pool
-  [9] Exceptional 3brd with pool and breakfast (5,0★)
-  [10] Exceptional 3brd with pool and breakfast
-time=2026-03-18T10:41:41.202+08:00 level=INFO msg="human pause" delay=6.295s
+  [4] Bali Home Immo Property - Head Office adlı yerin web sitesini ziyaret et
+  [5] Reklam·Villa Sales·Trusted Real Estate Agency since 2009·Site·bali-home-immo.com
+  [6] Villa Omah Padi (4,7★)
+  [7] Villa Omah Padi
+  [8] Villa Omah Padi adlı yerin web sitesini ziyaret et
+  [9] Reklam·Villa Management Made Easy·You Can Spend a Great Day in Our Lovely <b>Villa</b> with Friends and Family. Call Us Now.·Site·adamjyota.com
+  [10] Di Villa Bali (4,6★)
+time=2026-03-18T10:47:23.083+08:00 level=INFO msg="human pause" delay=4.673s
 
 [3/4] Alibaba — yoga mat
-time=2026-03-18T10:42:16.376+08:00 level=INFO msg=fetched target=Alibaba status=200 bytes=119113 duration=23.792689416s
+time=2026-03-18T10:47:55.731+08:00 level=INFO msg=fetched target=Alibaba status=200 bytes=119178 duration=23.538558333s
   Status: 1 req, 1 OK, 0 blocked, 0 CAPTCHA | 0 items | avoidance 100%
-time=2026-03-18T10:42:16.379+08:00 level=INFO msg="human pause" delay=5.202s
+time=2026-03-18T10:47:55.737+08:00 level=INFO msg="human pause" delay=4.753s
 
 [4/4] Yoga Alliance — school directory
-time=2026-03-18T10:42:42.874+08:00 level=INFO msg=fetched target="Yoga Alliance" status=200 bytes=388755 duration=17.159406667s
-time=2026-03-18T10:42:42.876+08:00 level=WARN msg="CAPTCHA detected" target="Yoga Alliance" type=recaptcha sitekey=""
+time=2026-03-18T10:48:18.857+08:00 level=INFO msg=fetched target="Yoga Alliance" status=200 bytes=388755 duration=13.103686375s
+time=2026-03-18T10:48:18.859+08:00 level=WARN msg="CAPTCHA detected" target="Yoga Alliance" type=recaptcha sitekey=""
   Status: 1 req, 1 OK, 0 blocked, 1 CAPTCHA | 0 items | avoidance 100%
 
 
