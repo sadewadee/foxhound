@@ -6,6 +6,7 @@ import (
 	"time"
 
 	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/behavior"
 )
 
 // Walker is a virtual user that pops jobs from the queue, fetches them,
@@ -22,10 +23,21 @@ type Walker struct {
 	writers   []foxhound.Writer
 	retry     *RetryPolicy
 	logger    *slog.Logger
+	// timing and rhythm drive human-like inter-request delays.
+	// Both are initialised from the hunt's BehaviorProfile in newWalker.
+	timing *behavior.Timing
+	rhythm *behavior.Rhythm
 }
 
 // newWalker creates a Walker that shares the Hunt's configured components.
+// It initialises timing and rhythm from the hunt's BehaviorProfile, falling
+// back to ModerateProfile when the profile name is empty or unrecognised so
+// that human-simulation delays are always active.
 func newWalker(id string, hunt *Hunt) *Walker {
+	profile := behavior.GetProfile(behavior.ProfileName(hunt.config.BehaviorProfile))
+	if profile == nil {
+		profile = behavior.ModerateProfile()
+	}
 	return &Walker{
 		id:        id,
 		hunt:      hunt,
@@ -36,6 +48,8 @@ func newWalker(id string, hunt *Hunt) *Walker {
 		writers:   hunt.config.Writers,
 		retry:     DefaultRetryPolicy(),
 		logger:    slog.With("component", "walker", "walker_id", id),
+		timing:    behavior.NewTiming(profile.Timing),
+		rhythm:    profile.Rhythm,
 	}
 }
 
@@ -60,6 +74,23 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 	// before discovered jobs are enqueued.
 	w.hunt.activeWalkers.Add(1)
 	defer w.hunt.activeWalkers.Add(-1)
+
+	// Apply a human-like inter-request delay using the rhythm state machine.
+	// The delay is drawn from the active burst/pause phase. Using a select
+	// with ctx.Done() ensures cancellation is honoured immediately even when
+	// the delay is several seconds long (e.g. careful profile pause phases).
+	if w.rhythm != nil {
+		delay := w.rhythm.Next()
+		if delay > 0 {
+			w.logger.Debug("behavior: applying rhythm delay",
+				"delay", delay, "state", w.rhythm.State())
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
 
 	var (
 		resp     *foxhound.Response
