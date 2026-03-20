@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -336,6 +337,43 @@ func (p *Pool) SetMaxRequests(n int) {
 	p.mu.Lock()
 	p.maxRequests = n
 	p.mu.Unlock()
+}
+
+// GetForGeo returns a proxy matching the requested country (and optionally city).
+// Falls back to any available proxy if no geo match is found.
+func (p *Pool) GetForGeo(ctx context.Context, country, city string) (*Proxy, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	country = strings.ToUpper(country)
+	city = strings.ToLower(city)
+	now := time.Now()
+
+	// First pass: exact match (country + city).
+	if city != "" {
+		for _, e := range p.entries {
+			if strings.ToUpper(e.proxy.Country) == country && strings.ToLower(e.proxy.City) == city {
+				if e.isAvailable(now) {
+					return e.proxy, nil
+				}
+			}
+		}
+	}
+
+	// Second pass: country match only.
+	for _, e := range p.entries {
+		if strings.ToUpper(e.proxy.Country) == country {
+			if e.isAvailable(now) {
+				return e.proxy, nil
+			}
+		}
+	}
+
+	// Fallback: any healthy proxy (release lock and delegate to Get).
+	p.mu.Unlock()
+	px, err := p.Get(ctx)
+	p.mu.Lock()
+	return px, err
 }
 
 // Len returns the total number of proxies in the pool (including on cooldown).

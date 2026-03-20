@@ -69,6 +69,7 @@ const (
 	JobStepLoadMore       = 6 // click "load more" button repeatedly until gone
 	JobStepPaginate       = 7 // detect and follow pagination links
 	JobStepEvaluate       = 8 // execute custom JavaScript on the page
+	JobStepFill           = 9 // type text into input field with human-like keystrokes
 )
 
 // JobStep is a single browser-side action that should be executed after the
@@ -106,6 +107,20 @@ type JobStep struct {
 	// "attached" (default), "detached", "visible", or "hidden".
 	// Maps to playwright's WaitForSelectorState.
 	WaitState string `json:"wait_state,omitempty"`
+	// Optional marks this step as non-fatal: if it fails, execution continues
+	// instead of aborting the fetch. Useful for steps that may not always be
+	// present on the page (e.g. a cookie banner dismiss button).
+	Optional bool `json:"optional,omitempty"`
+	// StopSelector is a CSS selector that signals InfiniteScroll to stop
+	// when the target element count is reached. Used with StopCount to scroll
+	// until N items exist (e.g. "div.result" + StopCount=20).
+	StopSelector string `json:"stop_selector,omitempty"`
+	// StopCount is the target element count for StopSelector. InfiniteScroll
+	// stops when document.querySelectorAll(StopSelector).length >= StopCount.
+	// Only used when StopSelector is set. Defaults to 1 when zero.
+	StopCount int `json:"stop_count,omitempty"`
+	// Value is the text to type into an input field for Fill steps.
+	Value string `json:"value,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -546,6 +561,13 @@ type Response struct {
 	Duration time.Duration
 	// Job is the original job that produced this response.
 	Job *Job
+	// StepResults holds return values from JobStepEvaluate steps, keyed by
+	// step index (e.g. "step_0", "step_2"). Only populated when steps
+	// produce output.
+	StepResults map[string]any
+	// CapturedXHR holds captured XHR/fetch responses when capture patterns are configured.
+	// Each entry is a map with keys: request_url, request_method, status, headers, body.
+	CapturedXHR []map[string]any
 }
 
 // Item represents a scraped data item passing through the pipeline.

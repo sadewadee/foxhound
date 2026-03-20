@@ -33,6 +33,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	neturl "net/url"
+	"regexp"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -151,6 +152,7 @@ type CamoufoxFetcher struct {
 	persistCtx      playwright.BrowserContext // context from LaunchPersistentContext
 	cdpURL          string                    // connect to existing browser via CDP
 	useRealChrome   bool                      // use pw.Chromium with channel=chrome
+	capturePatterns []*regexp.Regexp          // URL patterns for XHR/fetch response capture
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -815,18 +817,21 @@ func (f *CamoufoxFetcher) simulateHumanBehavior(page playwright.Page) {
 // executeStep performs a single Trail step on the loaded page. It handles
 // Click, Wait, and Scroll actions. Extract steps are skipped (handled later
 // by the Walker's Processor).
-func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobStep) error {
+// executeStep runs a single JobStep on the page. For Evaluate steps, the
+// return value of the JS expression is returned as the first value.
+// For all other steps the first return value is nil.
+func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobStep) (any, error) {
 	switch step.Action {
 	case foxhound.JobStepClick:
 		el, err := page.QuerySelector(step.Selector)
 		if err != nil {
-			return fmt.Errorf("query selector %q: %w", step.Selector, err)
+			return nil, fmt.Errorf("query selector %q: %w", step.Selector, err)
 		}
 		if el == nil {
-			return fmt.Errorf("selector %q not found", step.Selector)
+			return nil, fmt.Errorf("selector %q not found", step.Selector)
 		}
 		if err := el.Click(); err != nil {
-			return fmt.Errorf("click %q: %w", step.Selector, err)
+			return nil, fmt.Errorf("click %q: %w", step.Selector, err)
 		}
 		// Brief pause after click to let any JS handlers fire.
 		time.Sleep(time.Duration(200+rand.IntN(300)) * time.Millisecond)
@@ -840,7 +845,7 @@ func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobSte
 			Timeout: playwright.Float(float64(timeout.Milliseconds())),
 		})
 		if err != nil {
-			return fmt.Errorf("wait for %q (timeout %v): %w", step.Selector, timeout, err)
+			return nil, fmt.Errorf("wait for %q (timeout %v): %w", step.Selector, timeout, err)
 		}
 
 	case foxhound.JobStepScroll:
@@ -876,26 +881,65 @@ func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobSte
 		if maxScrolls <= 0 {
 			maxScrolls = 50
 		}
-		slog.Info("fetch/camoufox: infinite scroll started", "max", maxScrolls)
+
+		// Custom scroll container: if Selector is set, scroll inside that
+		// element (e.g. Google Maps panel) instead of document.body.
+		container := step.Selector // "" = whole page (default)
+
+		slog.Info("fetch/camoufox: infinite scroll started",
+			"max", maxScrolls, "container", container,
+			"stop_selector", step.StopSelector, "stop_count", step.StopCount)
 
 		scroller := behavior.NewScroll(behavior.DefaultScrollConfig())
+
+		// Build JS snippets for scroll height depending on container.
+		getHeightJS := "() => document.body.scrollHeight"
+		scrollToBottomJS := "() => window.scrollTo(0, document.body.scrollHeight)"
+		if container != "" {
+			getHeightJS = fmt.Sprintf("() => { const el = document.querySelector(%q); return el ? el.scrollHeight : 0 }", container)
+			scrollToBottomJS = fmt.Sprintf("() => { const el = document.querySelector(%q); if (el) el.scrollTop = el.scrollHeight }", container)
+		}
+
+		stopCount := step.StopCount
+		if stopCount <= 0 {
+			stopCount = 1
+		}
+
 		for i := 0; i < maxScrolls; i++ {
+			// Check StopSelector target count before scrolling.
+			if step.StopSelector != "" {
+				countResult, _ := page.Evaluate(fmt.Sprintf(
+					"() => document.querySelectorAll(%q).length", step.StopSelector))
+				if cnt, ok := countResult.(float64); ok && int(cnt) >= stopCount {
+					slog.Info("fetch/camoufox: infinite scroll stopped — target reached",
+						"selector", step.StopSelector, "count", int(cnt), "target", stopCount)
+					break
+				}
+			}
+
 			// Get current scroll height.
-			prevHeight, _ := page.Evaluate("() => document.body.scrollHeight")
+			prevHeight, _ := page.Evaluate(getHeightJS)
 			prevH, _ := prevHeight.(float64)
 
-			// Scroll to bottom with human-like gesture.
+			// Scroll with human-like gesture.
 			dist, pause, _ := scroller.ScrollGesture(behavior.ScrollScan)
-			_ = page.Mouse().Wheel(0, float64(dist))
+			if container != "" {
+				// Scroll inside the container element.
+				page.Evaluate(fmt.Sprintf(
+					"(d) => { const el = document.querySelector(%q); if (el) el.scrollTop += d }", container),
+					dist)
+			} else {
+				_ = page.Mouse().Wheel(0, float64(dist))
+			}
 			time.Sleep(pause)
 
-			// Also execute window.scrollTo for pages that need it.
-			page.Evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+			// Also jump to bottom for pages that need it.
+			page.Evaluate(scrollToBottomJS)
 			// Wait for new content to load.
 			time.Sleep(time.Duration(1500+rand.IntN(1500)) * time.Millisecond)
 
 			// Check if new content appeared.
-			newHeight, _ := page.Evaluate("() => document.body.scrollHeight")
+			newHeight, _ := page.Evaluate(getHeightJS)
 			newH, _ := newHeight.(float64)
 
 			if newH <= prevH {
@@ -954,6 +998,12 @@ func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobSte
 		}
 		slog.Info("fetch/camoufox: pagination started", "selector", sel, "max", maxPages)
 
+		// Capture initial page content before navigating away.
+		var pages []string
+		if content, contentErr := page.Content(); contentErr == nil {
+			pages = append(pages, content)
+		}
+
 		for i := 0; i < maxPages; i++ {
 			el, err := page.QuerySelector(sel)
 			if err != nil || el == nil {
@@ -976,7 +1026,59 @@ func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobSte
 				State: playwright.LoadStateNetworkidle,
 			})
 			time.Sleep(time.Duration(1000+rand.IntN(1500)) * time.Millisecond)
+
+			// Capture this page's content.
+			if content, contentErr := page.Content(); contentErr == nil {
+				pages = append(pages, content)
+			}
 		}
+
+		// Return accumulated pages — caller stores in Response.StepResults.
+		if len(pages) > 0 {
+			return pages, nil
+		}
+
+	case foxhound.JobStepFill:
+		if step.Selector == "" {
+			return nil, fmt.Errorf("fill step has empty selector")
+		}
+		el, err := page.QuerySelector(step.Selector)
+		if err != nil {
+			return nil, fmt.Errorf("fill: query %q: %w", step.Selector, err)
+		}
+		if el == nil {
+			return nil, fmt.Errorf("fill: selector %q not found", step.Selector)
+		}
+		// Clear existing value.
+		if err := el.Fill(""); err != nil {
+			slog.Debug("fetch/camoufox: fill clear failed", "err", err)
+		}
+		// Type with human-like keystrokes using behavior.Keyboard.
+		kb := behavior.NewKeyboard(behavior.DefaultKeyboardConfig())
+		actions := kb.TypeString(step.Value)
+		for _, a := range actions {
+			if a.IsBackspace {
+				if err := el.Press("Backspace"); err != nil {
+					slog.Debug("fetch/camoufox: fill backspace failed", "err", err)
+				}
+			} else {
+				if err := el.Type(string(a.Char)); err != nil {
+					slog.Debug("fetch/camoufox: fill type failed", "err", err)
+				}
+			}
+			time.Sleep(a.Delay)
+		}
+		time.Sleep(time.Duration(200+rand.IntN(300)) * time.Millisecond)
+
+	case foxhound.JobStepEvaluate:
+		if step.Script == "" {
+			return nil, fmt.Errorf("evaluate step has empty script")
+		}
+		result, err := page.Evaluate(step.Script)
+		if err != nil {
+			return nil, fmt.Errorf("evaluate script: %w", err)
+		}
+		return result, nil
 
 	case foxhound.JobStepExtract:
 		// Handled by Walker after fetch — no-op here.
@@ -984,7 +1086,7 @@ func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobSte
 	default:
 		slog.Debug("fetch/camoufox: unknown step action", "action", step.Action)
 	}
-	return nil
+	return nil, nil
 }
 
 // handleCookieConsent attempts to click common cookie-consent accept buttons.
@@ -1756,6 +1858,28 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 		}
 	}
 
+	// Set up XHR/fetch response capture if patterns are configured.
+	var capturedXHR []map[string]any
+	if len(f.capturePatterns) > 0 {
+		page.On("response", func(response playwright.Response) {
+			url := response.URL()
+			for _, p := range f.capturePatterns {
+				if p.MatchString(url) {
+					body, _ := response.Body()
+					headers, _ := response.AllHeaders()
+					capturedXHR = append(capturedXHR, map[string]any{
+						"request_url":    url,
+						"request_method": response.Request().Method(),
+						"status":         response.Status(),
+						"headers":        headers,
+						"body":           string(body),
+					})
+					break
+				}
+			}
+		})
+	}
+
 	timeoutMs := float64(f.timeout.Milliseconds())
 
 	slog.Debug("fetch/camoufox: navigating",
@@ -1805,15 +1929,15 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 		f.handleHCaptcha(page)
 	}
 
-	// Execute Trail-attached steps (Click, Wait, Scroll). These are the
-	// browser actions defined by Trail.Navigate().Click().Wait() etc.
 	// Execute Trail-attached steps. Click and Wait are "hard" steps — their
 	// failure means the page content will be wrong, so we abort the fetch.
-	// Scroll is best-effort (warn and continue).
+	// Scroll and Evaluate are best-effort (warn and continue).
+	var stepResults map[string]any
 	for i, step := range job.Steps {
-		if stepErr := f.executeStep(page, step); stepErr != nil {
+		stepResult, stepErr := f.executeStep(page, step)
+		if stepErr != nil {
 			// Hard steps: Click, Wait — abort on failure.
-			if step.Action == foxhound.JobStepClick || step.Action == foxhound.JobStepWait {
+			if !step.Optional && (step.Action == foxhound.JobStepClick || step.Action == foxhound.JobStepWait) {
 				return nil, fmt.Errorf("fetch/camoufox: step %d (%d) failed for %s: %w",
 					i, step.Action, job.URL, stepErr)
 			}
@@ -1823,6 +1947,13 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 				"selector", step.Selector,
 				"err", stepErr,
 			)
+		}
+		// Capture Evaluate step return values into Response.StepResults.
+		if stepResult != nil {
+			if stepResults == nil {
+				stepResults = make(map[string]any)
+			}
+			stepResults[fmt.Sprintf("step_%d", i)] = stepResult
 		}
 	}
 
@@ -1857,13 +1988,15 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 	)
 
 	return &foxhound.Response{
-		StatusCode: statusCode,
-		Headers:    make(map[string][]string),
-		Body:       []byte(content),
-		URL:        finalURL,
-		FetchMode:  foxhound.FetchBrowser,
-		Duration:   duration,
-		Job:        job,
+		StatusCode:  statusCode,
+		Headers:     make(map[string][]string),
+		Body:        []byte(content),
+		URL:         finalURL,
+		FetchMode:   foxhound.FetchBrowser,
+		Duration:    duration,
+		Job:         job,
+		StepResults: stepResults,
+		CapturedXHR: capturedXHR,
 	}, nil
 }
 

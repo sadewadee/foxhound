@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"regexp"
 	"time"
 
 	foxhound "github.com/sadewadee/foxhound"
@@ -114,8 +115,9 @@ type CamoufoxFetcher struct {
 	persistSession bool   // reuse BrowserContext across requests when true
 	initScript     string // JS injected into every new page via AddInitScript
 	userDataDir    string // persistent profile dir; triggers LaunchPersistentContext
-	cdpURL         string // connect to an existing browser via CDP instead of launching
-	useRealChrome  bool   // use pw.Chromium with channel=chrome instead of Firefox
+	cdpURL          string           // connect to an existing browser via CDP instead of launching
+	useRealChrome   bool             // use pw.Chromium with channel=chrome instead of Firefox
+	capturePatterns []*regexp.Regexp // URL patterns for XHR/fetch response capture
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
