@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/playwright-community/playwright-go"
-	"github.com/sadewadee/foxhound/fetch"
 )
 
 // cmdBrowserShell is the entry point for the interactive browser REPL.
@@ -44,39 +43,26 @@ func cmdBrowserShell(args []string) {
 
 	proxyURL := fs.String("proxy", os.Getenv("FOXHOUND_PROXY"), "proxy URL (or set FOXHOUND_PROXY)")
 	extensionPath := fs.String("extension", os.Getenv("NOPECHA_EXT"), "path to Firefox extension directory (or set NOPECHA_EXT)")
+	headlessDefault := "false"
+	if globalHeadless != "" {
+		headlessDefault = globalHeadless
+	}
+	headless := fs.String("headless", headlessDefault, `browser display mode: "true" (headless), "false" (visible window), "virtual" (Xvfb)`)
 	timeout := fs.Duration("timeout", 120*time.Second, "per-navigation timeout")
 
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)
 	}
 
-	// Build CamoufoxFetcher options.
-	opts := []fetch.CamoufoxOption{
-		fetch.WithHeadless("false"),    // visible browser — this is a debugging tool
-		fetch.WithBrowserTimeout(*timeout),
-		fetch.WithPersistSession(true), // keep one context alive across all REPL commands
-	}
 	if *proxyURL != "" {
-		opts = append(opts, fetch.WithBrowserProxy(*proxyURL))
 		slog.Info("browser-shell: proxy configured", "proxy", *proxyURL)
 	}
 	if *extensionPath != "" {
-		opts = append(opts, fetch.WithExtensionPath(*extensionPath))
 		slog.Info("browser-shell: extension loaded", "path", *extensionPath)
 	}
 
-	cf, err := fetch.NewCamoufox(opts...)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "browser-shell: failed to launch browser: %v\n", err)
-		os.Exit(1)
-	}
-	defer func() {
-		if closeErr := cf.Close(); closeErr != nil {
-			slog.Debug("browser-shell: close error", "err", closeErr)
-		}
-	}()
-
-	// Obtain the underlying playwright.Browser and open the initial page.
+	// Launch playwright directly — the REPL needs a visible browser page,
+	// not the CamoufoxFetcher's fetch-oriented API.
 	pw, err := playwright.Run()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "browser-shell: playwright runtime error: %v\n", err)
@@ -84,9 +70,17 @@ func cmdBrowserShell(args []string) {
 	}
 	defer pw.Stop() //nolint:errcheck
 
-	browser, err := pw.Firefox.Launch(playwright.BrowserTypeLaunchOptions{
-		Headless: playwright.Bool(false),
-	})
+	launchOpts := playwright.BrowserTypeLaunchOptions{
+		Headless: playwright.Bool(*headless == "true"),
+	}
+	slog.Info("browser-shell: headless mode", "mode", *headless)
+	if *proxyURL != "" {
+		launchOpts.Proxy = &playwright.Proxy{Server: *proxyURL}
+	}
+	if *extensionPath != "" {
+		launchOpts.Args = []string{"--load-extension=" + *extensionPath}
+	}
+	browser, err := pw.Firefox.Launch(launchOpts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "browser-shell: could not launch Firefox: %v\n", err)
 		os.Exit(1)

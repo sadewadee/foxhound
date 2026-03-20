@@ -486,11 +486,15 @@ func runHuntWithQueue(cfg *foxhound.Config, overrideQueue foxhound.Queue) error 
 
 	var browserFetcher foxhound.Fetcher
 	if cfg.Fetch.Browser.Instances > 0 {
-		cf, err := fetch.NewCamoufox(
+		camoufoxOpts := []fetch.CamoufoxOption{
 			fetch.WithBrowserIdentity(prof),
 			fetch.WithBlockImages(cfg.Fetch.Browser.BlockImages),
-			fetch.WithHeadless(cfg.Fetch.Browser.Headless),
-		)
+			fetch.WithHeadless(resolveHeadless(cfg.Fetch.Browser.Headless)),
+		}
+		if cfg.Fetch.Browser.ExtensionPath != "" {
+			camoufoxOpts = append(camoufoxOpts, fetch.WithExtensionPath(cfg.Fetch.Browser.ExtensionPath))
+		}
+		cf, err := fetch.NewCamoufox(camoufoxOpts...)
 		if err != nil {
 			slog.Warn("fetch: camoufox initialisation failed, continuing static-only",
 				"err", err)

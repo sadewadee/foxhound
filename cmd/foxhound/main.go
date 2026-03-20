@@ -9,11 +9,16 @@ import (
 	foxhound "github.com/sadewadee/foxhound"
 )
 
-const version = "0.0.2"
+const version = "0.0.4"
 
 // globalVerbose is the verbosity level set by -v / -vv flags.
 // 0 = normal (info), 1 = verbose (debug), 2 = very verbose (debug + source).
 var globalVerbose int
+
+// globalHeadless is the browser display mode set by --headless flag.
+// "true" = headless, "false" = visible window, "virtual" = Xvfb.
+// Empty string means not set (subcommands use their own default).
+var globalHeadless string
 
 func main() {
 	// Parse global flags before the command name.
@@ -78,7 +83,8 @@ func main() {
 // globalVerbose. Returns remaining args with global flags removed.
 func parseGlobalFlags(args []string) []string {
 	var remaining []string
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		switch arg {
 		case "-vv":
 			globalVerbose = 2
@@ -86,7 +92,18 @@ func parseGlobalFlags(args []string) []string {
 			if globalVerbose < 1 {
 				globalVerbose = 1
 			}
+		case "--headless":
+			// Consume the next arg as the headless mode value.
+			if i+1 < len(args) {
+				i++
+				globalHeadless = args[i]
+			}
 		default:
+			// --headless=value form
+			if strings.HasPrefix(arg, "--headless=") {
+				globalHeadless = strings.TrimPrefix(arg, "--headless=")
+				continue
+			}
 			// Check for -v combined with other short flags (unlikely but safe).
 			if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.Contains(arg, "v") {
 				// Count v's: -v = 1, -vv = 2
@@ -112,8 +129,9 @@ func printUsage() {
 	fmt.Print(`Usage: foxhound [global flags] <command> [command flags]
 
 Global Flags:
-  -v          Verbose output (debug level logging)
-  -vv         Very verbose output (debug + source location)
+  -v                Verbose output (debug level logging)
+  -vv               Very verbose output (debug + source location)
+  --headless MODE   Browser display mode: "true", "false", "virtual" (default "false")
 
 Commands:
   init        Scaffold a new foxhound project
@@ -130,4 +148,14 @@ Commands:
 
 Run "foxhound <command> -help" for command-specific flags.
 `)
+}
+
+// resolveHeadless returns the global --headless flag if set, otherwise
+// falls back to the config value. This lets "foxhound --headless false run"
+// override the YAML config.
+func resolveHeadless(configValue string) string {
+	if globalHeadless != "" {
+		return globalHeadless
+	}
+	return configValue
 }

@@ -65,6 +65,9 @@ fetch:
     block_images: true
     # Disable WebRTC to prevent IP leaks.
     block_webrtc: true
+    # NopeCHA CAPTCHA-solving extension is auto-downloaded and loaded by default.
+    # Set to "none" to disable, or a path to load a custom extension.
+    # extension_path: "none"
 
 # ---------------------------------------------------------------------------
 # Middleware

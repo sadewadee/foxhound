@@ -81,11 +81,12 @@ type StaticFetchConfig struct {
 
 // BrowserFetchConfig configures the Camoufox browser.
 type BrowserFetchConfig struct {
-	Timeout     Duration `yaml:"timeout"`
-	BlockImages bool     `yaml:"block_images"`
-	BlockWebRTC bool     `yaml:"block_webrtc"`
-	Headless    string   `yaml:"headless"`
-	Instances   int      `yaml:"instances"`
+	Timeout       Duration `yaml:"timeout"`
+	BlockImages   bool     `yaml:"block_images"`
+	BlockWebRTC   bool     `yaml:"block_webrtc"`
+	Headless      string   `yaml:"headless"`
+	Instances     int      `yaml:"instances"`
+	ExtensionPath string   `yaml:"extension_path"` // path to extension dir/xpi, or "none" to disable NopeCHA auto-load
 }
 
 // MiddlewareConfig configures request/response processing middleware.

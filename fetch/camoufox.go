@@ -127,6 +127,7 @@ func WithBrowserProxy(proxyURL string) CamoufoxOption {
 }
 
 // WithExtensionPath sets the path to a Firefox extension directory to load.
+// By default, NopeCHA is auto-downloaded and loaded. Set to "none" to disable.
 // In the stub build this stores the value but has no effect — the extension
 // is only loaded when compiled with the playwright build tag.
 func WithExtensionPath(path string) CamoufoxOption {

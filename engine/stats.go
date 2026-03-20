@@ -129,15 +129,16 @@ func (s *Stats) DomainStatsFor(domain string) *DomainStats {
 // ToMap returns a structured snapshot of current statistics suitable for
 // JSON serialisation or structured logging.
 func (s *Stats) ToMap() map[string]any {
-	elapsed := time.Since(s.StartedAt).Seconds()
+	elapsed := time.Since(s.StartedAt)
+	elapsedSec := elapsed.Seconds()
 	reqCount := s.RequestCount.Load()
 	rps := float64(0)
-	if elapsed > 0 {
-		rps = float64(reqCount) / elapsed
+	if elapsedSec > 0 {
+		rps = float64(reqCount) / elapsedSec
 	}
 
 	result := map[string]any{
-		"elapsed":        time.Since(s.StartedAt).Truncate(time.Second).String(),
+		"elapsed":        elapsed.Truncate(time.Second).String(),
 		"requests":       reqCount,
 		"success":        s.SuccessCount.Load(),
 		"errors":         s.ErrorCount.Load(),

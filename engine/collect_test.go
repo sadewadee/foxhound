@@ -1,4 +1,4 @@
-package spider_test
+package engine_test
 
 import (
 	"encoding/json"
@@ -9,7 +9,7 @@ import (
 	"time"
 
 	foxhound "github.com/sadewadee/foxhound"
-	"github.com/sadewadee/foxhound/spider"
+	"github.com/sadewadee/foxhound/engine"
 )
 
 func makeTestItem(title, price string) *foxhound.Item {
@@ -20,7 +20,7 @@ func makeTestItem(title, price string) *foxhound.Item {
 }
 
 func TestItemList_AppendAndLen(t *testing.T) {
-	il := spider.NewItemList()
+	il := engine.NewItemList()
 	if il.Len() != 0 {
 		t.Errorf("empty ItemList.Len() = %d, want 0", il.Len())
 	}
@@ -34,7 +34,7 @@ func TestItemList_AppendAndLen(t *testing.T) {
 }
 
 func TestItemList_Items_ReturnsCopy(t *testing.T) {
-	il := spider.NewItemList()
+	il := engine.NewItemList()
 	il.Append(makeTestItem("A", "10"))
 	il.Append(makeTestItem("B", "20"))
 
@@ -43,7 +43,6 @@ func TestItemList_Items_ReturnsCopy(t *testing.T) {
 		t.Fatalf("Items() returned %d, want 2", len(items))
 	}
 
-	// Mutating the returned slice should not affect the ItemList.
 	items[0] = nil
 	if il.Items()[0] == nil {
 		t.Error("Items() should return a copy, not a reference")
@@ -51,7 +50,7 @@ func TestItemList_Items_ReturnsCopy(t *testing.T) {
 }
 
 func TestItemList_Clear(t *testing.T) {
-	il := spider.NewItemList()
+	il := engine.NewItemList()
 	il.Append(makeTestItem("A", "10"))
 	il.Clear()
 	if il.Len() != 0 {
@@ -60,7 +59,7 @@ func TestItemList_Clear(t *testing.T) {
 }
 
 func TestItemList_ToJSON(t *testing.T) {
-	il := spider.NewItemList()
+	il := engine.NewItemList()
 	il.Append(makeTestItem("Widget", "9.99"))
 	il.Append(makeTestItem("Gadget", "19.99"))
 
@@ -90,7 +89,7 @@ func TestItemList_ToJSON(t *testing.T) {
 }
 
 func TestItemList_ToJSON_Indented(t *testing.T) {
-	il := spider.NewItemList()
+	il := engine.NewItemList()
 	il.Append(makeTestItem("Test", "1.00"))
 
 	dir := t.TempDir()
@@ -105,7 +104,6 @@ func TestItemList_ToJSON_Indented(t *testing.T) {
 		t.Fatalf("read file: %v", err)
 	}
 
-	// Indented JSON should contain newlines and spaces.
 	content := string(data)
 	if !strings.Contains(content, "\n") {
 		t.Error("indented JSON should contain newlines")
@@ -113,7 +111,7 @@ func TestItemList_ToJSON_Indented(t *testing.T) {
 }
 
 func TestItemList_ToJSONL(t *testing.T) {
-	il := spider.NewItemList()
+	il := engine.NewItemList()
 	il.Append(makeTestItem("A", "1"))
 	il.Append(makeTestItem("B", "2"))
 	il.Append(makeTestItem("C", "3"))
@@ -135,7 +133,6 @@ func TestItemList_ToJSONL(t *testing.T) {
 		t.Errorf("JSONL has %d lines, want 3", len(lines))
 	}
 
-	// Each line should be valid JSON.
 	for i, line := range lines {
 		var m map[string]any
 		if err := json.Unmarshal([]byte(line), &m); err != nil {
@@ -145,7 +142,7 @@ func TestItemList_ToJSONL(t *testing.T) {
 }
 
 func TestItemList_ToCSV(t *testing.T) {
-	il := spider.NewItemList()
+	il := engine.NewItemList()
 	il.Append(makeTestItem("Widget", "9.99"))
 	il.Append(makeTestItem("Gadget", "19.99"))
 
@@ -163,7 +160,7 @@ func TestItemList_ToCSV(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) != 3 { // header + 2 rows
+	if len(lines) != 3 {
 		t.Errorf("CSV has %d lines, want 3 (header + 2 rows)", len(lines))
 	}
 	if lines[0] != "title,price" {
@@ -172,64 +169,64 @@ func TestItemList_ToCSV(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// CrawlStats tests
+// HuntMetrics tests
 // ---------------------------------------------------------------------------
 
-func TestCrawlStats_ElapsedSeconds(t *testing.T) {
-	cs := spider.NewCrawlStats()
+func TestHuntMetrics_ElapsedSeconds(t *testing.T) {
+	hm := engine.NewHuntMetrics()
 	time.Sleep(50 * time.Millisecond)
 
-	elapsed := cs.ElapsedSeconds()
+	elapsed := hm.ElapsedSeconds()
 	if elapsed < 0.04 || elapsed > 1.0 {
 		t.Errorf("ElapsedSeconds() = %f, expected ~0.05", elapsed)
 	}
 }
 
-func TestCrawlStats_RequestsPerSecond(t *testing.T) {
-	cs := spider.NewCrawlStats()
-	cs.RequestsCount = 100
-	cs.EndTime = cs.StartTime.Add(10 * time.Second)
+func TestHuntMetrics_RequestsPerSecond(t *testing.T) {
+	hm := engine.NewHuntMetrics()
+	hm.RequestsCount = 100
+	hm.EndTime = hm.StartTime.Add(10 * time.Second)
 
-	rps := cs.RequestsPerSecond()
+	rps := hm.RequestsPerSecond()
 	if rps < 9 || rps > 11 {
 		t.Errorf("RequestsPerSecond() = %f, want ~10", rps)
 	}
 }
 
-func TestCrawlStats_IncrementStatus(t *testing.T) {
-	cs := spider.NewCrawlStats()
-	cs.IncrementStatus(200)
-	cs.IncrementStatus(200)
-	cs.IncrementStatus(404)
+func TestHuntMetrics_IncrementStatus(t *testing.T) {
+	hm := engine.NewHuntMetrics()
+	hm.IncrementStatus(200)
+	hm.IncrementStatus(200)
+	hm.IncrementStatus(404)
 
-	if cs.StatusCounts[200] != 2 {
-		t.Errorf("StatusCounts[200] = %d, want 2", cs.StatusCounts[200])
+	if hm.StatusCounts[200] != 2 {
+		t.Errorf("StatusCounts[200] = %d, want 2", hm.StatusCounts[200])
 	}
-	if cs.StatusCounts[404] != 1 {
-		t.Errorf("StatusCounts[404] = %d, want 1", cs.StatusCounts[404])
-	}
-}
-
-func TestCrawlStats_IncrementResponseBytes(t *testing.T) {
-	cs := spider.NewCrawlStats()
-	cs.IncrementResponseBytes("example.com", 1000)
-	cs.IncrementResponseBytes("example.com", 500)
-	cs.IncrementResponseBytes("other.com", 200)
-
-	if cs.ResponseBytes != 1700 {
-		t.Errorf("ResponseBytes = %d, want 1700", cs.ResponseBytes)
-	}
-	if cs.DomainBytes["example.com"] != 1500 {
-		t.Errorf("DomainBytes[example.com] = %d, want 1500", cs.DomainBytes["example.com"])
+	if hm.StatusCounts[404] != 1 {
+		t.Errorf("StatusCounts[404] = %d, want 1", hm.StatusCounts[404])
 	}
 }
 
-func TestCrawlStats_ToMap(t *testing.T) {
-	cs := spider.NewCrawlStats()
-	cs.RequestsCount = 50
-	cs.ItemsScraped = 30
+func TestHuntMetrics_IncrementResponseBytes(t *testing.T) {
+	hm := engine.NewHuntMetrics()
+	hm.IncrementResponseBytes("example.com", 1000)
+	hm.IncrementResponseBytes("example.com", 500)
+	hm.IncrementResponseBytes("other.com", 200)
 
-	m := cs.ToMap()
+	if hm.ResponseBytes != 1700 {
+		t.Errorf("ResponseBytes = %d, want 1700", hm.ResponseBytes)
+	}
+	if hm.DomainBytes["example.com"] != 1500 {
+		t.Errorf("DomainBytes[example.com] = %d, want 1500", hm.DomainBytes["example.com"])
+	}
+}
+
+func TestHuntMetrics_ToMap(t *testing.T) {
+	hm := engine.NewHuntMetrics()
+	hm.RequestsCount = 50
+	hm.ItemsScraped = 30
+
+	m := hm.ToMap()
 	if m["requests_count"] != int64(50) {
 		t.Errorf("ToMap()[requests_count] = %v, want 50", m["requests_count"])
 	}
@@ -239,67 +236,43 @@ func TestCrawlStats_ToMap(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// CrawlResult tests
+// HuntResult tests
 // ---------------------------------------------------------------------------
 
-func TestCrawlResult_Completed(t *testing.T) {
-	cr := &spider.CrawlResult{
-		Stats:  spider.NewCrawlStats(),
-		Items:  spider.NewItemList(),
-		Paused: false,
+func TestHuntResult_Completed(t *testing.T) {
+	hr := &engine.HuntResult{
+		Metrics: engine.NewHuntMetrics(),
+		Items:   engine.NewItemList(),
+		Paused:  false,
 	}
-	if !cr.Completed() {
+	if !hr.Completed() {
 		t.Error("Completed() should be true when not paused")
 	}
 
-	cr.Paused = true
-	if cr.Completed() {
+	hr.Paused = true
+	if hr.Completed() {
 		t.Error("Completed() should be false when paused")
 	}
 }
 
-func TestCrawlResult_Len(t *testing.T) {
-	cr := &spider.CrawlResult{
-		Stats: spider.NewCrawlStats(),
-		Items: spider.NewItemList(),
+func TestHuntResult_Len(t *testing.T) {
+	hr := &engine.HuntResult{
+		Metrics: engine.NewHuntMetrics(),
+		Items:   engine.NewItemList(),
 	}
-	if cr.Len() != 0 {
-		t.Errorf("empty CrawlResult.Len() = %d, want 0", cr.Len())
+	if hr.Len() != 0 {
+		t.Errorf("empty HuntResult.Len() = %d, want 0", hr.Len())
 	}
 
-	cr.Items.Append(makeTestItem("A", "1"))
-	if cr.Len() != 1 {
-		t.Errorf("CrawlResult.Len() = %d, want 1", cr.Len())
-	}
-}
-
-func TestCrawlResult_NilItems(t *testing.T) {
-	cr := &spider.CrawlResult{Stats: spider.NewCrawlStats()}
-	if cr.Len() != 0 {
-		t.Errorf("CrawlResult with nil items: Len() = %d, want 0", cr.Len())
+	hr.Items.Append(makeTestItem("A", "1"))
+	if hr.Len() != 1 {
+		t.Errorf("HuntResult.Len() = %d, want 1", hr.Len())
 	}
 }
 
-// ---------------------------------------------------------------------------
-// BlockChecker tests
-// ---------------------------------------------------------------------------
-
-func TestBaseSpider_IsBlocked(t *testing.T) {
-	s := &spider.BaseSpider{SpiderName: "test"}
-
-	blockedCodes := []int{401, 403, 407, 429, 444, 500, 502, 503, 504}
-	for _, code := range blockedCodes {
-		resp := &foxhound.Response{StatusCode: code}
-		if !s.IsBlocked(resp) {
-			t.Errorf("IsBlocked(%d) = false, want true", code)
-		}
-	}
-
-	okCodes := []int{200, 201, 301, 302, 404}
-	for _, code := range okCodes {
-		resp := &foxhound.Response{StatusCode: code}
-		if s.IsBlocked(resp) {
-			t.Errorf("IsBlocked(%d) = true, want false", code)
-		}
+func TestHuntResult_NilItems(t *testing.T) {
+	hr := &engine.HuntResult{Metrics: engine.NewHuntMetrics()}
+	if hr.Len() != 0 {
+		t.Errorf("HuntResult with nil items: Len() = %d, want 0", hr.Len())
 	}
 }

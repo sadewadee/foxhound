@@ -400,14 +400,14 @@ func (r *Response) FollowURL(rawURL string, opts ...FollowOption) *Job {
 	}
 
 	meta := make(map[string]any)
-	if cfg.referer {
-		meta["referer"] = r.URL
-	}
 	for k, v := range cfg.meta {
 		meta[k] = v
 	}
 	if cfg.callback != "" {
 		meta["callback"] = cfg.callback
+	}
+	if cfg.referer {
+		meta["referer"] = r.URL
 	}
 
 	return &Job{
