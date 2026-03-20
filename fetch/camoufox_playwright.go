@@ -642,7 +642,10 @@ func ensureNopeCHA() (string, error) {
 }
 
 // findNopeCHADownloadURL queries GitHub releases API and returns the
-// firefox_automation.zip asset download URL.
+// firefox.zip asset download URL. We use the regular extension build (not
+// firefox_automation.zip) because the automation build requires an API key
+// for cloud-based solving. The regular build works like a normal browser
+// extension — no API key needed.
 func findNopeCHADownloadURL() (string, error) {
 	// Use curl to fetch the releases API (avoids importing net/http for this one call).
 	out, err := exec.Command("curl", "-fsSL", nopeCHAGitHubReleasesAPI).Output()
@@ -660,12 +663,8 @@ func findNopeCHADownloadURL() (string, error) {
 		return "", fmt.Errorf("parse GitHub API response: %w", err)
 	}
 
-	// Prefer firefox_automation.zip, fall back to firefox.zip.
-	for _, a := range release.Assets {
-		if a.Name == "firefox_automation.zip" {
-			return a.BrowserDownloadURL, nil
-		}
-	}
+	// Use firefox.zip (regular extension, no API key needed).
+	// Do NOT use firefox_automation.zip — that build requires a paid API key.
 	for _, a := range release.Assets {
 		if a.Name == "firefox.zip" {
 			return a.BrowserDownloadURL, nil
