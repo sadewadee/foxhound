@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"time"
 
 	foxhound "github.com/sadewadee/foxhound"
@@ -33,6 +34,8 @@ const (
 	StepEvaluate
 	// StepFill types text into an input field with human-like keystrokes.
 	StepFill
+	// StepCollect extracts URLs from matching elements into a Pool.
+	StepCollect
 )
 
 // Step is a single action within a Trail.
@@ -213,6 +216,21 @@ func (t *Trail) Fill(selector, value string) *Trail {
 	return t
 }
 
+// Collect appends a step that extracts URLs from all elements matching
+// selector, reading the given attribute (typically "href"). The collected
+// URLs are stored in Response.StepResults as []string.
+//
+// This step is implemented as a JS Evaluate that runs
+// querySelectorAll(selector) and returns the attribute values.
+func (t *Trail) Collect(selector, attr string) *Trail {
+	t.Steps = append(t.Steps, Step{
+		Action:   StepCollect,
+		Selector: selector,
+		Value:    attr,
+	})
+	return t
+}
+
 // ToJobs converts the Trail into foxhound.Jobs. Each StepNavigate starts a
 // new Job; subsequent browser steps (Click, Wait, Scroll) are attached as
 // JobSteps on that Job and set FetchMode to FetchBrowser.
@@ -246,6 +264,23 @@ func (t *Trail) ToJobs() []*foxhound.Job {
 
 		// Extract steps cannot be serialized — skip them.
 		if step.Action == StepExtract {
+			continue
+		}
+
+		// Collect steps are implemented as JS Evaluate steps.
+		if step.Action == StepCollect {
+			script := fmt.Sprintf(
+				`() => [...document.querySelectorAll('%s')].map(el => el.getAttribute('%s')).filter(Boolean)`,
+				step.Selector, step.Value,
+			)
+			js := foxhound.JobStep{
+				Action:   foxhound.JobStepEvaluate,
+				Script:   script,
+				Selector: step.Selector,
+				Value:    step.Value,
+			}
+			current.Steps = append(current.Steps, js)
+			current.FetchMode = foxhound.FetchBrowser
 			continue
 		}
 
@@ -292,6 +327,8 @@ func mapStepAction(a StepAction) int {
 		return foxhound.JobStepEvaluate
 	case StepFill:
 		return foxhound.JobStepFill
+	case StepCollect:
+		return foxhound.JobStepEvaluate
 	default:
 		return foxhound.JobStepNavigate
 	}

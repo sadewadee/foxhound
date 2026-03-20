@@ -70,6 +70,7 @@ const (
 	JobStepPaginate       = 7 // detect and follow pagination links
 	JobStepEvaluate       = 8 // execute custom JavaScript on the page
 	JobStepFill           = 9 // type text into input field with human-like keystrokes
+	JobStepCollect        = 10 // collect URLs from page into pool
 )
 
 // JobStep is a single browser-side action that should be executed after the
