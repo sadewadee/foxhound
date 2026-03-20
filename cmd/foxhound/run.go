@@ -430,6 +430,10 @@ func cmdRun(args []string) {
 	if *hunt != "" {
 		cfg.Hunt.Domain = *hunt
 	}
+	if globalFast {
+		cfg.Behavior.Profile = "aggressive"
+		slog.Info("fast mode enabled: aggressive behavior profile, warm-up disabled")
+	}
 
 	slog.Info("configuration loaded",
 		"config", *configPath,

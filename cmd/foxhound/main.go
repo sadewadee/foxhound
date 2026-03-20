@@ -20,6 +20,9 @@ var globalVerbose int
 // Empty string means not set (subcommands use their own default).
 var globalHeadless string
 
+// globalFast disables warm-up steps and sets BehaviorProfile to "aggressive".
+var globalFast bool
+
 func main() {
 	// Parse global flags before the command name.
 	// Supports: -v, -vv, --verbose
@@ -98,6 +101,8 @@ func parseGlobalFlags(args []string) []string {
 				i++
 				globalHeadless = args[i]
 			}
+		case "--fast":
+			globalFast = true
 		default:
 			// --headless=value form
 			if strings.HasPrefix(arg, "--headless=") {
@@ -132,6 +137,7 @@ Global Flags:
   -v                Verbose output (debug level logging)
   -vv               Very verbose output (debug + source location)
   --headless MODE   Browser display mode: "true", "false", "virtual" (default "false")
+  --fast              Disable warm-up, use aggressive timing (dev/testing)
 
 Commands:
   init        Scaffold a new foxhound project
