@@ -23,6 +23,9 @@
 //
 //   # Visible browser
 //   go run -tags playwright ./examples/gmaps/ -query "yoga studio canggu bali" -headless false
+//
+//   # Fast mode (no warm-up, aggressive timing)
+//   go run -tags playwright ./examples/gmaps/ -query "yoga studio canggu bali" -fast
 package main
 
 import (
@@ -57,6 +60,7 @@ func main() {
 	maxResults := flag.Int("max-results", 120, "Max results to collect from feed")
 	headless := flag.String("headless", "true", "Browser headless mode: true, false, virtual")
 	enrich := flag.Bool("enrich", false, "Visit business websites to extract contacts")
+	fast := flag.Bool("fast", false, "Disable warm-up, use aggressive timing (dev/testing)")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
@@ -117,19 +121,26 @@ func main() {
 		InfiniteScrollInUntil("div[role='feed']", "div.Nv2PK", *maxResults, 200).
 		Collect("a.hfpxzc", "href")
 
+	if *fast {
+		collectTrail.NoWarmup()
+	}
+
 	collectJobs := collectTrail.ToJobs()
 	if len(collectJobs) == 0 {
 		slog.Error("no jobs generated from trail")
 		os.Exit(1)
 	}
 
-	collectJob := collectJobs[0]
-	collectJob.ID = "gmaps-collect"
-
-	resp, err := cf.Fetch(ctx, collectJob)
-	if err != nil {
-		slog.Error("collect fetch failed", "err", err)
-		os.Exit(1)
+	var resp *foxhound.Response
+	for i, job := range collectJobs {
+		job.ID = fmt.Sprintf("gmaps-collect-%d", i)
+		var err error
+		resp, err = cf.Fetch(ctx, job)
+		if err != nil {
+			slog.Error("collect fetch failed", "url", job.URL, "err", err)
+			os.Exit(1)
+		}
+		slog.Info("collect step complete", "url", job.URL, "status", resp.StatusCode)
 	}
 
 	// Extract collected URLs from StepResults
@@ -221,6 +232,11 @@ func main() {
 		&pipeline.Clean{TrimWhitespace: true},
 	)
 
+	behaviorProfile := "careful"
+	if *fast {
+		behaviorProfile = "aggressive"
+	}
+
 	h := engine.NewHunt(engine.HuntConfig{
 		Name:            "gmaps-profiles",
 		Domain:          "www.google.com",
@@ -235,7 +251,7 @@ func main() {
 		Middlewares: []foxhound.Middleware{
 			middleware.NewRateLimit(0.5, 1),
 		},
-		BehaviorProfile: "careful",
+		BehaviorProfile: behaviorProfile,
 	})
 
 	start := time.Now()
