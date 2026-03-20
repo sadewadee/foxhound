@@ -6,13 +6,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Foxhound is a Go scraping framework with native Camoufox (Firefox fork) anti-detection. It uses dual-mode fetching: a TLS-impersonating HTTP client for static pages and Camoufox via playwright-go for JS-heavy/protected pages, with automatic escalation when blocks are detected.
 
-**Status**: Phases 1-5 implemented. 19 packages, 991 tests. Phase 5 added: resource-type blocking, network interception, domain blocking, Response.FollowURL, selector wait states, spider block detection/retry, ItemList/CrawlResult/CrawlStats export, Element.FindSimilar, SQLite adaptive storage, page pool stats, fingerprint-customizable dedup, Stats.ToMap.
+**Status**: v0.0.5. 18 packages, 1000+ tests. NopeCHA CAPTCHA extension auto-downloads on first launch. All 13 GitHub issues resolved.
+
+**Browser**: Camoufox only. No Chromium, Nightly, or other browsers.
 
 ## Build & Test
 
 ```bash
 # Build everything
 go build ./...
+
+# Build with browser support (playwright)
+go build -tags playwright ./...
 
 # Run all tests
 go test ./...
@@ -29,10 +34,13 @@ go build -o foxhound ./cmd/foxhound/
 
 # CLI commands
 foxhound run --config config.yaml
+foxhound --headless false run --config config.yaml   # global headless flag
 foxhound init myproject
 foxhound check
 foxhound proxy-test --config config.yaml
 foxhound shell
+foxhound browser-shell                               # interactive Camoufox REPL
+foxhound browser-shell --headless true
 foxhound resume --hunt-id <id> --queue redis://localhost:6379
 
 # Docker
@@ -45,8 +53,11 @@ docker compose --profile monitoring up
 
 ### Dual-Mode Fetcher (core differentiator)
 - **Static path** (`FetchStatic`): Go HTTP client with header ordering from identity profile. ~5-50ms/req. (`fetch/stealth.go`)
-- **Browser path** (`FetchBrowser`): Camoufox (Firefox fork) via playwright-go using Juggler protocol. ~500ms-5s/req. (`fetch/camoufox.go` — Phase 1 stub, needs playwright-go install)
+- **Browser path** (`FetchBrowser`): Camoufox (Firefox fork) via playwright-go using Juggler protocol. ~500ms-5s/req. (`fetch/camoufox_playwright.go`)
 - **Smart Router** (`FetchAuto`): starts static, auto-escalates to browser on block detection (403/429/503). (`fetch/smart.go`)
+
+### NopeCHA Extension (auto-download)
+NopeCHA CAPTCHA-solving extension is downloaded from GitHub (`NopeCHALLC/nopecha-extension`) and loaded into Camoufox by default. Cached at `~/.cache/foxhound/extensions/nopecha/`. Disable with `extension_path: "none"` in config or `WithExtensionPath("none")`.
 
 ### Identity System
 Every request uses a complete, internally-consistent identity profile: UA + TLS fingerprint + header order + OS + hardware + screen + locale + geo must all match. 60 embedded device profiles via Go `embed` directive in `identity/data/`. Generate with functional options:
@@ -56,14 +67,42 @@ id := identity.Generate(identity.WithBrowser(identity.BrowserFirefox), identity.
 
 ### Key Terminology
 - **Hunt** (`engine/hunt.go`): scraping campaign orchestrator — seeds queue, launches walkers, collects stats
-- **Trail** (`engine/trail.go`): fluent navigation path builder (Navigate → Click → Wait → Extract)
+- **Trail** (`engine/trail.go`): fluent navigation path builder (Navigate → Click → Fill → Wait → Scroll → Evaluate → Extract)
 - **Walker** (`engine/walker.go`): goroutine that pops jobs, fetches, processes, writes items, enqueues discovered jobs
-- **Job** (`foxhound.go`): unit of work (URL + FetchMode + Priority + Meta)
+- **Job** (`foxhound.go`): unit of work (URL + FetchMode + Priority + Steps + Meta)
+- **ItemList** (`engine/collect.go`): thread-safe item collection with CSV/JSON/JSONL export
+
+### Browser Steps (JobStep)
+Steps are browser actions executed after page load, before content extraction:
+| Step | Constant | Description |
+|------|----------|-------------|
+| Navigate | 0 | Page navigation |
+| Click | 1 | Click element (hard failure unless Optional) |
+| Wait | 2 | Wait for selector (hard failure unless Optional) |
+| Extract | 3 | Handled by Processor after fetch |
+| Scroll | 4 | Human-like scroll via behavior.Scroll |
+| InfiniteScroll | 5 | Scroll until no new content; supports custom container (Selector) and StopSelector/StopCount |
+| LoadMore | 6 | Click "load more" button repeatedly |
+| Paginate | 7 | Follow pagination links, accumulate all pages HTML |
+| Evaluate | 8 | Execute custom JS, return value in Response.StepResults |
+| Fill | 9 | Type text with human-like keystrokes via behavior.Keyboard |
+
+### Trail API Example
+```go
+trail := engine.NewTrail("maps-search").
+    Navigate("https://www.google.com/maps").
+    Fill("input#searchboxinput", "cafe in canggu").
+    Click("button#searchbox-searchbutton").
+    WaitOptional("div[role='feed']", 10*time.Second).
+    ClickOptional("button.cookie-dismiss").
+    InfiniteScrollInUntil("div[role='feed']", "div.Nv2PK", 20, 100).
+    Evaluate("() => document.querySelectorAll('.Nv2PK').length")
+```
 
 ### Request Data Flow
 ```
 Job → middleware chain (rate limit → dedup → autothrottle → cookies → referer → retry)
-  → Smart Fetcher (static or browser) → Parser → User Process()
+  → Smart Fetcher (static or browser) → Steps → Parser → User Process()
   → Result{Items, Jobs} → Pipeline chain (validate → clean → dedup → transform)
   → Writers (CSV/JSON/webhook) + Queue (new jobs)
 ```
@@ -73,27 +112,30 @@ Job → middleware chain (rate limit → dedup → autothrottle → cookies → 
 foxhound/
   foxhound.go     — core types: Job, Response, Item, Result, Fetcher, Queue, Pipeline, Writer, Middleware
   config.go       — YAML config parser with env var expansion and defaults
-  engine/         — hunt, walker, trail, scheduler, retry, stats
+  engine/         — hunt, walker, trail, scheduler, retry, stats, collect (ItemList/HuntMetrics/HuntResult)
   identity/       — profile generation, embedded device/TLS/header databases (60 profiles)
-  fetch/          — stealth (HTTP+headers), camoufox (browser stub), smart (auto-router)
-  proxy/          — pool, health, cooldown, static provider
+  fetch/          — stealth (HTTP+headers), camoufox (browser), smart (auto-router), capture (XHR), pagepool
+  proxy/          — pool (+ GetForGeo), health, cooldown, static provider
   proxy/providers — brightdata, oxylabs, smartproxy adapters
   behavior/       — timing (log-normal), mouse (bezier), scroll, keyboard, navigation, profiles
-  middleware/     — ratelimit, dedup, depth, retry, autothrottle, cookies, referer, redirect, deltafetch, metrics
-  parse/          — goquery (CSS), json (dot-path), xpath (subset→CSS), regex, structured (schema)
-  pipeline/       — validate, clean, dedup, transform, chain
+  middleware/     — ratelimit, dedup, depth, retry, autothrottle, cookies, cookies_persist, referer, redirect, deltafetch, metrics
+  parse/          — goquery (CSS), json (dot-path), xpath (subset→CSS), regex, structured (schema),
+                    content (markdown/text), metadata (JSON-LD/OG/NextData/Nuxt), contact (email/phone),
+                    sitemap, feed (RSS/Atom), finder, adaptive_sqlite
+  pipeline/       — validate, clean, dedup, transform, field_transform (regex/rename/coerce), chain
   pipeline/export — json/jsonl, csv, webhook writers
   queue/          — memory (heap), redis (sorted set), sqlite (persistent)
   cache/          — memory (LRU+TTL), file (SHA256), redis, sqlite
   monitor/        — stats (atomic counters), prometheus (isolated registry), alerting (webhook rules)
   captcha/        — detect (cloudflare/recaptcha/hcaptcha/geetest), capsolver, twocaptcha, turnstile
-  cmd/foxhound/   — CLI: init, run, check, proxy-test, shell, resume
+  cmd/foxhound/   — CLI: init, run, check, proxy-test, shell, browser-shell, resume, curl2fox, preview
   examples/       — ecommerce (books.toscrape.com), travel, realtime price monitor
 ```
 
 ## Key Dependencies
 
 - `goquery` — HTML/CSS selector parsing
+- `playwright-go` — Camoufox browser automation (build tag: playwright)
 - `go-redis/v9` — Redis client (queue, cache)
 - `modernc.org/sqlite` — pure-Go SQLite (queue, cache)
 - `prometheus/client_golang` — metrics
@@ -106,10 +148,24 @@ These must be maintained in all implementation work:
 
 1. **Consistency over randomness**: all identity attributes (UA, TLS, headers, OS, hardware, screen, locale, geo) must be internally consistent.
 2. **Human timing uses log-normal distribution** (`behavior/timing.go`), not uniform random.
-3. **Camoufox chosen over Chromium** because Juggler protocol is less targeted by anti-bot than CDP.
-4. **Goal is to never trigger CAPTCHA**. If CAPTCHA appears, earlier layers failed.
-5. **Proxy geo must match identity locale/timezone**.
+3. **Camoufox only** — Juggler protocol is less targeted by anti-bot than CDP. No Chromium/Nightly.
+4. **NopeCHA auto-loaded** — CAPTCHA solving is built-in, no API key needed.
+5. **Goal is to never trigger CAPTCHA**. If CAPTCHA appears, earlier layers failed.
+6. **Proxy geo must match identity locale/timezone**.
 
 ## Config
 
 Example config at `config/config.yaml`. All config structs in `config.go`. Supports env var expansion via `os.ExpandEnv`. Defaults applied for all missing values.
+
+Key config additions (v0.0.4+):
+```yaml
+fetch:
+  browser:
+    extension_path: ""       # default: auto-download NopeCHA. Set "none" to disable.
+```
+
+Global CLI flags:
+```
+--headless MODE   "true" | "false" | "virtual" (overrides config)
+-v / -vv          verbose logging
+```
