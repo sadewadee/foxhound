@@ -84,17 +84,23 @@ func (p *PagePool) Acquire(ctx context.Context) (any, error) {
 	default:
 	}
 
-	// Try to create a new page if under limit.
-	if p.created.Load() < int64(p.maxSize) {
-		page, err := p.create()
-		if err != nil {
-			return nil, err
+	// Try to atomically claim a creation slot.
+	for {
+		cur := p.created.Load()
+		if cur >= int64(p.maxSize) {
+			break
 		}
-		p.created.Add(1)
-		p.acquired.Add(1)
-		slog.Debug("pagepool: created new page",
-			"total", p.created.Load(), "max", p.maxSize)
-		return page, nil
+		if p.created.CompareAndSwap(cur, cur+1) {
+			page, err := p.create()
+			if err != nil {
+				p.created.Add(-1) // release the slot on failure
+				return nil, err
+			}
+			p.acquired.Add(1)
+			slog.Debug("pagepool: created new page",
+				"total", p.created.Load(), "max", p.maxSize)
+			return page, nil
+		}
 	}
 
 	// At capacity — wait for a released page or context cancellation.

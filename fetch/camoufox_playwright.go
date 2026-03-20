@@ -268,11 +268,25 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 		slog.Info("fetch/camoufox: proxy configured", "server", proxyOpt.Server)
 	}
 
+	// Auto-load NopeCHA extension by default unless explicitly disabled.
+	// If extensionPath is empty, auto-download NopeCHA to cache.
+	// If extensionPath is "none", skip extension loading entirely.
+	if f.extensionPath == "" {
+		nopechaPath, nopechaErr := ensureNopeCHA()
+		if nopechaErr != nil {
+			slog.Warn("fetch/camoufox: NopeCHA auto-download failed, continuing without extension",
+				"err", nopechaErr)
+		} else {
+			f.extensionPath = nopechaPath
+			slog.Info("fetch/camoufox: NopeCHA extension auto-loaded", "path", nopechaPath)
+		}
+	}
+
 	// When an extension path is set AND Camoufox binary is available, inject
 	// the addon via CAMOU_CONFIG env var. Camoufox natively loads unpacked
 	// addons listed in CAMOU_CONFIG_* environment variables — no persistent
 	// context or profile hacking needed.
-	if f.extensionPath != "" && execPath != "" {
+	if f.extensionPath != "" && f.extensionPath != "none" && execPath != "" {
 		// Resolve to absolute path.
 		absExt, _ := filepath.Abs(f.extensionPath)
 		// If .xpi, it must be extracted first — Camoufox expects directories.
@@ -527,6 +541,130 @@ func findCamoufoxBinary() string {
 		}
 	}
 	return ""
+}
+
+// nopechaCacheDir returns the directory where NopeCHA extension is cached.
+func nopechaCacheDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".cache", "foxhound", "extensions", "nopecha")
+}
+
+// nopeCHAGitHubReleasesAPI is the GitHub API endpoint for NopeCHA releases.
+const nopeCHAGitHubReleasesAPI = "https://api.github.com/repos/NopeCHALLC/nopecha-extension/releases/latest"
+
+// ensureNopeCHA returns the path to a cached NopeCHA extension directory,
+// downloading it from GitHub releases if not already present.
+func ensureNopeCHA() (string, error) {
+	cacheDir := nopechaCacheDir()
+	manifestPath := filepath.Join(cacheDir, "manifest.json")
+
+	// Already cached — return immediately.
+	if _, err := os.Stat(manifestPath); err == nil {
+		slog.Debug("fetch/nopecha: using cached extension", "dir", cacheDir)
+		return cacheDir, nil
+	}
+
+	slog.Info("fetch/nopecha: downloading NopeCHA extension from GitHub...")
+
+	// Query GitHub API for latest release to find firefox_automation.zip asset.
+	downloadURL, err := findNopeCHADownloadURL()
+	if err != nil {
+		return "", fmt.Errorf("fetch/nopecha: find download URL: %w", err)
+	}
+
+	// Download the zip to a temp file.
+	tmpFile, err := os.CreateTemp("", "nopecha-*.zip")
+	if err != nil {
+		return "", fmt.Errorf("fetch/nopecha: create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpPath)
+
+	// Use curl for the download (follows redirects, handles GitHub).
+	dlCmd := exec.Command("curl", "-fsSL", "-o", tmpPath, downloadURL)
+	dlCmd.Stderr = os.Stderr
+	if err := dlCmd.Run(); err != nil {
+		return "", fmt.Errorf("fetch/nopecha: download failed: %w", err)
+	}
+
+	// Create cache directory and extract.
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return "", fmt.Errorf("fetch/nopecha: create cache dir: %w", err)
+	}
+
+	unzipCmd := exec.Command("unzip", "-o", tmpPath, "-d", cacheDir)
+	unzipCmd.Stderr = os.Stderr
+	if err := unzipCmd.Run(); err != nil {
+		os.RemoveAll(cacheDir)
+		return "", fmt.Errorf("fetch/nopecha: extract failed: %w", err)
+	}
+
+	// Verify manifest.json exists after extraction.
+	if _, err := os.Stat(manifestPath); err != nil {
+		// Some zips have a nested directory — check one level deep.
+		entries, _ := os.ReadDir(cacheDir)
+		for _, e := range entries {
+			if e.IsDir() {
+				nested := filepath.Join(cacheDir, e.Name(), "manifest.json")
+				if _, nerr := os.Stat(nested); nerr == nil {
+					// Move contents up one level.
+					nestedDir := filepath.Join(cacheDir, e.Name())
+					innerEntries, _ := os.ReadDir(nestedDir)
+					for _, ie := range innerEntries {
+						os.Rename(
+							filepath.Join(nestedDir, ie.Name()),
+							filepath.Join(cacheDir, ie.Name()),
+						)
+					}
+					os.Remove(nestedDir)
+					break
+				}
+			}
+		}
+	}
+
+	// Final check.
+	if _, err := os.Stat(manifestPath); err != nil {
+		return "", fmt.Errorf("fetch/nopecha: manifest.json not found after extraction")
+	}
+
+	slog.Info("fetch/nopecha: extension downloaded and cached", "dir", cacheDir)
+	return cacheDir, nil
+}
+
+// findNopeCHADownloadURL queries GitHub releases API and returns the
+// firefox_automation.zip asset download URL.
+func findNopeCHADownloadURL() (string, error) {
+	// Use curl to fetch the releases API (avoids importing net/http for this one call).
+	out, err := exec.Command("curl", "-fsSL", nopeCHAGitHubReleasesAPI).Output()
+	if err != nil {
+		return "", fmt.Errorf("GitHub API request failed: %w", err)
+	}
+
+	var release struct {
+		Assets []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal(out, &release); err != nil {
+		return "", fmt.Errorf("parse GitHub API response: %w", err)
+	}
+
+	// Prefer firefox_automation.zip, fall back to firefox.zip.
+	for _, a := range release.Assets {
+		if a.Name == "firefox_automation.zip" {
+			return a.BrowserDownloadURL, nil
+		}
+	}
+	for _, a := range release.Assets {
+		if a.Name == "firefox.zip" {
+			return a.BrowserDownloadURL, nil
+		}
+	}
+
+	return "", fmt.Errorf("no firefox extension asset found in latest NopeCHA release")
 }
 
 // Fetch navigates to job.URL inside a fresh, isolated BrowserContext, waits

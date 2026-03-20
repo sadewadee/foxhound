@@ -1,4 +1,4 @@
-package spider
+package engine
 
 import (
 	"encoding/csv"
@@ -12,8 +12,9 @@ import (
 	foxhound "github.com/sadewadee/foxhound"
 )
 
-// ItemList is a collection of scraped items with export methods.
-// It is safe for concurrent use.
+// ItemList is a thread-safe collection of scraped items with batch export
+// methods (JSON, JSONL, CSV). Use it with Hunt.ItemCallback or
+// Hunt.StreamWithStats to accumulate items during a hunt.
 type ItemList struct {
 	mu    sync.RWMutex
 	items []*foxhound.Item
@@ -61,10 +62,9 @@ func (il *ItemList) ToJSON(path string, indent bool) error {
 	defer il.mu.RUnlock()
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("spider: create dir for %q: %w", path, err)
+		return fmt.Errorf("engine: create dir for %q: %w", path, err)
 	}
 
-	// Convert items to field maps for clean JSON output.
 	records := make([]map[string]any, len(il.items))
 	for i, item := range il.items {
 		records[i] = item.ToMap()
@@ -78,7 +78,7 @@ func (il *ItemList) ToJSON(path string, indent bool) error {
 		data, err = json.Marshal(records)
 	}
 	if err != nil {
-		return fmt.Errorf("spider: marshal items: %w", err)
+		return fmt.Errorf("engine: marshal items: %w", err)
 	}
 
 	return os.WriteFile(path, data, 0o644)
@@ -90,19 +90,19 @@ func (il *ItemList) ToJSONL(path string) error {
 	defer il.mu.RUnlock()
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("spider: create dir for %q: %w", path, err)
+		return fmt.Errorf("engine: create dir for %q: %w", path, err)
 	}
 
 	f, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("spider: create %q: %w", path, err)
+		return fmt.Errorf("engine: create %q: %w", path, err)
 	}
 	defer f.Close()
 
 	enc := json.NewEncoder(f)
 	for _, item := range il.items {
 		if err := enc.Encode(item.ToMap()); err != nil {
-			return fmt.Errorf("spider: encode item: %w", err)
+			return fmt.Errorf("engine: encode item: %w", err)
 		}
 	}
 	return nil
@@ -114,27 +114,25 @@ func (il *ItemList) ToCSV(path string, columns []string) error {
 	defer il.mu.RUnlock()
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("spider: create dir for %q: %w", path, err)
+		return fmt.Errorf("engine: create dir for %q: %w", path, err)
 	}
 
 	f, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("spider: create %q: %w", path, err)
+		return fmt.Errorf("engine: create %q: %w", path, err)
 	}
 	defer f.Close()
 
 	w := csv.NewWriter(f)
 	defer w.Flush()
 
-	// Write header.
 	if err := w.Write(columns); err != nil {
-		return fmt.Errorf("spider: write CSV header: %w", err)
+		return fmt.Errorf("engine: write CSV header: %w", err)
 	}
 
-	// Write rows.
 	for _, item := range il.items {
 		if err := w.Write(item.ToCSVRow(columns)); err != nil {
-			return fmt.Errorf("spider: write CSV row: %w", err)
+			return fmt.Errorf("engine: write CSV row: %w", err)
 		}
 	}
 
@@ -142,11 +140,13 @@ func (il *ItemList) ToCSV(path string, columns []string) error {
 }
 
 // ---------------------------------------------------------------------------
-// CrawlStats
+// HuntMetrics — extended hunt-level metrics
 // ---------------------------------------------------------------------------
 
-// CrawlStats holds statistics for a spider run.
-type CrawlStats struct {
+// HuntMetrics holds extended statistics for a hunt beyond what Stats tracks.
+// It adds offsite/blocked counters, status code breakdown, and per-domain
+// byte tracking.
+type HuntMetrics struct {
 	mu sync.RWMutex
 
 	RequestsCount       int64
@@ -158,17 +158,17 @@ type CrawlStats struct {
 	ResponseBytes       int64
 	StartTime           time.Time
 	EndTime             time.Time
-	DownloadDelay       time.Duration
-	ConcurrentRequests  int
+	RequestDelay        time.Duration
+	ParallelRequests    int
 
 	StatusCounts map[int]int64
 	DomainBytes  map[string]int64
 	LogCounts    map[string]int64
 }
 
-// NewCrawlStats creates a CrawlStats initialised with the current time.
-func NewCrawlStats() *CrawlStats {
-	return &CrawlStats{
+// NewHuntMetrics creates a HuntMetrics initialised with the current time.
+func NewHuntMetrics() *HuntMetrics {
+	return &HuntMetrics{
 		StartTime:    time.Now(),
 		StatusCounts: make(map[int]int64),
 		DomainBytes:  make(map[string]int64),
@@ -176,88 +176,98 @@ func NewCrawlStats() *CrawlStats {
 	}
 }
 
-// ElapsedSeconds returns the duration of the crawl in seconds.
-func (cs *CrawlStats) ElapsedSeconds() float64 {
-	cs.mu.RLock()
-	defer cs.mu.RUnlock()
-	end := cs.EndTime
+// ElapsedSeconds returns the duration of the hunt in seconds.
+func (hm *HuntMetrics) ElapsedSeconds() float64 {
+	hm.mu.RLock()
+	defer hm.mu.RUnlock()
+	end := hm.EndTime
 	if end.IsZero() {
 		end = time.Now()
 	}
-	return end.Sub(cs.StartTime).Seconds()
+	return end.Sub(hm.StartTime).Seconds()
 }
 
 // RequestsPerSecond returns the average requests per second.
-func (cs *CrawlStats) RequestsPerSecond() float64 {
-	elapsed := cs.ElapsedSeconds()
+func (hm *HuntMetrics) RequestsPerSecond() float64 {
+	elapsed := hm.ElapsedSeconds()
 	if elapsed == 0 {
 		return 0
 	}
-	cs.mu.RLock()
-	defer cs.mu.RUnlock()
-	return float64(cs.RequestsCount) / elapsed
+	hm.mu.RLock()
+	defer hm.mu.RUnlock()
+	return float64(hm.RequestsCount) / elapsed
 }
 
 // IncrementStatus records an HTTP status code occurrence.
-func (cs *CrawlStats) IncrementStatus(status int) {
-	cs.mu.Lock()
-	cs.StatusCounts[status]++
-	cs.mu.Unlock()
+func (hm *HuntMetrics) IncrementStatus(status int) {
+	hm.mu.Lock()
+	hm.StatusCounts[status]++
+	hm.mu.Unlock()
 }
 
 // IncrementResponseBytes adds byte count for a domain.
-func (cs *CrawlStats) IncrementResponseBytes(domain string, count int64) {
-	cs.mu.Lock()
-	cs.ResponseBytes += count
-	cs.DomainBytes[domain] += count
-	cs.mu.Unlock()
+func (hm *HuntMetrics) IncrementResponseBytes(domain string, count int64) {
+	hm.mu.Lock()
+	hm.ResponseBytes += count
+	hm.DomainBytes[domain] += count
+	hm.mu.Unlock()
 }
 
-// ToMap returns the stats as a map for structured logging or JSON export.
-func (cs *CrawlStats) ToMap() map[string]any {
-	cs.mu.RLock()
-	defer cs.mu.RUnlock()
+// ToMap returns the metrics as a map for structured logging or JSON export.
+func (hm *HuntMetrics) ToMap() map[string]any {
+	hm.mu.RLock()
+	defer hm.mu.RUnlock()
+
+	end := hm.EndTime
+	if end.IsZero() {
+		end = time.Now()
+	}
+	elapsed := end.Sub(hm.StartTime).Seconds()
+	rps := float64(0)
+	if elapsed > 0 {
+		rps = float64(hm.RequestsCount) / elapsed
+	}
 
 	return map[string]any{
-		"items_scraped":        cs.ItemsScraped,
-		"items_dropped":        cs.ItemsDropped,
-		"elapsed_seconds":      cs.ElapsedSeconds(),
-		"concurrent_requests":  cs.ConcurrentRequests,
-		"requests_count":       cs.RequestsCount,
-		"requests_per_second":  cs.RequestsPerSecond(),
-		"failed_requests":      cs.FailedRequestsCount,
-		"offsite_requests":     cs.OffsiteRequests,
-		"blocked_requests":     cs.BlockedRequests,
-		"response_bytes":       cs.ResponseBytes,
-		"response_status_count": cs.StatusCounts,
-		"domains_response_bytes": cs.DomainBytes,
-		"log_count":            cs.LogCounts,
+		"items_scraped":          hm.ItemsScraped,
+		"items_dropped":          hm.ItemsDropped,
+		"elapsed_seconds":        elapsed,
+		"parallel_requests":      hm.ParallelRequests,
+		"requests_count":         hm.RequestsCount,
+		"requests_per_second":    rps,
+		"failed_requests":        hm.FailedRequestsCount,
+		"offsite_requests":       hm.OffsiteRequests,
+		"blocked_requests":       hm.BlockedRequests,
+		"response_bytes":         hm.ResponseBytes,
+		"response_status_count":  hm.StatusCounts,
+		"domains_response_bytes": hm.DomainBytes,
+		"log_count":              hm.LogCounts,
 	}
 }
 
 // ---------------------------------------------------------------------------
-// CrawlResult
+// HuntResult
 // ---------------------------------------------------------------------------
 
-// CrawlResult is the complete result from a spider run.
-type CrawlResult struct {
-	// Stats holds the crawl statistics.
-	Stats *CrawlStats
+// HuntResult is the complete result from a hunt execution.
+type HuntResult struct {
+	// Metrics holds the hunt metrics.
+	Metrics *HuntMetrics
 	// Items holds all scraped items.
 	Items *ItemList
-	// Paused is true if the crawl was paused (not completed).
+	// Paused is true if the hunt was paused (not completed).
 	Paused bool
 }
 
-// Completed returns true if the crawl finished normally (was not paused).
-func (cr *CrawlResult) Completed() bool {
-	return !cr.Paused
+// Completed returns true if the hunt finished normally (was not paused).
+func (hr *HuntResult) Completed() bool {
+	return !hr.Paused
 }
 
 // Len returns the number of scraped items.
-func (cr *CrawlResult) Len() int {
-	if cr.Items == nil {
+func (hr *HuntResult) Len() int {
+	if hr.Items == nil {
 		return 0
 	}
-	return cr.Items.Len()
+	return hr.Items.Len()
 }

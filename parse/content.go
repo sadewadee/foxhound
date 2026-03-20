@@ -42,41 +42,42 @@ func ToText(resp *foxhound.Response) string {
 	return normalizeWhitespace(text)
 }
 
+// mainContentSelectors are common main content container selectors in priority order.
+var mainContentSelectors = []string{
+	"main",
+	"article",
+	"[role='main']",
+	".post-content",
+	".entry-content",
+	".article-content",
+	".article-body",
+	"#content",
+	".content",
+}
+
+// findMainContent locates the primary content selection in the document,
+// stripping boilerplate elements. Returns the body as fallback.
+func findMainContent(doc *goquery.Document) *goquery.Selection {
+	for _, sel := range mainContentSelectors {
+		found := doc.Find(sel)
+		if found.Length() > 0 {
+			found.Find("nav, .sidebar, .footer, .comments, .related").Remove()
+			return found
+		}
+	}
+	// Fallback: strip scripts/styles and return body.
+	doc.Find("script, style, noscript, nav, header, footer, aside").Remove()
+	return doc.Find("body")
+}
+
 // ExtractMainContent attempts to extract the main content from a page,
 // excluding navigation, sidebars, footers, and other boilerplate.
-// It looks for common main content containers: <main>, <article>,
-// [role="main"], .content, #content, .post-content, .entry-content.
 func ExtractMainContent(resp *foxhound.Response) string {
 	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(resp.Body))
 	if err != nil {
 		return string(resp.Body)
 	}
-
-	// Try common main content selectors in priority order.
-	selectors := []string{
-		"main",
-		"article",
-		"[role='main']",
-		".post-content",
-		".entry-content",
-		".article-content",
-		".article-body",
-		"#content",
-		".content",
-	}
-
-	for _, sel := range selectors {
-		found := doc.Find(sel)
-		if found.Length() > 0 {
-			// Remove nav, sidebar, footer within the main content.
-			found.Find("nav, .sidebar, .footer, .comments, .related").Remove()
-			return normalizeWhitespace(found.Text())
-		}
-	}
-
-	// Fallback: strip scripts/styles and return body text.
-	doc.Find("script, style, noscript, nav, header, footer, aside").Remove()
-	return normalizeWhitespace(doc.Find("body").Text())
+	return normalizeWhitespace(findMainContent(doc).Text())
 }
 
 // ExtractMainContentMarkdown is like ExtractMainContent but returns Markdown.
@@ -85,23 +86,7 @@ func ExtractMainContentMarkdown(resp *foxhound.Response) string {
 	if err != nil {
 		return string(resp.Body)
 	}
-
-	selectors := []string{
-		"main", "article", "[role='main']",
-		".post-content", ".entry-content", ".article-content",
-		"#content", ".content",
-	}
-
-	for _, sel := range selectors {
-		found := doc.Find(sel)
-		if found.Length() > 0 {
-			found.Find("nav, .sidebar, .footer, .comments, .related").Remove()
-			return htmlToMarkdown(found)
-		}
-	}
-
-	doc.Find("script, style, noscript, nav, header, footer, aside").Remove()
-	return htmlToMarkdown(doc.Find("body"))
+	return htmlToMarkdown(findMainContent(doc))
 }
 
 // ---------------------------------------------------------------------------
@@ -128,40 +113,23 @@ func convertNode(b *strings.Builder, sel *goquery.Selection) {
 		}
 
 		tag := goquery.NodeName(s)
-		switch tag {
-		case "h1":
-			b.WriteString("\n\n# ")
+		switch {
+		case len(tag) == 2 && tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '6':
+			level := int(tag[1] - '0')
+			b.WriteString("\n\n")
+			b.WriteString(strings.Repeat("#", level))
+			b.WriteString(" ")
 			convertNode(b, s)
 			b.WriteString("\n\n")
-		case "h2":
-			b.WriteString("\n\n## ")
-			convertNode(b, s)
-			b.WriteString("\n\n")
-		case "h3":
-			b.WriteString("\n\n### ")
-			convertNode(b, s)
-			b.WriteString("\n\n")
-		case "h4":
-			b.WriteString("\n\n#### ")
-			convertNode(b, s)
-			b.WriteString("\n\n")
-		case "h5":
-			b.WriteString("\n\n##### ")
-			convertNode(b, s)
-			b.WriteString("\n\n")
-		case "h6":
-			b.WriteString("\n\n###### ")
-			convertNode(b, s)
-			b.WriteString("\n\n")
-		case "p":
+		case tag == "p":
 			b.WriteString("\n\n")
 			convertNode(b, s)
 			b.WriteString("\n\n")
-		case "br":
+		case tag == "br":
 			b.WriteString("\n")
-		case "hr":
+		case tag == "hr":
 			b.WriteString("\n\n---\n\n")
-		case "a":
+		case tag == "a":
 			text := strings.TrimSpace(s.Text())
 			href, _ := s.Attr("href")
 			if href != "" && text != "" {
@@ -169,21 +137,21 @@ func convertNode(b *strings.Builder, sel *goquery.Selection) {
 			} else if text != "" {
 				b.WriteString(text)
 			}
-		case "img":
+		case tag == "img":
 			alt, _ := s.Attr("alt")
 			src, _ := s.Attr("src")
 			if src != "" {
 				fmt.Fprintf(b, "![%s](%s)", alt, src)
 			}
-		case "strong", "b":
+		case tag == "strong" || tag == "b":
 			b.WriteString("**")
 			convertNode(b, s)
 			b.WriteString("**")
-		case "em", "i":
+		case tag == "em" || tag == "i":
 			b.WriteString("*")
 			convertNode(b, s)
 			b.WriteString("*")
-		case "code":
+		case tag == "code":
 			// Check if parent is <pre> for code blocks.
 			parent := s.Parent()
 			if parent.Length() > 0 && goquery.NodeName(parent) == "pre" {
@@ -192,11 +160,11 @@ func convertNode(b *strings.Builder, sel *goquery.Selection) {
 			b.WriteString("`")
 			b.WriteString(s.Text())
 			b.WriteString("`")
-		case "pre":
+		case tag == "pre":
 			b.WriteString("\n\n```\n")
 			b.WriteString(strings.TrimSpace(s.Text()))
 			b.WriteString("\n```\n\n")
-		case "blockquote":
+		case tag == "blockquote":
 			lines := strings.Split(strings.TrimSpace(s.Text()), "\n")
 			b.WriteString("\n\n")
 			for _, line := range lines {
@@ -205,7 +173,7 @@ func convertNode(b *strings.Builder, sel *goquery.Selection) {
 				b.WriteString("\n")
 			}
 			b.WriteString("\n")
-		case "ul":
+		case tag == "ul":
 			b.WriteString("\n")
 			s.Children().Each(func(_ int, li *goquery.Selection) {
 				if goquery.NodeName(li) == "li" {
@@ -215,7 +183,7 @@ func convertNode(b *strings.Builder, sel *goquery.Selection) {
 				}
 			})
 			b.WriteString("\n")
-		case "ol":
+		case tag == "ol":
 			b.WriteString("\n")
 			s.Children().Each(func(i int, li *goquery.Selection) {
 				if goquery.NodeName(li) == "li" {
@@ -223,12 +191,14 @@ func convertNode(b *strings.Builder, sel *goquery.Selection) {
 				}
 			})
 			b.WriteString("\n")
-		case "table":
+		case tag == "table":
 			convertTable(b, s)
-		case "script", "style", "noscript":
+		case tag == "script" || tag == "style" || tag == "noscript":
 			// Skip
-		case "div", "span", "section", "article", "main", "aside", "nav",
-			"header", "footer", "figure", "figcaption", "details", "summary":
+		case tag == "div" || tag == "span" || tag == "section" || tag == "article" ||
+			tag == "main" || tag == "aside" || tag == "nav" ||
+			tag == "header" || tag == "footer" || tag == "figure" ||
+			tag == "figcaption" || tag == "details" || tag == "summary":
 			convertNode(b, s)
 		default:
 			convertNode(b, s)
