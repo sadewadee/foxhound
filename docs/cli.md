@@ -20,12 +20,15 @@ foxhound [global flags] <command> [command flags]
 |------|-------------|
 | `-v`, `--verbose` | Verbose output (debug level logging) |
 | `-vv` | Very verbose output (debug + source location in log records) |
+| `--headless MODE` | Browser display mode: `"true"` (headless), `"false"` (visible window), `"virtual"` (Xvfb). Overrides config value. |
 
 Global flags must appear before the command name:
 
 ```bash
 foxhound -v run --config config.yaml
 foxhound -vv check --browser firefox
+foxhound --headless false run --config config.yaml   # force visible browser
+foxhound --headless=true browser-shell                # headless browser REPL
 ```
 
 ## Commands
@@ -238,11 +241,72 @@ foxhound resume --hunt-id my-hunt --queue redis://localhost:6379/0 --config conf
 foxhound resume --hunt-id my-hunt --queue /data/foxhound.db --config config.yaml
 ```
 
+### browser-shell
+
+Start an interactive Camoufox browser REPL. Requires the `playwright` build tag.
+
+```
+foxhound browser-shell [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--headless` | `"false"` | Browser display mode: `"true"`, `"false"`, `"virtual"` (overridden by global `--headless`) |
+| `--proxy` | `$FOXHOUND_PROXY` | Proxy URL (HTTP or SOCKS5) |
+| `--extension` | `$NOPECHA_EXT` | Path to Firefox extension directory |
+| `--timeout` | `120s` | Per-navigation timeout |
+
+The browser REPL opens a live Camoufox window (or headless instance). Session cookies, localStorage, and navigation history are preserved between commands.
+
+Commands: `goto`, `back`, `forward`, `reload`, `url`, `title`, `click`, `type`, `select`, `scroll`, `wait`, `text`, `attr`, `html`, `links`, `count`, `screenshot`, `eval`, `cookies`, `status`, `help`, `clear`, `exit`.
+
+```bash
+foxhound browser-shell
+foxhound --headless false browser-shell --proxy socks5://localhost:1080
+foxhound browser-shell --extension /path/to/nopecha --timeout 60s
+```
+
+Build with:
+
+```bash
+go build -tags playwright -o foxhound ./cmd/foxhound/
+```
+
+### curl2fox
+
+Convert a curl command to foxhound Go code.
+
+```
+foxhound curl2fox <curl command...>
+```
+
+Parses the curl flags (`-H`, `-X`, `-d`, `--json`, `-A`, `-b`, `-e`, etc.) and generates a complete `main.go` with identity, fetcher, job, processor, and hunt setup.
+
+```bash
+foxhound curl2fox 'curl https://api.example.com/data -H "Accept: application/json"'
+foxhound curl2fox curl -X POST https://example.com/login -d 'user=admin&pass=secret'
+```
+
+### preview
+
+Fetch a URL using the stealth HTTP client and print the response.
+
+```
+foxhound preview <url>
+```
+
+Outputs status code, final URL, duration, fetch mode, and the full response body. Useful for quick debugging without writing a processor.
+
+```bash
+foxhound preview https://books.toscrape.com/
+foxhound preview example.com              # https:// added automatically
+```
+
 ### version
 
 ```bash
 foxhound version
-# foxhound v0.0.1
+# foxhound v0.0.5
 ```
 
 ### help

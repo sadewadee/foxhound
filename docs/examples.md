@@ -401,6 +401,107 @@ h := engine.NewHunt(engine.HuntConfig{
 })
 ```
 
+## Trail API — Google Maps Search
+
+The Trail API provides a fluent builder for browser-based navigation. This example searches Google Maps and scrolls through results:
+
+```go
+trail := engine.NewTrail("maps").
+    Navigate("https://www.google.com/maps").
+    Fill("input#searchboxinput", "cafe in canggu").
+    Click("button#searchbox-searchbutton").
+    Wait("div[role='feed']", 10*time.Second).
+    InfiniteScrollInUntil("div[role='feed']", "div.Nv2PK", 20, 100)
+
+result, err := trail.Run(ctx, browserFetcher)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Extract from the final page state
+doc, _ := parse.NewDocument(result.Response)
+doc.Each("div.Nv2PK", func(i int, s *goquery.Selection) {
+    item := foxhound.NewItem()
+    item.Set("name", s.Find("div.qBF1Pd").Text())
+    item.Set("rating", s.Find("span.MW4etd").Text())
+    item.Set("reviews", s.Find("span.UY7F9").Text())
+    // ...
+})
+```
+
+## Metadata Extraction (JSON-LD)
+
+Extract structured data from JSON-LD `<script>` tags embedded in pages:
+
+```go
+processor := foxhound.ProcessorFunc(func(ctx context.Context, resp *foxhound.Response) (*foxhound.Result, error) {
+    doc, _ := parse.NewDocument(resp)
+
+    // ExtractJSONLD parses all <script type="application/ld+json"> blocks
+    jsonld := doc.ExtractJSONLD()
+    for _, ld := range jsonld {
+        item := foxhound.NewItem()
+        item.URL = resp.URL
+        item.Set("type", ld["@type"])
+        item.Set("name", ld["name"])
+        item.Set("description", ld["description"])
+        // ...
+    }
+    return &foxhound.Result{Items: items}, nil
+})
+```
+
+## Contact Extraction (Emails with CloudFlare cfemail)
+
+Extract email addresses from pages, including those obfuscated by CloudFlare's email protection:
+
+```go
+processor := foxhound.ProcessorFunc(func(ctx context.Context, resp *foxhound.Response) (*foxhound.Result, error) {
+    doc, _ := parse.NewDocument(resp)
+
+    // ExtractEmails finds mailto: links and decodes CloudFlare cfemail-protected addresses
+    emails := doc.ExtractEmails()
+
+    item := foxhound.NewItem()
+    item.URL = resp.URL
+    item.Set("emails", strings.Join(emails, ", "))
+    return &foxhound.Result{Items: []*foxhound.Item{item}}, nil
+})
+```
+
+`ExtractEmails` handles three sources: `mailto:` href links, plaintext email patterns, and CloudFlare `data-cfemail` encoded spans.
+
+## XHR Capture
+
+Capture XHR/fetch responses made by the page during browser-mode navigation. Useful for extracting API data that populates dynamic content:
+
+```go
+browserFetcher, _ := fetch.NewCamoufox(
+    fetch.WithBrowserIdentity(profile),
+    fetch.WithNetworkCapture(true),
+)
+
+processor := foxhound.ProcessorFunc(func(ctx context.Context, resp *foxhound.Response) (*foxhound.Result, error) {
+    var items []*foxhound.Item
+
+    // resp.CapturedRequests contains all XHR/fetch responses captured during page load
+    for _, req := range resp.CapturedRequests {
+        if strings.Contains(req.URL, "/api/listings") {
+            var listings []map[string]any
+            json.Unmarshal(req.Body, &listings)
+            for _, l := range listings {
+                item := foxhound.NewItem()
+                item.Set("name", l["name"])
+                item.Set("price", l["price"])
+                items = append(items, item)
+            }
+        }
+    }
+
+    return &foxhound.Result{Items: items}, nil
+})
+```
+
 ## Custom Processor Patterns
 
 ### Dispatching on domain
