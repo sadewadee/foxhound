@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"net/url"
 	"time"
 
 	foxhound "github.com/sadewadee/foxhound"
@@ -80,12 +81,68 @@ type Trail struct {
 	// Name is a human-readable label for this navigation path.
 	Name  string
 	// Steps is the ordered sequence of actions.
-	Steps []Step
+	Steps      []Step
+	skipWarmup bool
 }
+
+// defaultWarmupWait is the duration the warm-up visit waits for "body" to
+// appear before proceeding to the target URL.
+const defaultWarmupWait = 2 * time.Second
 
 // NewTrail creates a new empty Trail with the given name.
 func NewTrail(name string) *Trail {
 	return &Trail{Name: name}
+}
+
+// NoWarmup disables the automatic homepage warm-up visit that ToJobs()
+// prepends by default. Use this when speed is more important than stealth,
+// or when the trail already starts at the homepage.
+func (t *Trail) NoWarmup() *Trail {
+	t.skipWarmup = true
+	return t
+}
+
+// homepageURL returns the scheme+host root URL for rawURL, or "" on error.
+func homepageURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + "/"
+}
+
+// isHomepage reports whether rawURL points to the root of its origin
+// (path is empty or "/").
+func isHomepage(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return u.Path == "" || u.Path == "/"
+}
+
+// hasBrowserSteps reports whether the trail contains at least one step that
+// requires a browser (i.e., anything other than Navigate and Extract).
+func (t *Trail) hasBrowserSteps() bool {
+	for _, s := range t.Steps {
+		switch s.Action {
+		case StepClick, StepWait, StepScroll, StepInfiniteScroll,
+			StepLoadMore, StepPaginate, StepEvaluate, StepFill, StepCollect:
+			return true
+		}
+	}
+	return false
+}
+
+// firstNavigateURL returns the URL of the first StepNavigate in the trail,
+// or "" if there is none.
+func (t *Trail) firstNavigateURL() string {
+	for _, s := range t.Steps {
+		if s.Action == StepNavigate {
+			return s.URL
+		}
+	}
+	return ""
 }
 
 // Navigate appends a StepNavigate step that fetches url.
@@ -240,11 +297,33 @@ func (t *Trail) Collect(selector, attr string) *Trail {
 // Extraction is handled by the hunt-level Processor after the fetch completes.
 //
 // Steps that appear before the first Navigate are silently skipped.
+//
+// By default, when the trail has browser steps and the first Navigate URL is
+// not the site homepage, ToJobs prepends a warm-up Job that visits the
+// homepage first to seed cookies and build a natural referrer chain. Call
+// NoWarmup() to disable this behaviour.
 func (t *Trail) ToJobs() []*foxhound.Job {
+	steps := t.Steps
+
+	// Warm-up: prepend homepage visit for browser-mode trails.
+	if !t.skipWarmup && t.hasBrowserSteps() {
+		firstURL := t.firstNavigateURL()
+		if firstURL != "" && !isHomepage(firstURL) {
+			hp := homepageURL(firstURL)
+			if hp != "" {
+				warmupSteps := []Step{
+					{Action: StepNavigate, URL: hp},
+					{Action: StepWait, Selector: "body", Duration: defaultWarmupWait, Optional: true},
+				}
+				steps = append(warmupSteps, steps...)
+			}
+		}
+	}
+
 	var jobs []*foxhound.Job
 	var current *foxhound.Job
 
-	for _, step := range t.Steps {
+	for _, step := range steps {
 		if step.Action == StepNavigate {
 			// Start a new segment.
 			current = &foxhound.Job{
