@@ -64,6 +64,13 @@ type HuntConfig struct {
 	// the browser fetcher. They are injected as JobSteps of type
 	// JobStepEvaluate on every job that uses browser mode.
 	PageActions []string
+	// Pool is an optional URL pool from a collect phase. When set, all URLs
+	// in the pool are drained and added as seed jobs before walkers start.
+	// This enables the two-phase pattern: collect URLs first, process concurrently.
+	Pool Pool
+	// PoolFetchMode sets the FetchMode for jobs created from pool URLs.
+	// Defaults to FetchBrowser.
+	PoolFetchMode foxhound.FetchMode
 }
 
 // HuntState represents the lifecycle state of a Hunt.
@@ -184,6 +191,31 @@ func (h *Hunt) Run(ctx context.Context) error {
 			h.setState(HuntFailed)
 			return fmt.Errorf("seeding queue: %w", err)
 		}
+	}
+
+	// Drain pool URLs into queue as seed jobs.
+	if h.config.Pool != nil {
+		poolURLs, err := h.config.Pool.Drain(runCtx)
+		if err != nil {
+			slog.Error("hunt: draining pool", "error", err)
+		}
+		fetchMode := h.config.PoolFetchMode
+		if fetchMode == 0 && len(poolURLs) > 0 {
+			fetchMode = foxhound.FetchBrowser
+		}
+		for i, u := range poolURLs {
+			job := &foxhound.Job{
+				ID:        fmt.Sprintf("pool-%d", i),
+				URL:       u,
+				Method:    "GET",
+				FetchMode: fetchMode,
+				Priority:  foxhound.PriorityNormal,
+				CreatedAt: time.Now(),
+				Meta:      map[string]any{"source": "pool"},
+			}
+			h.config.Queue.Push(runCtx, job)
+		}
+		slog.Info("hunt: pool drained", "urls", len(poolURLs))
 	}
 
 	// Call OnStart hook.
