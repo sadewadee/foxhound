@@ -61,6 +61,9 @@ type Step struct {
 	StopSelector string
 	// StopCount is the target element count for StopSelector.
 	StopCount int
+	// ScrollWait is the duration to wait after each scroll iteration before
+	// checking for new content. Defaults to 2s when zero.
+	ScrollWait time.Duration
 	// Optional marks this step as non-fatal: if it fails, execution continues.
 	Optional bool
 	// Value is the text to type into an input field for StepFill.
@@ -121,6 +124,12 @@ func (t *Trail) Scroll() *Trail {
 // limits iterations (0 = default 50). Scrolls the whole page.
 func (t *Trail) InfiniteScroll(maxScrolls int) *Trail {
 	t.Steps = append(t.Steps, Step{Action: StepInfiniteScroll, MaxScrolls: maxScrolls})
+	return t
+}
+
+// InfiniteScrollWithWait appends an InfiniteScroll with custom post-scroll wait.
+func (t *Trail) InfiniteScrollWithWait(maxScrolls int, scrollWait time.Duration) *Trail {
+	t.Steps = append(t.Steps, Step{Action: StepInfiniteScroll, MaxScrolls: maxScrolls, ScrollWait: scrollWait})
 	return t
 }
 
@@ -250,6 +259,7 @@ func (t *Trail) ToJobs() []*foxhound.Job {
 			Script:       step.Script,
 			StopSelector: step.StopSelector,
 			StopCount:    step.StopCount,
+			ScrollWait:   step.ScrollWait,
 			Optional:     step.Optional,
 			Value:        step.Value,
 		}

@@ -119,6 +119,10 @@ type JobStep struct {
 	// stops when document.querySelectorAll(StopSelector).length >= StopCount.
 	// Only used when StopSelector is set. Defaults to 1 when zero.
 	StopCount int `json:"stop_count,omitempty"`
+	// ScrollWait is the duration to wait after each scroll iteration before
+	// checking for new content. Defaults to 2s when zero. Increase for slow
+	// sites like Google Maps (3-5s recommended).
+	ScrollWait time.Duration `json:"scroll_wait,omitempty"`
 	// Value is the text to type into an input field for Fill steps.
 	Value string `json:"value,omitempty"`
 }
@@ -335,6 +339,12 @@ func (r *Response) Follow(selector string, opts ...FollowOption) []*Job {
 			continue
 		}
 
+		// Skip metadata/specification URLs that are never real pages.
+		host := strings.ToLower(resolved.Hostname())
+		if isMetadataHost(host) {
+			continue
+		}
+
 		if _, dup := seen[link]; dup {
 			continue
 		}
@@ -408,6 +418,12 @@ func (r *Response) FollowURL(rawURL string, opts ...FollowOption) *Job {
 	resolved := base.ResolveReference(ref)
 	resolved.Fragment = ""
 	link := resolved.String()
+
+	// Skip metadata/specification URLs that are never real pages.
+	host := strings.ToLower(resolved.Hostname())
+	if isMetadataHost(host) {
+		return nil
+	}
 
 	parentDepth := 0
 	if r.Job != nil {
@@ -845,4 +861,25 @@ type Writer interface {
 	Flush(ctx context.Context) error
 	// Close releases writer resources.
 	Close() error
+}
+
+// isMetadataHost returns true for hosts that are metadata/specification URIs,
+// not real web pages (e.g. schema.org, w3.org XML namespaces).
+func isMetadataHost(host string) bool {
+	metadataHosts := []string{
+		"schema.org",
+		"www.schema.org",
+		"w3.org",
+		"www.w3.org",
+		"xmlns.com",
+		"purl.org",
+		"ogp.me",
+		"rdfs.org",
+	}
+	for _, h := range metadataHosts {
+		if host == h {
+			return true
+		}
+	}
+	return false
 }

@@ -446,6 +446,12 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 	f.pw = pw
 	f.browser = browser
 
+	// Pre-warm: create and immediately close one context to initialize
+	// browser internals. Subsequent context creation is ~50% faster.
+	if warmCtx, warmErr := f.browser.NewContext(); warmErr == nil {
+		warmCtx.Close()
+	}
+
 	browserType := "plain Firefox"
 	if execPath != "" {
 		browserType = "Camoufox"
@@ -905,6 +911,21 @@ func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobSte
 			stopCount = 1
 		}
 
+		scrollWait := step.ScrollWait
+		if scrollWait <= 0 {
+			scrollWait = 2 * time.Second
+		}
+
+		// Track element count across iterations for StopSelector progress.
+		prevCount := 0
+		if step.StopSelector != "" {
+			initResult, _ := page.Evaluate(fmt.Sprintf(
+				"() => document.querySelectorAll(%q).length", step.StopSelector))
+			if cnt, ok := initResult.(float64); ok {
+				prevCount = int(cnt)
+			}
+		}
+
 		for i := 0; i < maxScrolls; i++ {
 			// Check StopSelector target count before scrolling.
 			if step.StopSelector != "" {
@@ -936,7 +957,25 @@ func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobSte
 			// Also jump to bottom for pages that need it.
 			page.Evaluate(scrollToBottomJS)
 			// Wait for new content to load.
-			time.Sleep(time.Duration(1500+rand.IntN(1500)) * time.Millisecond)
+			time.Sleep(scrollWait + time.Duration(rand.IntN(500))*time.Millisecond)
+
+			// When StopSelector is set, use element count as progress indicator
+			// instead of scrollHeight — more reliable for lazy-loaded content.
+			if step.StopSelector != "" {
+				countResult, _ := page.Evaluate(fmt.Sprintf(
+					"() => document.querySelectorAll(%q).length", step.StopSelector))
+				if cnt, ok := countResult.(float64); ok && int(cnt) >= stopCount {
+					slog.Info("fetch/camoufox: infinite scroll stopped — target reached",
+						"selector", step.StopSelector, "count", int(cnt), "target", stopCount)
+					break
+				}
+				// If count changed from last iteration, content is still loading.
+				newCount, _ := countResult.(float64)
+				if int(newCount) > prevCount {
+					prevCount = int(newCount)
+					continue // skip scrollHeight check — content IS loading
+				}
+			}
 
 			// Check if new content appeared.
 			newHeight, _ := page.Evaluate(getHeightJS)
@@ -1778,6 +1817,19 @@ func (f *CamoufoxFetcher) submitAfterCaptcha(page playwright.Page) {
 	}
 }
 
+// hasWaitStep returns true if the job has at least one Wait step. When a job
+// includes explicit Wait steps the caller already handles element readiness, so
+// the initial page.Goto can use the faster DOMContentLoaded event instead of
+// waiting for full network idle — saving 1-3 seconds per navigation.
+func hasWaitStep(job *foxhound.Job) bool {
+	for _, s := range job.Steps {
+		if s.Action == foxhound.JobStepWait {
+			return true
+		}
+	}
+	return false
+}
+
 // navigate performs the actual playwright navigation. It is called from a
 // goroutine so that context cancellation can abort it cleanly.
 func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error) {
@@ -1894,6 +1946,11 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 	waitUntil := playwright.WaitUntilStateNetworkidle
 	if f.hasExtension {
 		waitUntil = playwright.WaitUntilStateLoad
+	}
+	// When job has explicit Wait steps, use faster domcontentloaded —
+	// the Wait step handles element readiness, so networkidle is redundant.
+	if hasWaitStep(job) {
+		waitUntil = playwright.WaitUntilStateDomcontentloaded
 	}
 
 	start := time.Now()
