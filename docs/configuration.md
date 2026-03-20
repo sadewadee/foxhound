@@ -56,6 +56,7 @@ fetch:
     instances: 2                     # concurrent browser instances (0 = static-only)
     block_images: true               # block image/media/font resources
     block_webrtc: true               # block WebRTC to prevent IP leaks
+    extension_path: ""               # "" = auto-download NopeCHA; "none" = disable; or path to .xpi
 
 middleware:
   concurrency:
@@ -274,7 +275,19 @@ fmt.Println(cp.ItemsProcessed, cp.QueueLen)
 | `true` | Native headless mode. |
 | `false` | Full visible browser window. Use for local debugging. |
 
+The CLI provides a global `--headless` flag that overrides the config value. For example, `foxhound run --headless=false --config config.yaml` forces a visible browser regardless of what the YAML sets.
+
 Set `instances: 0` to run in static-only mode with no browser dependency.
+
+### fetch.browser.extension_path
+
+Controls the NopeCHA CAPTCHA-solving browser extension.
+
+| Value | Behaviour |
+|-------|-----------|
+| `""` (empty, default) | Auto-downloads the latest NopeCHA `.xpi` at startup and loads it into Camoufox. |
+| `"none"` | Disables the extension entirely. No download, no loading. |
+| `/path/to/extension.xpi` | Loads a specific extension file from disk. |
 
 ### pipeline.export types
 
@@ -330,6 +343,7 @@ When a field is omitted, `LoadConfig` applies these defaults:
 | `fetch.static.max_idle_conns` | 100 |
 | `fetch.browser.timeout` | `60s` |
 | `fetch.browser.instances` | 2 |
+| `fetch.browser.extension_path` | `""` (auto-download NopeCHA) |
 | `queue.backend` | `memory` |
 | `cache.ttl` | `1h` |
 | `cache.max_size` | 1000 |

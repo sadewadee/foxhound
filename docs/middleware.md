@@ -328,6 +328,24 @@ Example delays for `baseDelay=500ms`:
 
 Context cancellation stops retries immediately. Always active (innermost middleware) in the CLI default chain.
 
+### NewPersistentCookies
+
+Persists cookies to disk as JSON, surviving process restarts. Wraps the fetcher to load cookies on startup and save after each response.
+
+```go
+cookies, _ := middleware.NewPersistentCookies(".foxhound/cookies.json")
+// Use as middleware: cookies.Wrap(fetcher)
+```
+
+The cookie file is written atomically after each response. On startup, existing cookies are loaded from the file. This is useful for long-running crawls that may be interrupted and resumed.
+
+```yaml
+middleware:
+  cookies:
+    persist: true
+    path: .foxhound/cookies.json
+```
+
 ## Custom Middleware
 
 Implement `foxhound.Middleware` or use `foxhound.MiddlewareFunc`:

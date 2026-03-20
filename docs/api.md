@@ -548,3 +548,253 @@ browserFetcher, _ := fetch.NewCamoufox(
 // SmartFetcher: static first, escalates to browser on 401/403/407/429/503
 smart := fetch.NewSmart(staticFetcher, browserFetcher)
 ```
+
+## Trail API
+
+`engine.Trail` is a fluent builder for multi-step browser navigation sequences. Each step is queued and executed in order when the trail runs.
+
+```go
+import (
+    "time"
+    "github.com/sadewadee/foxhound/engine"
+)
+
+trail := engine.NewTrail("product-search").
+    Navigate("https://example.com").
+    Fill("input#search", "query").
+    Click("button.submit").
+    Wait("div.results", 10*time.Second).
+    ClickOptional("button.cookie-dismiss").
+    WaitOptional("div.popup", 3*time.Second).
+    InfiniteScroll(50).
+    InfiniteScrollIn("div.panel", 50).
+    InfiniteScrollUntil("div.item", 20, 100).
+    InfiniteScrollInUntil("div.panel", "div.item", 20, 100).
+    Evaluate("() => document.title").
+    Paginate("a.next", 10).
+    LoadMore("button.more", 20)
+```
+
+| Method | Description |
+|--------|-------------|
+| `Navigate(url)` | Navigate the browser to the given URL. |
+| `Fill(selector, value)` | Type `value` into the element matching `selector`. |
+| `Click(selector)` | Click the element. Fails if not found. |
+| `ClickOptional(selector)` | Click if element exists, skip silently otherwise. |
+| `Wait(selector, timeout)` | Wait for element to appear, fail on timeout. |
+| `WaitOptional(selector, timeout)` | Wait for element, skip if timeout expires. |
+| `InfiniteScroll(maxScrolls)` | Scroll the page until no new content or `maxScrolls` reached. |
+| `InfiniteScrollIn(container, maxScrolls)` | Scroll within a specific container element. |
+| `InfiniteScrollUntil(itemSelector, minItems, maxScrolls)` | Scroll until `minItems` matching elements exist. |
+| `InfiniteScrollInUntil(container, itemSelector, minItems, maxScrolls)` | Scroll in container until `minItems` found. |
+| `Evaluate(js)` | Run JavaScript in the page. Result stored in `Response.StepResults`. |
+| `Paginate(nextSelector, maxPages)` | Click a "next" link repeatedly, up to `maxPages`. |
+| `LoadMore(buttonSelector, maxClicks)` | Click a "load more" button repeatedly. |
+
+Use a trail as the processor for a hunt by passing it to `engine.HuntConfig.Trail`.
+
+## Response.StepResults
+
+When a trail includes `Evaluate` steps, their return values are stored in `Response.StepResults`:
+
+```go
+// StepResults is map[string]any, keyed by "step_N" (0-indexed position in the trail)
+resp.StepResults["step_4"] // result of the 5th step (an Evaluate call)
+```
+
+## Response.CapturedXHR
+
+Captures matching XHR/fetch responses when `WithCaptureXHR` patterns are configured on the Camoufox fetcher:
+
+```go
+fetcher, _ := fetch.NewCamoufox(
+    fetch.WithCaptureXHR("*/api/products*", "*/graphql*"),
+)
+
+// After fetch, resp.CapturedXHR contains matching network responses:
+// []map[string]any with keys: "url", "status", "headers", "body"
+for _, xhr := range resp.CapturedXHR {
+    fmt.Println(xhr["url"], xhr["status"])
+    bodyJSON := xhr["body"] // raw response body as string
+}
+```
+
+## parse/metadata
+
+Extract structured metadata from HTML documents.
+
+```go
+import "github.com/sadewadee/foxhound/parse"
+
+doc, _ := parse.NewDocument(resp)
+
+// JSON-LD structured data (returns []map[string]any)
+jsonLD := parse.ExtractJSONLD(doc)
+
+// Open Graph tags (returns map[string]string: "og:title" -> value)
+og := parse.ExtractOpenGraph(doc)
+
+// All <meta> tags (returns map[string]string keyed by name or property)
+meta := parse.ExtractMeta(doc)
+
+// Next.js __NEXT_DATA__ payload (returns map[string]any)
+nextData := parse.ExtractNextData(doc)
+
+// Nuxt.js __NUXT_DATA__ payload (returns map[string]any)
+nuxtData := parse.ExtractNuxtData(doc)
+```
+
+## parse/contact
+
+Extract contact information from HTML.
+
+```go
+import "github.com/sadewadee/foxhound/parse"
+
+doc, _ := parse.NewDocument(resp)
+
+// Decode Cloudflare email protection (data-cfemail attributes)
+email := parse.DecodeCFEmail("abc123def") // returns decoded email string
+
+// Extract all email addresses from document text and mailto: links
+emails := parse.ExtractEmails(doc) // []string
+
+// Extract phone numbers from document text and tel: links
+phones := parse.ExtractPhones(doc) // []string
+```
+
+## parse/sitemap
+
+Parse XML sitemaps.
+
+```go
+import "github.com/sadewadee/foxhound/parse"
+
+// Parse a sitemap.xml (returns []SitemapURL with Loc, LastMod, Priority, ChangeFreq)
+urls, err := parse.ParseSitemap(sitemapBytes)
+
+// Parse a sitemap index (returns []SitemapIndexEntry with Loc, LastMod)
+entries, err := parse.ParseSitemapIndex(indexBytes)
+```
+
+## parse/feed
+
+Parse RSS and Atom feeds.
+
+```go
+import "github.com/sadewadee/foxhound/parse"
+
+// Parse RSS feed (returns *Feed with Title, Link, Items)
+feed, err := parse.ParseRSS(rssBytes)
+
+// Parse Atom feed (returns *Feed with Title, Link, Items)
+feed, err := parse.ParseAtom(atomBytes)
+```
+
+## engine/collect
+
+Helpers for collecting items and metrics from a hunt.
+
+### ItemList
+
+Thread-safe accumulator for scraped items.
+
+```go
+import "github.com/sadewadee/foxhound/engine"
+
+list := engine.NewItemList()
+list.Append(item)            // add an item (goroutine-safe)
+list.Len()                   // number of items
+list.Items()                 // []*foxhound.Item snapshot
+list.Clear()                 // remove all items
+
+// Serialisation:
+jsonBytes, _ := list.ToJSON()    // JSON array
+jsonlBytes, _ := list.ToJSONL() // one JSON object per line
+csvBytes, _ := list.ToCSV()     // CSV with auto-detected columns
+```
+
+### HuntMetrics
+
+Live metrics snapshot from a running or completed hunt.
+
+```go
+metrics := hunt.Metrics() // returns engine.HuntMetrics
+// Fields: RequestsTotal, RequestsOK, RequestsFailed, RequestsBlocked,
+//         ItemsScraped, BytesDownloaded, Elapsed, RequestsPerSec, AvgLatency
+```
+
+### HuntResult
+
+Returned by `hunt.RunCollect(ctx)` -- runs the hunt and returns all items plus final metrics.
+
+```go
+result, err := hunt.RunCollect(ctx) // engine.HuntResult
+items := result.Items               // []*foxhound.Item
+metrics := result.Metrics           // engine.HuntMetrics
+```
+
+## middleware/cookies_persist
+
+Persistent cookie jar that saves/loads cookies to/from a JSON file.
+
+```go
+import "github.com/sadewadee/foxhound/middleware"
+
+cookieMW := middleware.NewPersistentCookies("/tmp/cookies.json")
+// Use as middleware -- cookies survive across program restarts.
+// The file is loaded on creation and saved after each response.
+```
+
+## pipeline/field_transform
+
+Transform individual item fields using regex, renaming, or type coercion.
+
+```go
+import "github.com/sadewadee/foxhound/pipeline"
+
+p := pipeline.NewFieldTransformPipeline([]pipeline.FieldTransform{
+    {
+        Field:        "price",
+        RegexFind:    `[\d,.]+`,    // extract numeric portion
+    },
+    {
+        Field:        "price",
+        CoerceTo:     "float",      // convert string to float64
+    },
+    {
+        Field:        "old_name",
+        RenameTo:     "new_name",   // rename the field
+    },
+    {
+        Field:        "description",
+        RegexReplace: []string{`\s+`, " "}, // [pattern, replacement]
+    },
+})
+```
+
+`FieldTransform` fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Field` | string | The item field to operate on. |
+| `RegexFind` | string | Extract the first regex match, replacing the field value. |
+| `RegexReplace` | []string | `[pattern, replacement]` -- regex find-and-replace on the value. |
+| `RenameTo` | string | Rename the field key. |
+| `CoerceTo` | string | Coerce the value: `"float"`, `"int"`, `"bool"`, `"string"`. |
+
+## proxy Pool.GetForGeo
+
+Select a proxy matching a specific geographic location.
+
+```go
+import "github.com/sadewadee/foxhound/proxy"
+
+pool := proxy.NewPool(proxies, proxy.RotatePerSession)
+
+// Get a proxy in a specific country (city is optional, pass "" to match any city)
+p, err := pool.GetForGeo("US", "")           // any US proxy
+p, err := pool.GetForGeo("DE", "Berlin")     // proxy in Berlin, Germany
+```
+
+Returns an error if no proxy matches the requested location.

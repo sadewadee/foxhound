@@ -284,6 +284,30 @@ h := engine.NewHunt(engine.HuntConfig{
 })
 ```
 
+## FieldTransformPipeline
+
+Transform, rename, and coerce item fields inline using `FieldTransform` rules:
+
+```go
+transforms := []pipeline.FieldTransform{
+    {Field: "price", RegexFind: `[^\d.]`, RegexReplace: "", CoerceTo: "float"},
+    {Field: "title", RenameTo: "name"},
+}
+p := pipeline.NewFieldTransformPipeline(transforms)
+```
+
+Each transform is applied in order. `RegexFind`/`RegexReplace` runs a regex substitution on the field value, `CoerceTo` converts the result to the specified type (`"float"`, `"int"`, `"string"`), and `RenameTo` renames the field key.
+
+Use it in a chain like any other stage:
+
+```go
+chain := pipeline.NewChain(
+    &pipeline.Validate{Required: []string{"title", "price"}},
+    p,
+    &pipeline.Dedup{Key: "url"},
+)
+```
+
 ## Custom Writer
 
 ```go

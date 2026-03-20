@@ -250,6 +250,28 @@ captcha:
 
 Solvers are used as a last resort. The primary strategy is prevention.
 
+## NopeCHA Extension
+
+NopeCHA is a CAPTCHA-solving browser extension that is auto-downloaded on the first Camoufox browser launch. It is loaded into Camoufox by default and solves hCaptcha, reCAPTCHA, and Cloudflare Turnstile challenges automatically in the background.
+
+No manual installation or API key is required for basic usage. The extension operates passively -- if a CAPTCHA appears during browser-mode navigation, NopeCHA attempts to solve it without any explicit call from your code.
+
+To disable NopeCHA (e.g. for debugging or lightweight runs):
+
+```yaml
+fetch:
+  browser:
+    extension_path: "none"
+```
+
+Or in Go:
+
+```go
+browserFetcher, _ := fetch.NewCamoufox(
+    fetch.WithExtensionPath("none"),
+)
+```
+
 ## Block Detection in SmartFetcher
 
 `SmartFetcher` escalates from static to browser on these status codes:

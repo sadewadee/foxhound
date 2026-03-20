@@ -72,6 +72,17 @@ if err != nil {
 defer cf.Close()
 ```
 
+## NopeCHA Extension (Auto-Download)
+
+Foxhound auto-downloads the [NopeCHA](https://github.com/NopeCHALLC/nopecha-extension) CAPTCHA-solving extension on first launch. The extension is cached locally and loaded into every Camoufox instance.
+
+- **Source**: GitHub `NopeCHALLC/nopecha-extension` releases
+- **Cache location**: `~/.cache/foxhound/extensions/nopecha/`
+- **Disable**: set `extension_path: "none"` in config or `WithExtensionPath("none")` in code
+- **Custom extension**: set `extension_path` to a directory or `.xpi` file path
+
+The auto-download runs once per machine. Subsequent launches use the cached copy.
+
 ## CamoufoxOption Reference
 
 | Option | Default | Description |
@@ -83,6 +94,8 @@ defer cf.Close()
 | `WithMaxBrowserRequests(n)` | 300 | Restart browser instance after N requests (0 = never restart) |
 | `WithPersistSession(bool)` | false | Reuse `BrowserContext` across fetches (preserves cookies/localStorage) |
 | `WithBrowserProxy(url)` | "" | HTTP or SOCKS5 proxy for all browser requests |
+| `WithExtensionPath(path)` | auto-download NopeCHA | Path to Firefox extension dir/xpi. Set `"none"` to disable. |
+| `WithCaptureXHR(patterns)` | nil | Regexp patterns for XHR/fetch response capture (see below) |
 
 ## Headless Modes
 
@@ -167,6 +180,103 @@ job.FetchMode = foxhound.FetchBrowser // force Camoufox
 job.FetchMode = foxhound.FetchAuto    // auto-route (default)
 ```
 
+## JobStep Types
+
+Jobs can carry an ordered list of `Steps` that the browser executes after page load. Each step has an `Action` field identifying its type.
+
+| Action | Const | Description |
+|--------|-------|-------------|
+| 0 | `JobStepNavigate` | Navigate to a URL (usually the first step, implicit) |
+| 1 | `JobStepClick` | Click an element matching `Selector` |
+| 2 | `JobStepWait` | Wait for `Selector` to reach `WaitState` (`"attached"`, `"detached"`, `"visible"`, `"hidden"`) |
+| 3 | `JobStepExtract` | Extract content from elements matching `Selector` |
+| 4 | `JobStepScroll` | Scroll by `ScrollExtent` pixels (`ScrollAxis` 0=vertical, 1=horizontal) |
+| 5 | `JobStepInfiniteScroll` | Scroll to bottom repeatedly until no new content loads (max `MaxScrolls`, default 50) |
+| 6 | `JobStepLoadMore` | Click a "load more" button (`Selector`) repeatedly (max `MaxClicks`, default 20) |
+| 7 | `JobStepPaginate` | Follow pagination links (`Selector`), accumulate HTML from all pages in `StepResults` (max `MaxPages`, default 10) |
+| 8 | `JobStepEvaluate` | Execute JavaScript (`Script`). Return value stored in `Response.StepResults["step_N"]` |
+| 9 | `JobStepFill` | Type text (`Value`) into an input (`Selector`) with human-like keystrokes via `behavior.Keyboard` |
+
+### InfiniteScroll
+
+By default, InfiniteScroll scrolls the document body. Set `Selector` to scroll inside a custom container (e.g. `"div.results-panel"`).
+
+Use `StopSelector` and `StopCount` to stop early when enough items exist:
+
+```go
+foxhound.JobStep{
+    Action:       foxhound.JobStepInfiniteScroll,
+    Selector:     "div.results-panel",  // custom scrollable container (optional)
+    StopSelector: "div.result",         // stop when this selector matches...
+    StopCount:    20,                   // ...at least 20 elements
+    MaxScrolls:   100,
+}
+```
+
+### Optional Steps
+
+Set `Optional: true` on any step to make it non-fatal. If the step fails (e.g. a cookie banner dismiss button not present), execution continues to the next step instead of aborting the fetch.
+
+```go
+foxhound.JobStep{
+    Action:   foxhound.JobStepClick,
+    Selector: "#cookie-accept",
+    Optional: true,  // skip if not present
+}
+```
+
+### Evaluate Step
+
+Executes arbitrary JavaScript on the page. The return value is stored in `Response.StepResults` keyed by step index (`"step_0"`, `"step_2"`, etc.):
+
+```go
+step := foxhound.JobStep{
+    Action: foxhound.JobStepEvaluate,
+    Script: "document.querySelectorAll('.item').length",
+}
+// After fetch:
+// resp.StepResults["step_0"] == 42
+```
+
+### Fill Step
+
+Types text into an input field using human-like keystrokes (via `behavior.Keyboard`), including natural inter-key delays and occasional corrections:
+
+```go
+foxhound.JobStep{
+    Action:   foxhound.JobStepFill,
+    Selector: "input[name=search]",
+    Value:    "foxhound scraper",
+}
+```
+
+### Paginate
+
+The Paginate step follows pagination links matching `Selector` across multiple pages. HTML from all visited pages is accumulated into `Response.StepResults["step_N"]`, so you can extract items from the combined content after the fetch completes.
+
+## XHR/Fetch Capture
+
+Use `WithCaptureXHR(patterns)` to intercept API responses made by the page. Captured exchanges are available in `Response.CapturedXHR` after the fetch.
+
+```go
+import "regexp"
+
+cf, _ := fetch.NewCamoufox(
+    fetch.WithCaptureXHR(
+        regexp.MustCompile(`/api/products`),
+        regexp.MustCompile(`/graphql`),
+    ),
+)
+
+// After fetch:
+for _, xhr := range resp.CapturedXHR {
+    fmt.Println(xhr["request_url"], xhr["status"])
+    // xhr["body"] contains the response body as []byte
+}
+```
+
+Each captured entry is a map with keys: `request_url`, `request_method`, `status`, `headers`, `body`.
+
 ## Config
 
 ```yaml
@@ -177,6 +287,7 @@ fetch:
     instances: 2          # concurrent browser instances (0 = static-only)
     block_images: true
     block_webrtc: true
+    extension_path: ""    # auto-download NopeCHA (default), "none" to disable, or path to extension
 ```
 
 Setting `instances: 0` disables browser mode entirely.

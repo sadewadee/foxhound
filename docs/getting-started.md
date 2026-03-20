@@ -15,8 +15,8 @@ Optional, for browser mode:
 
 ## Stats
 
-- 37,003 lines of Go across 24 packages
-- 700+ tests
+- 37,003 lines of Go across 18 packages
+- 1000+ tests
 - 174 Go source files
 
 ## Installation
@@ -48,6 +48,23 @@ docker compose up
 ```
 
 See [Deployment](deployment.md) for full Docker usage.
+
+## Quick Trail API Example
+
+The Trail API provides a fluent interface for browser-based navigation flows. Here is a Google Maps search:
+
+```go
+trail := engine.NewTrail("maps").
+    Navigate("https://www.google.com/maps").
+    Fill("input#searchboxinput", "cafe in canggu").
+    Click("button#searchbox-searchbutton").
+    Wait("div[role='feed']", 10*time.Second).
+    InfiniteScrollInUntil("div[role='feed']", "div.Nv2PK", 20, 100)
+```
+
+## NopeCHA Extension
+
+NopeCHA is auto-downloaded on the first Camoufox browser launch. It handles hCaptcha, reCAPTCHA, and Turnstile challenges automatically. No manual setup required.
 
 ## Your First Scrape
 

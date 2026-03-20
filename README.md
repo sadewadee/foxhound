@@ -6,7 +6,7 @@
   <strong>Go Scraping Framework with Native Camoufox Anti-Detection</strong>
 </p>
 
-# Foxhound v0.0.2
+# Foxhound v0.0.5
 
 High-performance Go scraping framework with native Camoufox anti-detection, dual-mode fetching, and 13-layer middleware.
 
@@ -15,22 +15,28 @@ High-performance Go scraping framework with native Camoufox anti-detection, dual
 - **Dual-mode fetching**: TLS-impersonating HTTP client (~5-50ms) + Camoufox browser (~500ms-5s), with automatic escalation on block detection
 - **Consistent identity profiles**: UA + TLS fingerprint + header order + OS + hardware + screen + locale all match — randomness without consistency causes instant blocks
 - **13-layer middleware chain**: concurrency, metrics, rate limit, robots.txt, delta-fetch, dedup, autothrottle, cookies, referer, blocked detector, redirect, depth limit, retry
+- **Trail API**: fluent navigation builder with Fill, InfiniteScroll, Evaluate (custom JS), XHR/fetch capture, and optional steps
+- **Structured data extraction**: JSON-LD, OpenGraph, NextData, NuxtData extractors + contact deobfuscation (CloudFlare cfemail)
+- **NopeCHA auto-download**: CAPTCHA-solving extension fetched and configured automatically at runtime
 - **9 export formats**: JSON, JSONL, CSV, Markdown, Text, XML, SQLite, PostgreSQL, Webhook
-- **Adaptive parsing**: CSS pseudo-selectors (`::text`, `::attr`), similarity matching, auto-selector generation
+- **Adaptive parsing**: CSS pseudo-selectors (`::text`, `::attr`), similarity matching, auto-selector generation + sitemap/RSS/Atom parsing
 - **Streaming API**: `Hunt.Stream(ctx)` for real-time item processing via Go channels
 - **Checkpoint/resume**: auto-save hunt state every N items
-- **37K+ lines of Go, 24 packages, 700+ tests**
+- **18 packages, 1000+ tests**
 
 ## Key Capabilities
 
 | Area | What you get |
 |------|-------------|
 | **Performance** | CSS parsing in ~8ms for 5K elements. Multi-core goroutines with per-domain concurrency control |
-| **Anti-detection** | Real Camoufox binary (C++ fingerprint spoofing), human behavior simulation (log-normal timing, Bezier mouse, scroll rhythm) |
+| **Anti-detection** | Real Camoufox binary (C++ fingerprint spoofing), human behavior simulation (log-normal timing, Bezier mouse, scroll rhythm), NopeCHA auto-download |
 | **Block avoidance** | 9 vendor patterns (Cloudflare, Akamai, DataDome, PerimeterX) with auto-retry + reCAPTCHA checkbox click + Turnstile handler |
 | **Identity** | 60+ device profiles with consistent UA + TLS + headers + OS + GPU + screen + locale + geo matching |
-| **Parsing** | CSS + XPath + regex + JSON + structured schema + adaptive selectors + similarity matching + pseudo-selectors |
-| **Export** | 9 formats: JSON, JSONL, CSV, Markdown (table/list/cards), Text, XML, SQLite, PostgreSQL, Webhook |
+| **Trail API** | Fill forms (`JobStepFill`), infinite scroll with container + stop condition, `Evaluate` custom JS, XHR/fetch capture, optional steps, persistent cookies |
+| **Parsing** | CSS + XPath + regex + JSON + structured schema + adaptive selectors + similarity matching + pseudo-selectors + sitemap/RSS/Atom |
+| **Structured data** | JSON-LD, OpenGraph, NextData, NuxtData extractors + CloudFlare cfemail deobfuscation |
+| **Export** | 9 formats: JSON, JSONL, CSV, Markdown (table/list/cards), Text, XML, SQLite, PostgreSQL, Webhook + field-level pipeline transforms |
+| **Proxy** | Pool rotation, health checking, cooldown, geo-targeted selection matching identity locale |
 | **Queue** | Memory, Redis (distributed), SQLite (persistent) — checkpoint/resume across restarts |
 | **Monitoring** | Prometheus metrics + webhook alerting with error/block rate thresholds |
 | **Scaling** | `docker compose --scale foxhound=4` with shared Redis queue |
@@ -43,6 +49,8 @@ cd foxhound
 go build -o foxhound ./cmd/foxhound/
 foxhound init myproject && cd myproject
 go mod tidy
+foxhound run --config config.yaml          # default: headed mode
+foxhound run --config config.yaml --headless  # headless Camoufox
 ```
 
 Scrape books.toscrape.com in under 20 lines:
@@ -63,6 +71,26 @@ h := engine.NewHunt(engine.HuntConfig{
     Seeds: []*foxhound.Job{{URL: "http://books.toscrape.com/", FetchMode: foxhound.FetchStatic}},
 })
 h.Run(context.Background())
+```
+
+### Trail API — Fill + Infinite Scroll
+
+```go
+trail := engine.NewTrail(fetcher).
+    Navigate("https://example.com/search").
+    Fill("input[name=q]", "foxhound scraper").
+    Click("button[type=submit]").
+    WaitFor(".results").
+    InfiniteScrollUntil(".results-container", func(count int) bool {
+        return count >= 100 // stop after 100 items loaded
+    }).
+    Evaluate(`document.querySelectorAll(".item").length`). // custom JS
+    Extract(".result-item", map[string]string{
+        "title": "h3::text",
+        "url":   "a::attr(href)",
+    })
+
+items, err := trail.Run(ctx)
 ```
 
 ## Real Scraping Results

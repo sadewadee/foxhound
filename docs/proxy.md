@@ -190,6 +190,16 @@ func (p *MyProvider) Proxies(ctx context.Context) ([]*proxy.Proxy, error) {
 pool := proxy.NewPool(&MyProvider{APIKey: "..."})
 ```
 
+## GetForGeo
+
+Select a proxy by country code and optional city. Returns the best-scoring proxy matching the requested geography:
+
+```go
+proxy, err := pool.GetForGeo("ID", "denpasar")
+```
+
+The country code is ISO 3166-1 alpha-2 (e.g. `"ID"` for Indonesia, `"US"` for United States). The city parameter is case-insensitive and optional -- pass an empty string to match any city in the country.
+
 ## Proxy Parsing
 
 Parse a raw proxy string into a `Proxy` struct:

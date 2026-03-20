@@ -5,7 +5,7 @@
 ### Pull from GHCR
 
 ```bash
-docker pull ghcr.io/sadewadee/foxhound:v0.0.1
+docker pull ghcr.io/sadewadee/foxhound:v0.0.5
 docker pull ghcr.io/sadewadee/foxhound:latest
 ```
 
@@ -103,6 +103,7 @@ cp .env.example .env
 | `OXYLABS_PASSWORD` | *(none)* | Oxylabs proxy password |
 | `CAPSOLVER_API_KEY` | *(none)* | Capsolver CAPTCHA API key |
 | `TWOCAPTCHA_API_KEY` | *(none)* | 2Captcha API key |
+| `NOPECHA_EXT` | *(auto-download)* | Path to NopeCHA extension directory. Auto-downloaded on first Camoufox launch if not set |
 
 ## Static-Only Deployment (no browser)
 
@@ -180,19 +181,19 @@ healthcheck:
   retries: 3
 ```
 
-## v0.0.1 Release
+## v0.0.5 Release
 
-The v0.0.1 tag is the first public release:
+The v0.0.5 tag is the latest release:
 
 ```bash
-git checkout v0.0.1
+git checkout v0.0.5
 go build -o foxhound ./cmd/foxhound/
 ```
 
 Docker image:
 
 ```bash
-docker pull ghcr.io/sadewadee/foxhound:v0.0.1
+docker pull ghcr.io/sadewadee/foxhound:v0.0.5
 ```
 
 ## Rollback
