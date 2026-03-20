@@ -1,0 +1,75 @@
+package engine
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestSQLitePool_AddAndDrain(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pool_test.db")
+	p, err := NewSQLitePool(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLitePool: %v", err)
+	}
+	defer p.Close()
+
+	ctx := context.Background()
+	p.Add(ctx, "https://example.com/1")
+	p.Add(ctx, "https://example.com/2")
+	p.Add(ctx, "https://example.com/1") // dup
+
+	if got := p.Len(); got != 2 {
+		t.Fatalf("Len = %d, want 2", got)
+	}
+
+	urls, err := p.Drain(ctx)
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if len(urls) != 2 {
+		t.Fatalf("Drain len = %d, want 2", len(urls))
+	}
+	if got := p.Len(); got != 0 {
+		t.Fatalf("Len after drain = %d, want 0", got)
+	}
+}
+
+func TestSQLitePool_Persistence(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pool_persist.db")
+
+	p1, _ := NewSQLitePool(dbPath)
+	p1.Add(context.Background(), "https://example.com/a")
+	p1.Add(context.Background(), "https://example.com/b")
+	p1.Close()
+
+	p2, _ := NewSQLitePool(dbPath)
+	defer p2.Close()
+	if got := p2.Len(); got != 2 {
+		t.Fatalf("Len after reopen = %d, want 2", got)
+	}
+}
+
+func TestSQLitePool_AddBatch(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pool_batch.db")
+	p, _ := NewSQLitePool(dbPath)
+	defer p.Close()
+
+	urls := []string{"https://a.com", "https://b.com", "https://a.com", "https://c.com"}
+	p.AddBatch(context.Background(), urls)
+	if got := p.Len(); got != 3 {
+		t.Fatalf("Len = %d, want 3", got)
+	}
+}
+
+func TestSQLitePool_CleanupFile(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pool_cleanup.db")
+	p, _ := NewSQLitePool(dbPath)
+	p.Add(context.Background(), "https://example.com")
+	p.Close()
+
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		t.Fatal("db file should exist after close")
+	}
+}
