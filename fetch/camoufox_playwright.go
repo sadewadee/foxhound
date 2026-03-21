@@ -1518,6 +1518,12 @@ func (f *CamoufoxFetcher) handleHCaptcha(page playwright.Page) {
 // solver extension (NopeCHA) to solve it. Used when extension is loaded —
 // no manual clicking needed, the extension handles everything.
 func (f *CamoufoxFetcher) waitForExtensionSolve(page playwright.Page) {
+	// Early exit if the extension was explicitly disabled — nothing can solve.
+	if f.extensionPath == "none" {
+		slog.Debug("fetch/camoufox: captcha extension disabled, skipping solve wait")
+		return
+	}
+
 	// Give page JS + extension time to init and start solving.
 	time.Sleep(5 * time.Second)
 
@@ -1544,8 +1550,8 @@ func (f *CamoufoxFetcher) waitForExtensionSolve(page playwright.Page) {
 	slog.Info("fetch/camoufox: captcha detected, waiting for extension to solve",
 		"type", captchaType)
 
-	// Poll for solve completion — check every second for up to 45s.
-	for i := 0; i < 45; i++ {
+	// Poll for solve completion — check every second for up to 15s.
+	for i := 0; i < 15; i++ {
 		time.Sleep(1 * time.Second)
 
 		solved := false
@@ -2043,8 +2049,21 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 	}
 
 	// Handle Cloudflare challenges (JS check, Turnstile, Under Attack Mode).
-	if f.handleCloudflare(page) {
-		slog.Debug("fetch/camoufox: page updated after Cloudflare challenge")
+	// Some sites (e.g. Bing) present sequential challenges — retry up to 3 times.
+	for cfAttempt := 0; cfAttempt < 3; cfAttempt++ {
+		cfType := f.detectCloudflare(page)
+		if cfType == "" {
+			break // No challenge detected
+		}
+		slog.Info("fetch/camoufox: Cloudflare challenge detected",
+			"type", cfType, "attempt", cfAttempt+1, "url", job.URL)
+		if !f.handleCloudflare(page) {
+			slog.Warn("fetch/camoufox: Cloudflare handling did not resolve challenge",
+				"attempt", cfAttempt+1)
+			break
+		}
+		// Brief wait for page to settle after challenge resolution.
+		time.Sleep(2 * time.Second)
 	}
 
 	// Human behaviour simulation — makes page interaction look natural to
