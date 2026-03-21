@@ -14,6 +14,103 @@ var (
 	phoneRe = regexp.MustCompile(`(?:\+\d{1,3}[\s\-]?)?\(?\d{2,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{3,4}`)
 )
 
+// imageExtensions are file extensions that indicate an email-like string is
+// actually an image filename (e.g. logo@2x.png).
+var imageExtensions = []string{".png", ".jpg", ".jpeg", ".gif", ".svg", ".js", ".css", ".webp"}
+
+// spamDomains are infrastructure/CDN domains whose addresses should not be
+// returned as contact emails.
+var spamDomains = []string{
+	"sentry.io", "wixpress.com", "cloudflare.com",
+	"gstatic.com", "googleapis.com", "w3.org",
+}
+
+// isLikelyEmail returns false for strings that match the email regex but are
+// clearly not real contact addresses.
+func isLikelyEmail(email string) bool {
+	lower := strings.ToLower(email)
+
+	// Reject URL-encoded prefix (e.g. %20info@domain.com).
+	if strings.HasPrefix(email, "%") {
+		return false
+	}
+
+	// Reject image filenames and asset URLs (e.g. logo@2x.png).
+	for _, ext := range imageExtensions {
+		if strings.HasSuffix(lower, ext) {
+			return false
+		}
+	}
+
+	// Reject known infrastructure/CDN domains.
+	atIdx := strings.LastIndex(lower, "@")
+	if atIdx < 0 {
+		return false
+	}
+	domain := lower[atIdx+1:]
+	for _, d := range spamDomains {
+		if domain == d || strings.HasSuffix(domain, "."+d) {
+			return false
+		}
+	}
+
+	// Reject local parts that are only digits and dots (e.g. 2.0@domain.com).
+	localPart := lower[:atIdx]
+	allDigitsDots := true
+	for _, r := range localPart {
+		if r != '.' && (r < '0' || r > '9') {
+			allDigitsDots = false
+			break
+		}
+	}
+	if allDigitsDots {
+		return false
+	}
+
+	return true
+}
+
+// isLikelyPhone returns false for digit strings that are clearly not real phone
+// numbers (all-same digits, sequential runs, suspicious prefixes).
+func isLikelyPhone(cleaned string) bool {
+	// Strip leading '+' for pattern checks.
+	digits := strings.TrimPrefix(cleaned, "+")
+	if len(digits) == 0 {
+		return false
+	}
+
+	// Reject all-same-digit sequences (e.g. 0000000000).
+	allSame := true
+	for _, r := range digits {
+		if r != rune(digits[0]) {
+			allSame = false
+			break
+		}
+	}
+	if allSame {
+		return false
+	}
+
+	// Reject sequential digit runs (e.g. 1234567890, 0123456789).
+	sequential := true
+	for i := 1; i < len(digits); i++ {
+		if digits[i] != digits[i-1]+1 {
+			sequential = false
+			break
+		}
+	}
+	if sequential {
+		return false
+	}
+
+	// Reject numbers starting with suspicious prefixes.
+	if strings.HasPrefix(digits, "0000") || strings.HasPrefix(digits, "9999") {
+		return false
+	}
+
+	return true
+}
+
 // DecodeCFEmail decodes a CloudFlare-obfuscated email string.
 // CloudFlare XOR-encodes emails: first 2 hex chars are the key,
 // remaining hex pairs are XOR'd with the key.
@@ -42,14 +139,33 @@ func ExtractEmails(resp *foxhound.Response) []string {
 	doc, err := NewDocument(resp)
 	if err != nil {
 		// Fallback to regex on raw body.
-		return dedup(emailRe.FindAllString(string(resp.Body), -1))
+		var raw []string
+		for _, m := range emailRe.FindAllString(string(resp.Body), -1) {
+			if isLikelyEmail(strings.ToLower(strings.TrimSpace(m))) {
+				raw = append(raw, m)
+			}
+		}
+		return dedup(raw)
 	}
 
 	seen := make(map[string]bool)
 	var emails []string
 	add := func(e string) {
 		e = strings.ToLower(strings.TrimSpace(e))
-		if e != "" && strings.Contains(e, "@") && !seen[e] {
+		// Strip URL-encoded prefix garbage (e.g. %20info@domain.com → info@domain.com).
+		if strings.HasPrefix(e, "%") {
+			trimmed := strings.TrimLeft(e, "%0123456789abcdef")
+			if strings.Contains(trimmed, "@") {
+				e = trimmed
+			}
+		}
+		if e == "" || !strings.Contains(e, "@") {
+			return
+		}
+		if !isLikelyEmail(e) {
+			return
+		}
+		if !seen[e] {
 			seen[e] = true
 			emails = append(emails, e)
 		}
@@ -85,34 +201,55 @@ func ExtractEmails(resp *foxhound.Response) []string {
 func ExtractPhones(resp *foxhound.Response) []string {
 	doc, err := NewDocument(resp)
 	if err != nil {
-		return dedup(phoneRe.FindAllString(string(resp.Body), -1))
+		var raw []string
+		for _, m := range phoneRe.FindAllString(string(resp.Body), -1) {
+			cleaned := strings.Map(func(r rune) rune {
+				if r >= '0' && r <= '9' || r == '+' {
+					return r
+				}
+				return -1
+			}, m)
+			if len(cleaned) >= 10 && isLikelyPhone(cleaned) {
+				raw = append(raw, m)
+			}
+		}
+		return dedup(raw)
 	}
 
 	seen := make(map[string]bool)
 	var phones []string
-	add := func(p string) {
-		// Strip whitespace for dedup.
+
+	// addPhone adds a candidate phone number. skipPatternCheck bypasses
+	// isLikelyPhone for high-confidence sources such as tel: links.
+	addPhone := func(p string, skipPatternCheck bool) {
+		// Strip non-digit, non-plus characters for dedup key and length check.
 		cleaned := strings.Map(func(r rune) rune {
 			if r >= '0' && r <= '9' || r == '+' {
 				return r
 			}
 			return -1
 		}, p)
-		if len(cleaned) >= 7 && !seen[cleaned] {
+		if len(cleaned) < 10 {
+			return
+		}
+		if !skipPatternCheck && !isLikelyPhone(cleaned) {
+			return
+		}
+		if !seen[cleaned] {
 			seen[cleaned] = true
 			phones = append(phones, p)
 		}
 	}
 
-	// tel: links.
+	// tel: links — high confidence, skip pattern check.
 	doc.Each("a[href^='tel:']", func(_ int, s *goquery.Selection) {
 		href, _ := s.Attr("href")
-		add(strings.TrimPrefix(href, "tel:"))
+		addPhone(strings.TrimPrefix(href, "tel:"), true)
 	})
 
-	// Plaintext regex.
+	// Plaintext regex — apply full validation.
 	for _, m := range phoneRe.FindAllString(doc.Text("body"), -1) {
-		add(m)
+		addPhone(m, false)
 	}
 
 	return phones
