@@ -146,10 +146,25 @@ func (f *StealthFetcher) Fetch(ctx context.Context, job *foxhound.Job) (*foxhoun
 	)
 
 	start := time.Now()
-	httpResp, err := f.client.Do(req)
+	var httpResp *http.Response
+	var lastErr error
+	const maxRetries = 2
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		httpResp, lastErr = f.client.Do(req)
+		if lastErr == nil {
+			break
+		}
+		if !isTransientError(lastErr) || attempt == maxRetries {
+			break
+		}
+		delay := time.Duration(500*(attempt+1)) * time.Millisecond
+		slog.Debug("fetch/stealth: transient error, retrying",
+			"url", job.URL, "attempt", attempt+1, "delay", delay, "err", lastErr)
+		time.Sleep(delay)
+	}
 	duration := time.Since(start)
-	if err != nil {
-		return nil, fmt.Errorf("fetch/stealth: request to %s failed: %w", job.URL, err)
+	if lastErr != nil {
+		return nil, fmt.Errorf("fetch/stealth: request to %s failed: %w", job.URL, lastErr)
 	}
 	defer httpResp.Body.Close()
 
