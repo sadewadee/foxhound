@@ -2020,6 +2020,16 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 		return nil, fmt.Errorf("fetch/camoufox: extracting content from %s: %w", job.URL, err)
 	}
 
+	// If paginate steps accumulated pages, join them all for Response.Body so
+	// processors can extract data from every page at once. The delimiter
+	// <!-- foxhound:page-break --> allows processors to split pages if needed.
+	for _, v := range stepResults {
+		if pages, ok := v.([]string); ok && len(pages) > 1 {
+			content = strings.Join(pages, "\n<!-- foxhound:page-break -->\n")
+			break
+		}
+	}
+
 	// Collect status code and final URL from the navigation response.
 	statusCode := 200
 	finalURL := job.URL
