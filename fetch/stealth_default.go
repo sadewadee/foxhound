@@ -207,6 +207,7 @@ func (f *StealthFetcher) Fetch(ctx context.Context, job *foxhound.Job) (*foxhoun
 		FetchMode:  foxhound.FetchStatic,
 		Duration:   duration,
 		Job:        job,
+		Cookies:    httpResp.Cookies(),
 	}, nil
 }
 

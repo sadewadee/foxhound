@@ -585,6 +585,9 @@ type Response struct {
 	// CapturedXHR holds captured XHR/fetch responses when capture patterns are configured.
 	// Each entry is a map with keys: request_url, request_method, status, headers, body.
 	CapturedXHR []map[string]any
+	// Cookies contains cookies set by the response (Set-Cookie headers for
+	// static fetches, browser context cookies for browser fetches).
+	Cookies []*http.Cookie `json:"cookies,omitempty"`
 }
 
 // Item represents a scraped data item passing through the pipeline.

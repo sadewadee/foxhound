@@ -222,6 +222,15 @@ func (f *StealthFetcher) Fetch(ctx context.Context, job *foxhound.Job) (*foxhoun
 		stdHeaders[k] = vals
 	}
 
+	// Convert azuretls cookies (map[string]string) to []*http.Cookie.
+	var respCookies []*http.Cookie
+	for name, value := range azureResp.Cookies {
+		respCookies = append(respCookies, &http.Cookie{
+			Name:  name,
+			Value: value,
+		})
+	}
+
 	return &foxhound.Response{
 		StatusCode: azureResp.StatusCode,
 		Headers:    stdHeaders,
@@ -230,6 +239,7 @@ func (f *StealthFetcher) Fetch(ctx context.Context, job *foxhound.Job) (*foxhoun
 		FetchMode:  foxhound.FetchStatic,
 		Duration:   duration,
 		Job:        job,
+		Cookies:    respCookies,
 	}, nil
 }
 

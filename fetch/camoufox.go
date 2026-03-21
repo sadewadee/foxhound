@@ -37,8 +37,26 @@ var errPlaywrightNotConfigured = errors.New(
 		"  Then install the browser: go run github.com/playwright-community/playwright-go/cmd/playwright install firefox",
 )
 
+// BrowserCookie represents a cookie to inject into the browser context.
+type BrowserCookie struct {
+	Name     string
+	Value    string
+	Domain   string
+	Path     string
+	Secure   bool
+	HttpOnly bool
+}
+
 // CamoufoxOption is a functional option for configuring a CamoufoxFetcher.
 type CamoufoxOption func(*CamoufoxFetcher)
+
+// WithBrowserCookies sets cookies to inject into the browser context before
+// page navigation. Useful for pre-authenticated sessions.
+func WithBrowserCookies(cookies []BrowserCookie) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.cookies = cookies
+	}
+}
 
 // WithBrowserIdentity sets the identity profile used to configure the Camoufox
 // browser context. All CAMOU_CONFIG environment variables are derived from p.
@@ -119,6 +137,7 @@ type CamoufoxFetcher struct {
 	useRealChrome   bool             // use pw.Chromium with channel=chrome instead of Firefox
 	capturePatterns []*regexp.Regexp // URL patterns for XHR/fetch response capture
 	poolSize        int              // max pooled pages (0 = disabled)
+	cookies        []BrowserCookie  // cookies to inject into browser context before navigation
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.

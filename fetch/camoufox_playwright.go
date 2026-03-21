@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net/http"
 	neturl "net/url"
 	"regexp"
 	"os"
@@ -62,8 +63,26 @@ var resourceBlockPatterns = []string{
 	"**/*.{woff,woff2,ttf,otf,eot}",
 }
 
+// BrowserCookie represents a cookie to inject into the browser context.
+type BrowserCookie struct {
+	Name     string
+	Value    string
+	Domain   string
+	Path     string
+	Secure   bool
+	HttpOnly bool
+}
+
 // CamoufoxOption is a functional option for configuring a CamoufoxFetcher.
 type CamoufoxOption func(*CamoufoxFetcher)
+
+// WithBrowserCookies sets cookies to inject into the browser context before
+// page navigation. Useful for pre-authenticated sessions.
+func WithBrowserCookies(cookies []BrowserCookie) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.cookies = cookies
+	}
+}
 
 // WithBrowserIdentity sets the identity profile used to configure the Camoufox
 // browser context and CAMOU_CONFIG environment variables.
@@ -155,6 +174,7 @@ type CamoufoxFetcher struct {
 	capturePatterns []*regexp.Regexp          // URL patterns for XHR/fetch response capture
 	poolSize        int                        // max pooled pages (0 = disabled)
 	pool            *PagePool                  // page pool (non-nil when poolSize > 0 and !persistSession)
+	cookies         []BrowserCookie            // cookies to inject into browser context before navigation
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -1960,6 +1980,26 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 		}
 	}
 
+	// Inject cookies into browser context before navigation.
+	if len(f.cookies) > 0 {
+		var pwCookies []playwright.OptionalCookie
+		for _, c := range f.cookies {
+			domain := c.Domain
+			path := c.Path
+			pwCookies = append(pwCookies, playwright.OptionalCookie{
+				Name:     c.Name,
+				Value:    c.Value,
+				Domain:   &domain,
+				Path:     &path,
+				Secure:   playwright.Bool(c.Secure),
+				HttpOnly: playwright.Bool(c.HttpOnly),
+			})
+		}
+		if err := bctx.AddCookies(pwCookies); err != nil {
+			slog.Warn("fetch/camoufox: failed to inject cookies", "err", err)
+		}
+	}
+
 	// Inject init script before any page JS executes. This runs on every
 	// page navigation, making it the right place for navigator overrides or
 	// global stubs that must survive across client-side route changes.
@@ -2151,6 +2191,21 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 		"job_id", job.ID,
 	)
 
+	// Export browser cookies into Response.Cookies.
+	var respCookies []*http.Cookie
+	if pwCookies, cookieErr := bctx.Cookies(); cookieErr == nil {
+		for _, c := range pwCookies {
+			respCookies = append(respCookies, &http.Cookie{
+				Name:     c.Name,
+				Value:    c.Value,
+				Domain:   c.Domain,
+				Path:     c.Path,
+				Secure:   c.Secure,
+				HttpOnly: c.HttpOnly,
+			})
+		}
+	}
+
 	return &foxhound.Response{
 		StatusCode:  statusCode,
 		Headers:     make(map[string][]string),
@@ -2161,6 +2216,7 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 		Job:         job,
 		StepResults: stepResults,
 		CapturedXHR: capturedXHR,
+		Cookies:     respCookies,
 	}, nil
 }
 
