@@ -94,16 +94,49 @@ func main() {
 	// ------------------------------------------------------------------
 	// 3. Single fetch — Google search page.
 	// ------------------------------------------------------------------
+	fetchMode := foxhound.FetchStatic
+	var jobSteps []foxhound.JobStep
+	if fetchMode == foxhound.FetchBrowser {
+		// Pattern D: JS Evaluate step — most resilient to DOM changes.
+		// Only attached when running in browser mode; static fetcher ignores steps.
+		jobSteps = []foxhound.JobStep{
+			{
+				Action: foxhound.JobStepEvaluate,
+				Script: `() => {
+            const results = [];
+            document.querySelectorAll('#search h3, #rso h3').forEach(h3 => {
+                const link = h3.closest('a');
+                const parent = h3.closest('[data-hveid], .g, [jscontroller]');
+                let snippet = '';
+                if (parent) {
+                    const spans = parent.querySelectorAll('span:not([class])');
+                    for (const s of spans) {
+                        if (s.textContent.length > 40) { snippet = s.textContent; break; }
+                    }
+                }
+                results.push({
+                    title: h3.textContent,
+                    link: link ? link.href : '',
+                    snippet: snippet
+                });
+            });
+            return results;
+        }`,
+			},
+		}
+	}
+
 	job := &foxhound.Job{
 		ID:        "google-serp-wisata-alam-jawa-timur",
 		URL:       targetURL,
 		Method:    http.MethodGet,
-		FetchMode: foxhound.FetchStatic,
+		FetchMode: fetchMode,
 		Priority:  foxhound.PriorityNormal,
 		Headers: http.Header{
 			"Accept-Language": []string{"id-ID,id;q=0.9,en;q=0.7"},
 			"Referer":         []string{"https://www.google.com/"},
 		},
+		Steps:     jobSteps,
 		CreatedAt: time.Now(),
 	}
 
@@ -254,6 +287,35 @@ func parseGoogleSERP(resp *foxhound.Response, _ int) []OrganicResult {
 				URL:      href,
 			})
 		})
+	}
+
+	// Pattern D: JS-based extraction — most resilient to DOM changes.
+	// Extract from the live page using JavaScript if all CSS patterns failed.
+	if len(results) == 0 && resp.StepResults != nil {
+		// Check if we have JS evaluation results
+		for _, v := range resp.StepResults {
+			if items, ok := v.([]interface{}); ok {
+				for _, item := range items {
+					if m, ok := item.(map[string]interface{}); ok {
+						title, _ := m["title"].(string)
+						link, _ := m["link"].(string)
+						snippet, _ := m["snippet"].(string)
+						if title != "" {
+							position++
+							results = append(results, OrganicResult{
+								Position: position,
+								Title:    title,
+								URL:      link,
+								Snippet:  snippet,
+							})
+						}
+					}
+				}
+			}
+		}
+		if len(results) > 0 {
+			slog.Info("Pattern D (JS Evaluate) extracted results", "count", len(results))
+		}
 	}
 
 	if len(results) == 0 {
