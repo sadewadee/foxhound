@@ -153,6 +153,8 @@ type CamoufoxFetcher struct {
 	cdpURL          string                    // connect to existing browser via CDP
 	useRealChrome   bool                      // use pw.Chromium with channel=chrome
 	capturePatterns []*regexp.Regexp          // URL patterns for XHR/fetch response capture
+	poolSize        int                        // max pooled pages (0 = disabled)
+	pool            *PagePool                  // page pool (non-nil when poolSize > 0 and !persistSession)
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -211,6 +213,18 @@ func WithCDPURL(url string) CamoufoxOption {
 func WithRealChrome(use bool) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.useRealChrome = use
+	}
+}
+
+// WithPoolSize enables page pooling with the given max size.
+// When enabled, browser contexts and pages are reused instead of created
+// fresh for each request, significantly reducing per-request overhead (~3s
+// context creation cost is eliminated after warmup).
+// Only applies when PersistSession is false (non-persistent mode).
+// Set to 0 (default) to disable pooling and use per-request contexts.
+func WithPoolSize(n int) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.poolSize = n
 	}
 }
 
@@ -462,6 +476,48 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 		"block_images", f.blockImages,
 		"timeout", f.timeout,
 	)
+
+	// Initialise page pool when poolSize > 0 and not in persistent-session mode.
+	// Each pooled entry owns a dedicated BrowserContext + Page so contexts are
+	// fully isolated between pool slots and sessions never bleed.
+	if f.poolSize > 0 && !f.persistSession {
+		f.pool = NewPagePool(
+			f.poolSize,
+			func() (any, error) {
+				bctx, err := f.browser.NewContext(f.buildContextOptions())
+				if err != nil {
+					return nil, fmt.Errorf("pagepool: new context: %w", err)
+				}
+				pg, err := bctx.NewPage()
+				if err != nil {
+					_ = bctx.Close()
+					return nil, fmt.Errorf("pagepool: new page: %w", err)
+				}
+				return pg, nil
+			},
+			func(v any) error {
+				pg := v.(playwright.Page)
+				return pg.Context().Close()
+			},
+			WithPageReset(func(v any) error {
+				pg := v.(playwright.Page)
+				// Clear cookies + storage to prevent session bleed across requests.
+				if err := pg.Context().ClearCookies(); err != nil {
+					return fmt.Errorf("pagepool: clear cookies: %w", err)
+				}
+				// Navigate to about:blank so no prior page content is visible.
+				if _, err := pg.Goto("about:blank", playwright.PageGotoOptions{
+					WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+					Timeout:   playwright.Float(5000),
+				}); err != nil {
+					return fmt.Errorf("pagepool: reset navigate: %w", err)
+				}
+				return nil
+			}),
+		)
+		slog.Info("fetch/camoufox: page pool initialised", "pool_size", f.poolSize)
+	}
+
 	return f, nil
 }
 
@@ -1832,6 +1888,22 @@ func hasWaitStep(job *foxhound.Job) bool {
 // navigate performs the actual playwright navigation. It is called from a
 // goroutine so that context cancellation can abort it cleanly.
 func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error) {
+	// When a page pool is active, acquire a pre-warmed page+context instead of
+	// creating a fresh BrowserContext for every request. The pool resets cookies
+	// and navigates to about:blank between uses to prevent session bleed.
+	if f.pool != nil {
+		pooledAny, err := f.pool.Acquire(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("fetch/camoufox: acquiring pooled page for %s: %w", job.URL, err)
+		}
+		page := pooledAny.(playwright.Page)
+		bctx := page.Context()
+		resp, err := f.navigateWithPage(job, bctx, page)
+		// Always release back to pool; the pool's reset func will clean state.
+		f.pool.Release(page)
+		return resp, err
+	}
+
 	// Obtain a BrowserContext — either a fresh one or the shared session
 	// context, depending on the persistSession configuration.
 	bctx, shouldClose, err := f.getOrCreateContext()
@@ -1849,19 +1921,6 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 		}()
 	}
 
-	// Inject Accept-Language from the identity profile as an extra header so
-	// the browser reports the correct locale to the server.
-	if f.identity != nil && len(f.identity.Languages) > 0 {
-		if err := bctx.SetExtraHTTPHeaders(map[string]string{
-			"Accept-Language": buildAcceptLanguage(f.identity.Languages),
-		}); err != nil {
-			slog.Warn("fetch/camoufox: could not set Accept-Language header",
-				"url", job.URL,
-				"err", err,
-			)
-		}
-	}
-
 	page, err := bctx.NewPage()
 	if err != nil {
 		return nil, fmt.Errorf("fetch/camoufox: opening page for %s: %w", job.URL, err)
@@ -1874,6 +1933,26 @@ func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error
 			)
 		}
 	}()
+
+	return f.navigateWithPage(job, bctx, page)
+}
+
+// navigateWithPage performs navigation using the given page and context.
+// It is called by navigate for both the pooled and non-pooled paths.
+// The caller is responsible for closing or releasing the page after return.
+func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.BrowserContext, page playwright.Page) (*foxhound.Response, error) {
+	// Inject Accept-Language from the identity profile as an extra header so
+	// the browser reports the correct locale to the server.
+	if f.identity != nil && len(f.identity.Languages) > 0 {
+		if err := bctx.SetExtraHTTPHeaders(map[string]string{
+			"Accept-Language": buildAcceptLanguage(f.identity.Languages),
+		}); err != nil {
+			slog.Warn("fetch/camoufox: could not set Accept-Language header",
+				"url", job.URL,
+				"err", err,
+			)
+		}
+	}
 
 	// Inject init script before any page JS executes. This runs on every
 	// page navigation, making it the right place for navigator overrides or
@@ -2237,6 +2316,18 @@ func (f *CamoufoxFetcher) restart() error {
 // steps from running.
 func (f *CamoufoxFetcher) Close() error {
 	var firstErr error
+
+	// Close the page pool first so all pooled contexts are released before
+	// the browser is torn down.
+	if f.pool != nil {
+		if closeErr := f.pool.Close(); closeErr != nil {
+			slog.Warn("fetch/camoufox: error closing page pool", "err", closeErr)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("fetch/camoufox: closing page pool: %w", closeErr)
+			}
+		}
+		f.pool = nil
+	}
 
 	// Close the persistent session context so its resources are freed
 	// before the browser itself is torn down.
