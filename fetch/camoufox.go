@@ -118,6 +118,7 @@ type CamoufoxFetcher struct {
 	cdpURL          string           // connect to an existing browser via CDP instead of launching
 	useRealChrome   bool             // use pw.Chromium with channel=chrome instead of Firefox
 	capturePatterns []*regexp.Regexp // URL patterns for XHR/fetch response capture
+	poolSize        int              // max pooled pages (0 = disabled)
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -177,6 +178,19 @@ func WithCDPURL(url string) CamoufoxOption {
 func WithRealChrome(use bool) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.useRealChrome = use
+	}
+}
+
+// WithPoolSize enables page pooling with the given max size.
+// When enabled, browser contexts and pages are reused instead of created
+// fresh for each request, significantly reducing per-request overhead (~3s
+// context creation cost is eliminated after warmup).
+// Only applies when PersistSession is false (non-persistent mode).
+// Set to 0 (default) to disable pooling and use per-request contexts.
+// In the stub build this stores the value but has no effect.
+func WithPoolSize(n int) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.poolSize = n
 	}
 }
 
