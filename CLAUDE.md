@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Foxhound is a Go scraping framework with native Camoufox (Firefox fork) anti-detection. It uses dual-mode fetching: a TLS-impersonating HTTP client for static pages and Camoufox via playwright-go for JS-heavy/protected pages, with automatic escalation when blocks are detected.
 
-**Status**: v0.0.5. 18 packages, 1000+ tests. NopeCHA CAPTCHA extension auto-downloads on first launch. All 13 GitHub issues resolved.
+**Status**: v0.0.7. 18 packages, 1100+ tests. NopeCHA CAPTCHA extension auto-downloads on first launch. All 13 GitHub issues resolved.
 
 **Browser**: Camoufox only. No Chromium, Nightly, or other browsers.
 
@@ -114,11 +114,14 @@ foxhound/
   config.go       — YAML config parser with env var expansion and defaults
   engine/         — hunt, walker, trail, scheduler, retry, stats, collect (ItemList/HuntMetrics/HuntResult)
   identity/       — profile generation, embedded device/TLS/header databases (60 profiles)
-  fetch/          — stealth (HTTP+headers), camoufox (browser), smart (auto-router), capture (XHR), pagepool
+  fetch/          — stealth (HTTP+headers), camoufox (browser), smart (auto-router), capture (XHR), pagepool,
+                    domain_score.go (Bayesian domain risk scoring)
   proxy/          — pool (+ GetForGeo), health, cooldown, static provider
   proxy/providers — brightdata, oxylabs, smartproxy adapters
-  behavior/       — timing (log-normal), mouse (bezier), scroll, keyboard, navigation, profiles
-  middleware/     — ratelimit, dedup, depth, retry, autothrottle, cookies, cookies_persist, referer, redirect, deltafetch, metrics
+  behavior/       — timing (log-normal), mouse (bezier), scroll, keyboard, navigation, profiles,
+                    distributions.go (Weibull/Gamma/Gaussian samplers), fatigue.go (session warmup/fatigue model)
+  middleware/     — ratelimit, dedup, depth, retry, autothrottle, cookies, cookies_persist, referer, redirect, deltafetch, metrics,
+                    circuitbreaker.go (3-state FSM circuit breaker)
   parse/          — goquery (CSS), json (dot-path), xpath (subset→CSS), regex, structured (schema),
                     content (markdown/text), metadata (JSON-LD/OG/NextData/Nuxt), contact (email/phone),
                     sitemap, feed (RSS/Atom), finder, adaptive_sqlite
@@ -152,6 +155,10 @@ These must be maintained in all implementation work:
 4. **NopeCHA auto-loaded** — CAPTCHA solving is built-in, no API key needed.
 5. **Goal is to never trigger CAPTCHA**. If CAPTCHA appears, earlier layers failed.
 6. **Proxy geo must match identity locale/timezone**.
+7. **Human timing uses Weibull/Gamma distributions** — not uniform random. Burst delays, scroll distances, and pauses are drawn from right-skewed distributions matching observed human behavior.
+8. **Per-session parameter jitter** — `profile.Jitter()` perturbs all behavior parameters ±15% to prevent anti-bot ML from clustering sessions into discrete archetypes.
+9. **Session fatigue model** — warmup slowdown at session start, cruise speed mid-session, gradual fatigue buildup. Per-call noise prevents smooth-curve detection.
+10. **Adaptive domain learning** — Bayesian risk scoring learns which domains block static fetches and auto-escalates to browser. Social media preset escalates after 1 block.
 
 ## Config
 
@@ -162,6 +169,18 @@ Key config additions (v0.0.4+):
 fetch:
   browser:
     extension_path: ""       # default: auto-download NopeCHA. Set "none" to disable.
+    page_reuse_limit: 200    # destroy pooled page after N requests (0 = unlimited)
+
+behavior:
+  profile: "careful"          # careful | moderate | aggressive
+  jitter: true                # apply ±15% per-session parameter jitter
+
+middleware:
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 0.5
+    base_timeout: 30s
+    max_timeout: 10m
 ```
 
 Global CLI flags:

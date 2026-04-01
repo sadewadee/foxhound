@@ -6,7 +6,7 @@
   <strong>Go Scraping Framework with Native Camoufox Anti-Detection</strong>
 </p>
 
-# Foxhound v0.0.5
+# Foxhound v0.0.7
 
 High-performance Go scraping framework with native Camoufox anti-detection, dual-mode fetching, and 13-layer middleware.
 
@@ -22,7 +22,7 @@ High-performance Go scraping framework with native Camoufox anti-detection, dual
 - **Adaptive parsing**: CSS pseudo-selectors (`::text`, `::attr`), similarity matching, auto-selector generation + sitemap/RSS/Atom parsing
 - **Streaming API**: `Hunt.Stream(ctx)` for real-time item processing via Go channels
 - **Checkpoint/resume**: auto-save hunt state every N items
-- **18 packages, 1000+ tests**
+- **18 packages, 1100+ tests**
 
 ## Key Capabilities
 
