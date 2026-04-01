@@ -1,6 +1,7 @@
 package behavior
 
 import (
+	"math"
 	"math/rand/v2"
 	"time"
 )
@@ -123,44 +124,48 @@ func (r *Rhythm) Next() time.Duration {
 }
 
 // burstDelay returns a short, human-like delay appropriate within a burst.
-// Using a small uniform range keeps individual actions feeling rapid while
-// still avoiding perfectly-uniform timing signatures.
+// Weibull(k=1.8, lambda=700ms) produces mode ~550ms, right-skewed.
+// Clamped to [150ms, 2s] to stay within human burst-action range.
 func (r *Rhythm) burstDelay() time.Duration {
-	// 200 ms – 1.5 s: fast but not robotic.
-	const minMs, maxMs = 200.0, 1500.0
-	ms := minMs + rand.Float64()*(maxMs-minMs)
+	ms := WeibullClamped(1.8, 700.0, 150.0, 2000.0)
 	return time.Duration(ms * float64(time.Millisecond))
 }
 
 // transitionToPause chooses between a normal pause and a long pause based on
 // LongPauseProb, updates the state, and returns the pause duration.
+// Uses Weibull distribution for right-skewed, human-like pause durations.
 func (r *Rhythm) transitionToPause() time.Duration {
 	if r.config.LongPauseProb > 0 && rand.Float64() < r.config.LongPauseProb {
 		r.state = RhythmLongPause
-		return uniformDuration(r.config.LongPauseMin, r.config.LongPauseMax)
+		return weibullDuration(r.config.LongPauseMin, r.config.LongPauseMax, 1.5)
 	}
 	r.state = RhythmPause
-	return uniformDuration(r.config.PauseMin, r.config.PauseMax)
+	return weibullDuration(r.config.PauseMin, r.config.PauseMax, 2.0)
 }
 
-// startNewBurst selects a random burst length in [BurstMin, BurstMax] and
-// resets the state to RhythmBurst. actionsLeft is the number of burst-delay
-// calls that Next() will serve before switching to a pause.
+// startNewBurst selects a Weibull-distributed burst length in [BurstMin, BurstMax]
+// and resets the state to RhythmBurst. The mode falls in the lower half of the
+// range, producing more frequent short bursts with occasional long ones.
 func (r *Rhythm) startNewBurst() {
 	span := r.config.BurstMax - r.config.BurstMin
 	if span <= 0 {
 		r.actionsLeft = r.config.BurstMin
 	} else {
-		r.actionsLeft = r.config.BurstMin + rand.IntN(span+1)
+		// Weibull(k=2.2, lambda=0.5*range) -- mode in lower half of range
+		continuous := WeibullClamped(2.2, float64(span)*0.5, 0, float64(span))
+		r.actionsLeft = r.config.BurstMin + int(math.Round(continuous))
 	}
 	r.state = RhythmBurst
 }
 
-// uniformDuration returns a uniformly-distributed duration in [lo, hi].
-func uniformDuration(lo, hi time.Duration) time.Duration {
+// weibullDuration returns a Weibull-distributed duration in [lo, hi] with shape k.
+// The scale lambda is set to 40% of the range, placing the mode in the lower third.
+func weibullDuration(lo, hi time.Duration, k float64) time.Duration {
 	if hi <= lo {
 		return lo
 	}
-	span := int64(hi - lo)
-	return lo + time.Duration(rand.Int64N(span))
+	span := float64(hi - lo)
+	lambda := span * 0.4
+	sample := WeibullClamped(k, lambda, 0, span)
+	return lo + time.Duration(sample)
 }

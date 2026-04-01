@@ -1,6 +1,9 @@
 package behavior
 
-import "time"
+import (
+	"math/rand/v2"
+	"time"
+)
 
 // ProfileName identifies a preset behaviour configuration.
 type ProfileName string
@@ -29,6 +32,8 @@ type BehaviorProfile struct {
 	// Rhythm controls the burst/pause cadence of a virtual user session.
 	// It is initialised from DefaultRhythmConfig and tuned per preset.
 	Rhythm *Rhythm
+	// Fatigue controls the session warmup and fatigue model.
+	Fatigue FatigueConfig
 }
 
 // GetProfile returns the named profile.  Falls back to ModerateProfile for
@@ -80,9 +85,10 @@ func CarefulProfile() *BehaviorProfile {
 		},
 
 		Keyboard: KeyboardConfig{
-			MinDelay: 80 * time.Millisecond,
-			MaxDelay: 250 * time.Millisecond,
-			TypoProb: 0.04, // more typos = more human
+			MinDelay:    80 * time.Millisecond,
+			MaxDelay:    250 * time.Millisecond,
+			TypoProb:    0.04, // more typos = more human
+			BigramModel: true,
 		},
 
 		Navigation: NavigationConfig{
@@ -103,6 +109,13 @@ func CarefulProfile() *BehaviorProfile {
 			LongPauseMax:  8 * time.Minute,
 			LongPauseProb: 0.25, // more frequent long breaks — very human
 		}),
+
+		Fatigue: FatigueConfig{
+			WarmupAmplitude:  0.5,
+			WarmupTau:        2 * time.Minute,
+			FatigueAmplitude: 0.3,
+			FatigueTau:       30 * time.Minute,
+		},
 	}
 }
 
@@ -122,11 +135,18 @@ func ModerateProfile() *BehaviorProfile {
 
 		Scroll: DefaultScrollConfig(),
 
-		Keyboard: DefaultKeyboardConfig(),
+		Keyboard: KeyboardConfig{
+			MinDelay:    50 * time.Millisecond,
+			MaxDelay:    200 * time.Millisecond,
+			TypoProb:    0.02,
+			BigramModel: true,
+		},
 
 		Navigation: DefaultNavigationConfig(),
 
 		Rhythm: NewRhythm(DefaultRhythmConfig()),
+
+		Fatigue: DefaultFatigueConfig(),
 	}
 }
 
@@ -166,9 +186,10 @@ func AggressiveProfile() *BehaviorProfile {
 		},
 
 		Keyboard: KeyboardConfig{
-			MinDelay: 30 * time.Millisecond,
-			MaxDelay: 100 * time.Millisecond,
-			TypoProb: 0.01,
+			MinDelay:    30 * time.Millisecond,
+			MaxDelay:    100 * time.Millisecond,
+			TypoProb:    0.01,
+			BigramModel: true,
 		},
 
 		Navigation: NavigationConfig{
@@ -189,5 +210,96 @@ func AggressiveProfile() *BehaviorProfile {
 			LongPauseMax:  2 * time.Minute,
 			LongPauseProb: 0.08, // fewer long pauses — faster throughput
 		}),
+
+		Fatigue: FatigueConfig{
+			WarmupAmplitude:  0.2,
+			WarmupTau:        2 * time.Minute,
+			FatigueAmplitude: 0.15,
+			FatigueTau:       30 * time.Minute,
+		},
+	}
+}
+
+// Jitter returns a copy of this profile with per-session random perturbation
+// applied to all numeric parameters. This prevents clustering attacks that
+// would otherwise identify all sessions using the same named profile.
+//
+// Each parameter is multiplied by (1 + U(-jitterFrac, +jitterFrac)) where
+// jitterFrac defaults to 0.15 (±15%).
+func (p *BehaviorProfile) Jitter() *BehaviorProfile {
+	return p.JitterBy(0.15)
+}
+
+// JitterBy returns a copy with the specified jitter fraction applied.
+func (p *BehaviorProfile) JitterBy(frac float64) *BehaviorProfile {
+	jf := func(v float64) float64 {
+		return v * (1.0 + (rand.Float64()*2-1)*frac)
+	}
+	jd := func(d time.Duration) time.Duration {
+		return time.Duration(float64(d) * (1.0 + (rand.Float64()*2-1)*frac))
+	}
+	ji := func(v int) int {
+		result := int(float64(v) * (1.0 + (rand.Float64()*2-1)*frac))
+		if result < 1 {
+			result = 1
+		}
+		return result
+	}
+
+	return &BehaviorProfile{
+		Name: p.Name,
+		Timing: TimingConfig{
+			Mu:    jf(p.Timing.Mu),
+			Sigma: jf(p.Timing.Sigma),
+			Min:   jd(p.Timing.Min),
+			Max:   jd(p.Timing.Max),
+		},
+		Mouse: MouseConfig{
+			Jitter:        jf(p.Mouse.Jitter),
+			OvershootProb: jf(p.Mouse.OvershootProb),
+			OvershootPx:   jf(p.Mouse.OvershootPx),
+		},
+		Scroll: ScrollConfig{
+			ReadMinPx:      ji(p.Scroll.ReadMinPx),
+			ReadMaxPx:      ji(p.Scroll.ReadMaxPx),
+			ScanMinPx:      ji(p.Scroll.ScanMinPx),
+			ScanMaxPx:      ji(p.Scroll.ScanMaxPx),
+			ReadPause:      jd(p.Scroll.ReadPause),
+			ScanPause:      jd(p.Scroll.ScanPause),
+			ScrollUpProb:   jf(p.Scroll.ScrollUpProb),
+			HorizMinPx:     ji(p.Scroll.HorizMinPx),
+			HorizMaxPx:     ji(p.Scroll.HorizMaxPx),
+			HorizScanMinPx: ji(p.Scroll.HorizScanMinPx),
+			HorizScanMaxPx: ji(p.Scroll.HorizScanMaxPx),
+		},
+		Keyboard: KeyboardConfig{
+			MinDelay:    jd(p.Keyboard.MinDelay),
+			MaxDelay:    jd(p.Keyboard.MaxDelay),
+			TypoProb:    jf(p.Keyboard.TypoProb),
+			BigramModel: p.Keyboard.BigramModel,
+		},
+		Navigation: NavigationConfig{
+			PagesPerSession: Range{Min: ji(p.Navigation.PagesPerSession.Min), Max: ji(p.Navigation.PagesPerSession.Max)},
+			SessionDuration: DurationRange{Min: jd(p.Navigation.SessionDuration.Min), Max: jd(p.Navigation.SessionDuration.Max)},
+			SessionGap:      DurationRange{Min: jd(p.Navigation.SessionGap.Min), Max: jd(p.Navigation.SessionGap.Max)},
+			BackButtonProb:  jf(p.Navigation.BackButtonProb),
+			UselessPageProb: jf(p.Navigation.UselessPageProb),
+			SearchProb:      jf(p.Navigation.SearchProb),
+		},
+		Rhythm: NewRhythm(RhythmConfig{
+			BurstMin:      ji(p.Rhythm.config.BurstMin),
+			BurstMax:      ji(p.Rhythm.config.BurstMax),
+			PauseMin:      jd(p.Rhythm.config.PauseMin),
+			PauseMax:      jd(p.Rhythm.config.PauseMax),
+			LongPauseMin:  jd(p.Rhythm.config.LongPauseMin),
+			LongPauseMax:  jd(p.Rhythm.config.LongPauseMax),
+			LongPauseProb: jf(p.Rhythm.config.LongPauseProb),
+		}),
+		Fatigue: FatigueConfig{
+			WarmupAmplitude:  jf(p.Fatigue.WarmupAmplitude),
+			WarmupTau:        jd(p.Fatigue.WarmupTau),
+			FatigueAmplitude: jf(p.Fatigue.FatigueAmplitude),
+			FatigueTau:       jd(p.Fatigue.FatigueTau),
+		},
 	}
 }

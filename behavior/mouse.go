@@ -117,40 +117,52 @@ func (m *Mouse) MoveTo(start, end Point) []Point {
 	return path
 }
 
-// ClickOffset returns a small random offset from an element's centre.
-// Range: 0-5 px in each axis, matching architecture spec.
+// ClickOffset returns a small Gaussian-distributed offset from an element's centre.
+// Range: [-5, +5] px in each axis, center-heavy for natural click targeting.
 func (m *Mouse) ClickOffset() Point {
+	sigma := 5.0 / 2.5
 	return Point{
-		X: (rand.Float64()*2 - 1) * 5,
-		Y: (rand.Float64()*2 - 1) * 5,
+		X: GaussianClamped(sigma, 5.0),
+		Y: GaussianClamped(sigma, 5.0),
 	}
 }
 
 // ClickDuration returns the duration between mouse-down and mouse-up.
-// Range: [50 ms, 150 ms].
+// Uses LogNormal distribution (median ~90ms) matching observed human click
+// press-and-release timing. Clamped to [40ms, 250ms].
 func (m *Mouse) ClickDuration() time.Duration {
-	ms := 50 + rand.Float64()*(150-50)
+	// LogNormal with mu=ln(90)≈4.5, sigma=0.3 → median ~90ms, mean ~94ms
+	ms := LogNormalSample(4.5, 0.3)
+	if ms < 40 {
+		ms = 40
+	}
+	if ms > 250 {
+		ms = 250
+	}
 	return time.Duration(ms * float64(time.Millisecond))
 }
 
-// IdleDrift returns a small random drift suitable for idle mouse simulation.
-// Range: ≤ 2 px in each axis.
+// IdleDrift returns a small Gaussian-distributed drift suitable for idle mouse simulation.
+// Range: [-2, +2] px in each axis, center-heavy for realistic micro-movements.
 func (m *Mouse) IdleDrift() Point {
+	sigma := 2.0 / 2.5
 	return Point{
-		X: (rand.Float64()*2 - 1) * 2,
-		Y: (rand.Float64()*2 - 1) * 2,
+		X: GaussianClamped(sigma, 2.0),
+		Y: GaussianClamped(sigma, 2.0),
 	}
 }
 
-// jitter adds uniformly-distributed noise in [-Jitter, +Jitter] to each axis.
+// jitter adds Gaussian-distributed noise in [-Jitter, +Jitter] to each axis.
+// Gaussian produces center-heavy offsets that look more natural than uniform.
 func (m *Mouse) jitter(p Point) Point {
 	if m.config.Jitter == 0 {
 		return p
 	}
 	j := m.config.Jitter
+	sigma := j / 2.5 // 99% of samples within +/-Jitter
 	return Point{
-		X: p.X + (rand.Float64()*2-1)*j,
-		Y: p.Y + (rand.Float64()*2-1)*j,
+		X: p.X + GaussianClamped(sigma, j),
+		Y: p.Y + GaussianClamped(sigma, j),
 	}
 }
 

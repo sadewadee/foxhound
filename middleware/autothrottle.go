@@ -3,6 +3,8 @@ package middleware
 import (
 	"context"
 	"log/slog"
+	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -23,6 +25,10 @@ type AutoThrottleConfig struct {
 
 	// MaxDelay is the ceiling delay. A 429 or 503 response spikes to MaxDelay.
 	MaxDelay time.Duration
+
+	// Alpha is the EMA smoothing factor (default 0.3). Higher values react faster
+	// to latency changes but are more sensitive to outliers.
+	Alpha float64
 }
 
 // domainThrottle holds per-domain adaptive state.
@@ -31,6 +37,64 @@ type domainThrottle struct {
 	avgMs  float64 // exponential moving average of response latency in ms
 	delay  time.Duration
 	config AutoThrottleConfig
+	// Ring buffer for outlier dampening
+	latencies [10]float64
+	latCount  int
+	latIdx    int
+}
+
+// addLatency records a latency sample in the ring buffer.
+func (dt *domainThrottle) addLatency(ms float64) {
+	dt.latencies[dt.latIdx] = ms
+	dt.latIdx = (dt.latIdx + 1) % len(dt.latencies)
+	if dt.latCount < len(dt.latencies) {
+		dt.latCount++
+	}
+}
+
+// dampenOutlier clamps the latency to median ± 3*MAD to prevent single spikes
+// from swinging the EMA wildly.
+func (dt *domainThrottle) dampenOutlier(ms float64) float64 {
+	if dt.latCount < 3 {
+		return ms // not enough data for dampening
+	}
+
+	// Copy and sort the active portion
+	n := dt.latCount
+	sorted := make([]float64, n)
+	for i := 0; i < n; i++ {
+		idx := (dt.latIdx - n + i + len(dt.latencies)) % len(dt.latencies)
+		sorted[i] = dt.latencies[idx]
+	}
+	sort.Float64s(sorted)
+
+	// Median
+	median := sorted[n/2]
+	if n%2 == 0 {
+		median = (sorted[n/2-1] + sorted[n/2]) / 2.0
+	}
+
+	// MAD (Median Absolute Deviation)
+	deviations := make([]float64, n)
+	for i, v := range sorted {
+		deviations[i] = math.Abs(v - median)
+	}
+	sort.Float64s(deviations)
+	mad := deviations[n/2]
+	if mad == 0 {
+		mad = 1 // avoid zero MAD for constant latencies
+	}
+
+	// Clamp to median ± 3*MAD
+	lo := median - 3*mad
+	hi := median + 3*mad
+	if ms < lo {
+		return lo
+	}
+	if ms > hi {
+		return hi
+	}
+	return ms
 }
 
 // update recalculates the delay based on the latest response latency and status.
@@ -38,19 +102,23 @@ func (dt *domainThrottle) update(latency time.Duration, statusCode int) {
 	dt.mu.Lock()
 	defer dt.mu.Unlock()
 
-	// Spike to MaxDelay on server-side throttle signals.
 	if statusCode == 429 || statusCode == 503 {
 		dt.delay = dt.config.MaxDelay
 		slog.Debug("autothrottle: spiked to max", "delay", dt.delay, "status", statusCode)
 		return
 	}
 
-	const alpha = 0.3 // EMA smoothing factor
 	latMs := float64(latency.Milliseconds())
+
+	// Record in ring buffer and apply outlier dampening
+	dt.addLatency(latMs)
+	dampened := dt.dampenOutlier(latMs)
+
+	alpha := dt.config.Alpha
 	if dt.avgMs == 0 {
-		dt.avgMs = latMs
+		dt.avgMs = dampened
 	} else {
-		dt.avgMs = alpha*latMs + (1-alpha)*dt.avgMs
+		dt.avgMs = alpha*dampened + (1-alpha)*dt.avgMs
 	}
 
 	tc := dt.config.TargetConcurrency
@@ -93,6 +161,9 @@ type autoThrottleMiddleware struct {
 //
 // The computed delay is slept before the *next* request to that domain.
 func NewAutoThrottle(cfg AutoThrottleConfig) foxhound.Middleware {
+	if cfg.Alpha <= 0 || cfg.Alpha >= 1 {
+		cfg.Alpha = 0.3
+	}
 	return &autoThrottleMiddleware{
 		config:  cfg,
 		domains: make(map[string]*domainThrottle),

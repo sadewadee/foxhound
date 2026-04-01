@@ -92,8 +92,8 @@ func TestClickDurationIsInRange(t *testing.T) {
 	m := NewMouse(DefaultMouseConfig())
 	for i := 0; i < 100; i++ {
 		d := m.ClickDuration()
-		if d < 50*time.Millisecond || d > 150*time.Millisecond {
-			t.Errorf("ClickDuration %v outside [50ms, 150ms]", d)
+		if d < 40*time.Millisecond || d > 250*time.Millisecond {
+			t.Errorf("ClickDuration %v outside [40ms, 250ms]", d)
 		}
 	}
 }
