@@ -84,6 +84,14 @@ func WithBrowserCookies(cookies []BrowserCookie) CamoufoxOption {
 	}
 }
 
+// WithBehaviorProfile sets the behavior profile used for scroll and keyboard
+// simulation in browser steps. When nil, defaults are used.
+func WithBehaviorProfile(p *behavior.BehaviorProfile) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.behaviorProfile = p
+	}
+}
+
 // WithBrowserIdentity sets the identity profile used to configure the Camoufox
 // browser context and CAMOU_CONFIG environment variables.
 func WithBrowserIdentity(p *identity.Profile) CamoufoxOption {
@@ -173,8 +181,12 @@ type CamoufoxFetcher struct {
 	useRealChrome   bool                      // use pw.Chromium with channel=chrome
 	capturePatterns []*regexp.Regexp          // URL patterns for XHR/fetch response capture
 	poolSize        int                        // max pooled pages (0 = disabled)
+	pageReuseLimit  int                        // max reuses per pooled page (0 = unlimited)
 	pool            *PagePool                  // page pool (non-nil when poolSize > 0 and !persistSession)
 	cookies         []BrowserCookie            // cookies to inject into browser context before navigation
+	behaviorProfile *behavior.BehaviorProfile  // optional profile for scroll/keyboard configs
+	nopechaHasKey   bool                       // true when NopeCHA extension has an API key configured
+	tempDirs        []string                   // temp directories to clean up on Close/restart
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -245,6 +257,16 @@ func WithRealChrome(use bool) CamoufoxOption {
 func WithPoolSize(n int) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.poolSize = n
+	}
+}
+
+// WithPageReuseLimit sets the maximum number of requests a pooled page handles
+// before being destroyed and replaced. This prevents long-lived pages from
+// accumulating state that increases detection risk. Default 0 means unlimited.
+// Recommended: 50-200 for anti-detection scraping.
+func WithPageReuseLimit(n int) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.pageReuseLimit = n
 	}
 }
 
@@ -334,6 +356,7 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 					slog.Warn("fetch/camoufox: failed to extract .xpi", "err", uzErr)
 				} else {
 					absExt = extractDir
+					f.tempDirs = append(f.tempDirs, extractDir)
 					slog.Info("fetch/camoufox: extracted .xpi", "dir", extractDir)
 				}
 			}
@@ -352,6 +375,11 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 
 		slog.Info("fetch/camoufox: addon injected via CAMOU_CONFIG",
 			"path", absExt)
+
+		// After extension is installed, check if NopeCHA has an API key.
+		if strings.Contains(f.extensionPath, "nopecha") {
+			f.nopechaHasKey = f.checkNopeCHAKey()
+		}
 	}
 
 	// --- Browser acquisition: CDP connect > persistent context > normal launch ---
@@ -534,8 +562,11 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 				}
 				return nil
 			}),
+			WithPoolReuseLimit(f.pageReuseLimit),
 		)
-		slog.Info("fetch/camoufox: page pool initialised", "pool_size", f.poolSize)
+		slog.Info("fetch/camoufox: page pool initialised",
+			"pool_size", f.poolSize,
+			"page_reuse_limit", f.pageReuseLimit)
 	}
 
 	return f, nil
@@ -848,50 +879,90 @@ func (f *CamoufoxFetcher) getOrCreateContext() (playwright.BrowserContext, bool,
 // Actions performed (all are best-effort; errors are silently ignored so the
 // underlying content extraction is not blocked by a failed gesture):
 //  1. Random reading pause after page load (1-3 s)
-//  2. Move mouse to a random viewport position
-//  3. Scroll down 200-600 px
-//  4. Optionally scroll back up (30 % probability, natural reading pattern)
-//  5. Move mouse to a second random viewport position
+//  2. Traverse bezier path to first random viewport position
+//  3. Idle micro-drift while "reading"
+//  4. Scroll down 200-600 px with idle drift during scroll pause
+//  5. Optionally scroll back up (30 % probability, natural reading pattern)
+//  6. Traverse bezier path to second random viewport position
 func (f *CamoufoxFetcher) simulateHumanBehavior(page playwright.Page) {
+	mouse := behavior.NewMouse(f.mouseConfig())
+
 	// 1. Reading pause — simulates time-to-first-interaction after load.
 	time.Sleep(time.Duration(1000+rand.IntN(2000)) * time.Millisecond)
 
-	// 2. Move mouse to a random position in the visible viewport.
 	viewportSize := page.ViewportSize()
-	if viewportSize != nil && viewportSize.Width > 100 && viewportSize.Height > 100 {
-		x := float64(rand.IntN(viewportSize.Width-100) + 50)
-		y := float64(rand.IntN(viewportSize.Height-100) + 50)
-		if err := page.Mouse().Move(x, y); err != nil {
-			slog.Debug("fetch/camoufox: simulateHuman: mouse move 1 failed", "err", err)
+	if viewportSize == nil || viewportSize.Width <= 100 || viewportSize.Height <= 100 {
+		return
+	}
+
+	// 2. Traverse bezier path to first random position
+	startX := float64(viewportSize.Width / 2)
+	startY := float64(viewportSize.Height / 2)
+	endX := float64(rand.IntN(viewportSize.Width-100) + 50)
+	endY := float64(rand.IntN(viewportSize.Height-100) + 50)
+
+	path := mouse.MoveTo(
+		behavior.Point{X: startX, Y: startY},
+		behavior.Point{X: endX, Y: endY},
+	)
+	for _, pt := range path {
+		if err := page.Mouse().Move(pt.X, pt.Y); err != nil {
+			break
 		}
-		time.Sleep(time.Duration(200+rand.IntN(300)) * time.Millisecond)
+		// Inter-point delay: 5-15ms per waypoint (mimics 60-120Hz mouse polling)
+		time.Sleep(time.Duration(5+rand.IntN(11)) * time.Millisecond)
+	}
+
+	// Idle micro-drift while "reading" (0.5-3px tremor)
+	idleDuration := time.Duration(500+rand.IntN(1500)) * time.Millisecond
+	idleEnd := time.Now().Add(idleDuration)
+	lastX, lastY := endX, endY
+	for time.Now().Before(idleEnd) {
+		drift := mouse.IdleDrift()
+		lastX += drift.X
+		lastY += drift.Y
+		page.Mouse().Move(lastX, lastY)
+		time.Sleep(time.Duration(80+rand.IntN(120)) * time.Millisecond)
 	}
 
 	// 3. Scroll down — shows the user is reading past the fold.
-	scroller := behavior.NewScroll(behavior.DefaultScrollConfig())
+	scroller := behavior.NewScroll(f.scrollConfig())
 	dist, pause, _ := scroller.ScrollGesture(behavior.ScrollReading)
 	if err := page.Mouse().Wheel(0, float64(dist)); err != nil {
 		slog.Debug("fetch/camoufox: simulateHuman: scroll down failed", "err", err)
 	}
-	time.Sleep(pause)
+
+	// Idle micro-drift during scroll pause
+	scrollPauseEnd := time.Now().Add(pause)
+	for time.Now().Before(scrollPauseEnd) {
+		drift := mouse.IdleDrift()
+		lastX += drift.X
+		lastY += drift.Y
+		page.Mouse().Move(lastX, lastY)
+		time.Sleep(time.Duration(80+rand.IntN(120)) * time.Millisecond)
+	}
 
 	// 4. Occasionally scroll back up — natural reading / re-reading behaviour.
 	if rand.Float64() < 0.3 {
 		upDist, upPause, _ := scroller.ScrollGesture(behavior.ScrollReading)
-		// Use half the distance for a partial re-read.
 		if err := page.Mouse().Wheel(0, -float64(upDist/2)); err != nil {
 			slog.Debug("fetch/camoufox: simulateHuman: scroll up failed", "err", err)
 		}
 		time.Sleep(upPause)
 	}
 
-	// 5. Move mouse to a second random viewport position.
-	if viewportSize != nil && viewportSize.Width > 100 && viewportSize.Height > 100 {
-		x := float64(rand.IntN(viewportSize.Width-100) + 50)
-		y := float64(rand.IntN(viewportSize.Height-100) + 50)
-		if err := page.Mouse().Move(x, y); err != nil {
-			slog.Debug("fetch/camoufox: simulateHuman: mouse move 2 failed", "err", err)
+	// 5. Traverse bezier path to second position
+	endX2 := float64(rand.IntN(viewportSize.Width-100) + 50)
+	endY2 := float64(rand.IntN(viewportSize.Height-100) + 50)
+	path2 := mouse.MoveTo(
+		behavior.Point{X: lastX, Y: lastY},
+		behavior.Point{X: endX2, Y: endY2},
+	)
+	for _, pt := range path2 {
+		if err := page.Mouse().Move(pt.X, pt.Y); err != nil {
+			break
 		}
+		time.Sleep(time.Duration(5+rand.IntN(11)) * time.Millisecond)
 	}
 }
 
@@ -930,7 +1001,7 @@ func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobSte
 		}
 
 	case foxhound.JobStepScroll:
-		scroller := behavior.NewScroll(behavior.DefaultScrollConfig())
+		scroller := behavior.NewScroll(f.scrollConfig())
 		axis := behavior.ScrollAxis(step.ScrollAxis)
 		extent := step.ScrollExtent
 		if extent <= 0 {
@@ -971,7 +1042,7 @@ func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobSte
 			"max", maxScrolls, "container", container,
 			"stop_selector", step.StopSelector, "stop_count", step.StopCount)
 
-		scroller := behavior.NewScroll(behavior.DefaultScrollConfig())
+		scroller := behavior.NewScroll(f.scrollConfig())
 
 		// Build JS snippets for scroll height depending on container.
 		getHeightJS := "() => document.body.scrollHeight"
@@ -1168,7 +1239,7 @@ func (f *CamoufoxFetcher) executeStep(page playwright.Page, step foxhound.JobSte
 			slog.Debug("fetch/camoufox: fill clear failed", "err", err)
 		}
 		// Type with human-like keystrokes using behavior.Keyboard.
-		kb := behavior.NewKeyboard(behavior.DefaultKeyboardConfig())
+		kb := behavior.NewKeyboard(f.keyboardConfig())
 		actions := kb.TypeString(step.Value)
 		for _, a := range actions {
 			if a.IsBackspace {
@@ -1534,13 +1605,38 @@ func (f *CamoufoxFetcher) handleHCaptcha(page playwright.Page) {
 	slog.Warn("fetch/camoufox: hCaptcha found but could not locate clickable checkbox")
 }
 
+// checkNopeCHAKey checks if the NopeCHA extension has an API key configured.
+func (f *CamoufoxFetcher) checkNopeCHAKey() bool {
+	// Check manifest.json or config.json in the extension directory for API key.
+	configPaths := []string{
+		filepath.Join(f.extensionPath, "manifest.json"),
+		filepath.Join(f.extensionPath, "config.json"),
+	}
+	for _, path := range configPaths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		// Look for non-empty key field.
+		content := string(data)
+		if strings.Contains(content, `"key"`) && !strings.Contains(content, `"key":""`) && !strings.Contains(content, `"key": ""`) {
+			return true
+		}
+	}
+	return false
+}
+
 // waitForExtensionSolve detects captcha type on the page and waits for the
 // solver extension (NopeCHA) to solve it. Used when extension is loaded —
 // no manual clicking needed, the extension handles everything.
 func (f *CamoufoxFetcher) waitForExtensionSolve(page playwright.Page) {
 	// Early exit if the extension was explicitly disabled — nothing can solve.
-	if f.extensionPath == "none" {
+	if !f.hasExtension || f.extensionPath == "none" {
 		slog.Debug("fetch/camoufox: captcha extension disabled, skipping solve wait")
+		return
+	}
+	if !f.nopechaHasKey {
+		slog.Debug("fetch/camoufox: NopeCHA has no API key, skipping extension solve wait")
 		return
 	}
 
@@ -2298,6 +2394,16 @@ func parsePlaywrightProxy(rawURL string) *playwright.Proxy {
 	return proxy
 }
 
+// cleanTempDirs removes all tracked temporary directories.
+func (f *CamoufoxFetcher) cleanTempDirs() {
+	for _, dir := range f.tempDirs {
+		if err := os.RemoveAll(dir); err != nil {
+			slog.Debug("fetch/camoufox: error removing temp dir", "dir", dir, "err", err)
+		}
+	}
+	f.tempDirs = nil
+}
+
 // restart closes the current browser instance and launches a new one, resetting
 // the request counter. It is serialised under mu so that concurrent Fetch calls
 // do not race on the browser handle. If the new browser fails to launch the
@@ -2330,6 +2436,15 @@ func (f *CamoufoxFetcher) restart() error {
 		f.sessionCtx = nil
 	}
 	f.sessionMu.Unlock()
+
+	// Drain the page pool — old pages reference the dead browser.
+	if f.pool != nil {
+		f.pool.Close()
+		f.pool = nil
+	}
+
+	// Clean up temporary directories from the previous browser session.
+	f.cleanTempDirs()
 
 	// Close the existing browser (best-effort; errors are logged only).
 	if f.browser != nil {
@@ -2380,11 +2495,77 @@ func (f *CamoufoxFetcher) restart() error {
 	f.browser = browser
 	f.requestCount.Store(0)
 
+	// Recreate page pool for the new browser.
+	if f.poolSize > 0 && !f.persistSession {
+		f.pool = NewPagePool(
+			f.poolSize,
+			func() (any, error) {
+				bctx, err := f.browser.NewContext(f.buildContextOptions())
+				if err != nil {
+					return nil, fmt.Errorf("pool create: %w", err)
+				}
+				pg, err := bctx.NewPage()
+				if err != nil {
+					bctx.Close()
+					return nil, fmt.Errorf("pool create page: %w", err)
+				}
+				return pg, nil
+			},
+			func(page any) error {
+				pg := page.(playwright.Page)
+				return pg.Context().Close()
+			},
+			WithPageReset(func(page any) error {
+				pg := page.(playwright.Page)
+				if err := pg.Context().ClearCookies(); err != nil {
+					return err
+				}
+				_, err := pg.Goto("about:blank", playwright.PageGotoOptions{
+					WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+					Timeout:   playwright.Float(5000),
+				})
+				return err
+			}),
+			WithPoolReuseLimit(f.pageReuseLimit),
+		)
+		slog.Info("fetch/camoufox: page pool recreated after restart",
+			"pool_size", f.poolSize,
+			"page_reuse_limit", f.pageReuseLimit)
+	}
+
 	slog.Info("fetch/camoufox: browser restarted successfully")
 	return nil
 }
 
+// scrollConfig returns the scroll configuration from the behavior profile,
+// or defaults when no profile is set.
+func (f *CamoufoxFetcher) scrollConfig() behavior.ScrollConfig {
+	if f.behaviorProfile != nil {
+		return f.behaviorProfile.Scroll
+	}
+	return behavior.DefaultScrollConfig()
+}
+
+// keyboardConfig returns the keyboard configuration from the behavior profile,
+// or defaults when no profile is set.
+func (f *CamoufoxFetcher) keyboardConfig() behavior.KeyboardConfig {
+	if f.behaviorProfile != nil {
+		return f.behaviorProfile.Keyboard
+	}
+	return behavior.DefaultKeyboardConfig()
+}
+
+// mouseConfig returns the mouse configuration from the behavior profile,
+// or defaults when no profile is set.
+func (f *CamoufoxFetcher) mouseConfig() behavior.MouseConfig {
+	if f.behaviorProfile != nil {
+		return f.behaviorProfile.Mouse
+	}
+	return behavior.DefaultMouseConfig()
+}
+
 // Close gracefully shuts down the browser and stops the playwright runtime.
+//
 // Resources are released in order: persistent session context (if any),
 // LaunchPersistentContext context (if any), browser, then the playwright
 // process. Errors from each step are logged but do not prevent the subsequent
@@ -2458,6 +2639,9 @@ func (f *CamoufoxFetcher) Close() error {
 		}
 		f.pw = nil
 	}
+
+	// Clean up temporary directories after all browser resources are freed.
+	f.cleanTempDirs()
 
 	return firstErr
 }

@@ -1,6 +1,7 @@
 package behavior
 
 import (
+	"math"
 	"math/rand/v2"
 	"time"
 )
@@ -105,11 +106,13 @@ func (s *Scroll) ScrollGesture(mode ScrollMode) (distance int, pause time.Durati
 
 	switch mode {
 	case ScrollScan:
-		distance = s.config.ScanMinPx + rand.IntN(s.config.ScanMaxPx-s.config.ScanMinPx+1)
-		pause = pauseFromMidpoint(s.config.ScanPause, 0.6, 2.0)
+		// Gamma(alpha=2.5, rate=0.0012): mean ~2083px, mode ~1250px
+		distance = int(math.Round(GammaClamped(2.5, 0.0012, float64(s.config.ScanMinPx), float64(s.config.ScanMaxPx))))
+		pause = weibullPause(s.config.ScanPause, 0.6, 2.0, 1.8)
 	default: // ScrollReading
-		distance = s.config.ReadMinPx + rand.IntN(s.config.ReadMaxPx-s.config.ReadMinPx+1)
-		pause = pauseFromMidpoint(s.config.ReadPause, 0.5, 2.5)
+		// Gamma(alpha=3.0, rate=0.006): mean ~500px, mode ~333px
+		distance = int(math.Round(GammaClamped(3.0, 0.006, float64(s.config.ReadMinPx), float64(s.config.ReadMaxPx))))
+		pause = weibullPause(s.config.ReadPause, 0.5, 2.5, 2.0)
 	}
 	return
 }
@@ -156,11 +159,11 @@ func (s *Scroll) ScrollGestureAxis(mode ScrollMode, axis ScrollAxis) (distance i
 
 	switch mode {
 	case ScrollScan:
-		distance = s.config.HorizScanMinPx + rand.IntN(s.config.HorizScanMaxPx-s.config.HorizScanMinPx+1)
-		pause = pauseFromMidpoint(s.config.ScanPause, 0.6, 2.0)
+		distance = int(math.Round(GammaClamped(2.5, 0.0012, float64(s.config.HorizScanMinPx), float64(s.config.HorizScanMaxPx))))
+		pause = weibullPause(s.config.ScanPause, 0.6, 2.0, 1.8)
 	default: // ScrollReading
-		distance = s.config.HorizMinPx + rand.IntN(s.config.HorizMaxPx-s.config.HorizMinPx+1)
-		pause = pauseFromMidpoint(s.config.ReadPause, 0.5, 2.5)
+		distance = int(math.Round(GammaClamped(3.0, 0.006, float64(s.config.HorizMinPx), float64(s.config.HorizMaxPx))))
+		pause = weibullPause(s.config.ReadPause, 0.5, 2.5, 2.0)
 	}
 	return
 }
@@ -192,11 +195,13 @@ func (s *Scroll) ScrollSequenceAxis(extent int, mode ScrollMode, axis ScrollAxis
 	return actions
 }
 
-// pauseFromMidpoint returns a uniformly-distributed duration in
-// [midpoint*loFactor, midpoint*hiFactor]. This allows per-profile tuning of
-// scroll pauses via the ReadPause/ScanPause config fields.
-func pauseFromMidpoint(midpoint time.Duration, loFactor, hiFactor float64) time.Duration {
+// weibullPause returns a Weibull-distributed pause centered around midpoint.
+// loFactor and hiFactor define the bounds as multiples of midpoint.
+// k is the Weibull shape parameter.
+func weibullPause(midpoint time.Duration, loFactor, hiFactor, k float64) time.Duration {
 	lo := float64(midpoint) * loFactor
 	hi := float64(midpoint) * hiFactor
-	return time.Duration(lo + rand.Float64()*(hi-lo))
+	lambda := (hi - lo) * 0.4
+	sample := WeibullClamped(k, lambda, 0, hi-lo)
+	return time.Duration(lo + sample)
 }

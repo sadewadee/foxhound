@@ -3,6 +3,7 @@ package middleware_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -313,11 +314,11 @@ func TestRetrySucceedsOnFirstAttempt(t *testing.T) {
 func TestRetryRetriesOnError(t *testing.T) {
 	var count int
 	mock := &mockFetcher{}
-	mock.err = errors.New("transient")
+	mock.err = errors.New("connection reset")
 	fetcher := foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
 		count++
 		if count < 3 {
-			return nil, errors.New("transient")
+			return nil, errors.New("connection reset")
 		}
 		return okResponse(job), nil
 	})
@@ -356,7 +357,7 @@ func TestRetryExhaustedReturnsLastError(t *testing.T) {
 
 func TestRetryRespectsContextCancellation(t *testing.T) {
 	fetcher := foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
-		return nil, errors.New("fail")
+		return nil, errors.New("connection timeout")
 	})
 
 	r := middleware.NewRetry(10, 50*time.Millisecond)
@@ -390,5 +391,49 @@ func TestRetryOnBlockedStatusCodes(t *testing.T) {
 	}
 	if resp.StatusCode != 200 {
 		t.Errorf("expected 200 after retrying blocked response, got %d", resp.StatusCode)
+	}
+}
+
+func TestRetryRetriesNetworkErrors(t *testing.T) {
+	callCount := 0
+	flaky := foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
+		callCount++
+		if callCount <= 2 {
+			return nil, fmt.Errorf("NS_ERROR_NET_RESET")
+		}
+		return &foxhound.Response{StatusCode: 200, Headers: make(http.Header)}, nil
+	})
+
+	mw := middleware.NewRetry(3, 10*time.Millisecond)
+	fetcher := mw.Wrap(flaky)
+
+	resp, err := fetcher.Fetch(context.Background(), &foxhound.Job{URL: "https://example.com"})
+	if err != nil {
+		t.Fatalf("Expected success after retry, got error: %v", err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+	if callCount != 3 {
+		t.Fatalf("Expected 3 calls (2 failures + 1 success), got %d", callCount)
+	}
+}
+
+func TestRetryDoesNotRetryNonNetworkErrors(t *testing.T) {
+	callCount := 0
+	fetcher := foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
+		callCount++
+		return nil, errors.New("some non-retryable application error")
+	})
+
+	mw := middleware.NewRetry(3, 10*time.Millisecond)
+	wrapped := mw.Wrap(fetcher)
+
+	_, err := wrapped.Fetch(context.Background(), &foxhound.Job{URL: "https://example.com"})
+	if err == nil {
+		t.Fatal("Expected error for non-retryable failure")
+	}
+	if callCount != 1 {
+		t.Fatalf("Expected 1 call (no retries for non-network error), got %d", callCount)
 	}
 }

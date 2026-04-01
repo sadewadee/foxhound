@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"math/rand/v2"
+	"strings"
 	"time"
 
 	foxhound "github.com/sadewadee/foxhound"
@@ -20,8 +21,9 @@ var blockedStatusCodes = map[int]bool{
 
 // retryMiddleware wraps a Fetcher with exponential-backoff retry logic.
 type retryMiddleware struct {
-	maxRetries int
-	baseDelay  time.Duration
+	maxRetries         int
+	baseDelay          time.Duration
+	retryNetworkErrors bool // retry on transient network errors (default true)
 }
 
 // NewRetry creates a Middleware that retries failed or blocked requests up to
@@ -31,7 +33,7 @@ type retryMiddleware struct {
 // jitter to spread retry storms.  Context cancellation stops retries
 // immediately.
 func NewRetry(maxRetries int, baseDelay time.Duration) foxhound.Middleware {
-	return &retryMiddleware{maxRetries: maxRetries, baseDelay: baseDelay}
+	return &retryMiddleware{maxRetries: maxRetries, baseDelay: baseDelay, retryNetworkErrors: true}
 }
 
 // Wrap returns a Fetcher that retries on error or blocked status code.
@@ -57,6 +59,11 @@ func (r *retryMiddleware) Wrap(next foxhound.Fetcher) foxhound.Fetcher {
 			resp, err = next.Fetch(ctx, job)
 			if err == nil && !blockedStatusCodes[resp.StatusCode] {
 				return resp, nil
+			}
+
+			// Don't retry non-retryable errors.
+			if err != nil && (!r.retryNetworkErrors || !isRetryableNetworkError(err)) {
+				return resp, err
 			}
 
 			slog.Debug("retry: attempt failed",
@@ -86,4 +93,33 @@ func statusCode(resp *foxhound.Response) int {
 		return 0
 	}
 	return resp.StatusCode
+}
+
+// isRetryableNetworkError checks if an error is a transient network error
+// that should be retried. These are connection-level failures that typically
+// succeed on a second attempt.
+func isRetryableNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	retryable := []string{
+		"reset",
+		"timeout",
+		"refused",
+		"eof",
+		"broken pipe",
+		"connection closed",
+		"no such host",
+		"network is unreachable",
+		"i/o timeout",
+		"tls handshake",
+		"ns_error_net_reset",
+	}
+	for _, r := range retryable {
+		if strings.Contains(msg, r) {
+			return true
+		}
+	}
+	return false
 }

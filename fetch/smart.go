@@ -17,6 +17,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"time"
 
 	foxhound "github.com/sadewadee/foxhound"
 	"github.com/sadewadee/foxhound/captcha"
@@ -95,12 +97,31 @@ func WithBrowserFetcher(fetcher foxhound.Fetcher) SmartOption {
 	}
 }
 
+// WithDomainScorer enables adaptive domain learning. When a scorer is provided,
+// FetchAuto uses Bayesian risk scores to decide whether to attempt static
+// fetching or skip directly to browser.
+func WithDomainScorer(scorer *DomainScorer) SmartOption {
+	return func(f *SmartFetcher) {
+		f.scorer = scorer
+	}
+}
+
+// WithCautiousTimeout sets the timeout for static fetches when the domain
+// scorer recommends caution (moderate risk). Default is 5 seconds.
+func WithCautiousTimeout(d time.Duration) SmartOption {
+	return func(f *SmartFetcher) {
+		f.cautiousTimeout = d
+	}
+}
+
 // SmartFetcher routes each job to the appropriate fetcher. It implements
 // foxhound.Fetcher and can be used transparently wherever a Fetcher is expected.
 type SmartFetcher struct {
-	static   foxhound.Fetcher
-	browser  foxhound.Fetcher
-	detector BlockDetector
+	static          foxhound.Fetcher
+	browser         foxhound.Fetcher
+	detector        BlockDetector
+	scorer          *DomainScorer // nil when learning is disabled
+	cautiousTimeout time.Duration
 }
 
 // NewSmart creates a SmartFetcher. static must not be nil; browser may be nil
@@ -110,9 +131,10 @@ type SmartFetcher struct {
 // fetcher after construction.
 func NewSmart(static, browser foxhound.Fetcher, opts ...SmartOption) *SmartFetcher {
 	f := &SmartFetcher{
-		static:   static,
-		browser:  browser,
-		detector: &ContentBlockDetector{},
+		static:          static,
+		browser:         browser,
+		detector:        &ContentBlockDetector{},
+		cautiousTimeout: 5 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(f)
@@ -164,7 +186,38 @@ func (f *SmartFetcher) fetchBrowser(ctx context.Context, job *foxhound.Job) (*fo
 }
 
 // fetchAuto implements the try-static-then-escalate logic.
+// When a DomainScorer is attached, it consults the learned risk score before
+// deciding whether to attempt a static fetch or skip directly to browser.
 func (f *SmartFetcher) fetchAuto(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
+	domain := extractDomainSmart(job)
+
+	// Check learned risk score
+	if f.scorer != nil {
+		action := f.scorer.Recommend(domain)
+		switch action {
+		case ActionBrowserDirect:
+			if f.browser != nil {
+				slog.Info("fetch/smart: learned risk is high, going directly to browser",
+					"domain", domain, "risk", fmt.Sprintf("%.2f", f.scorer.Risk(domain)),
+					"url", job.URL)
+				resp, err := f.browser.Fetch(ctx, job)
+				if resp != nil {
+					blocked := f.detector.IsBlocked(resp)
+					f.scorer.RecordBrowser(domain, blocked)
+				}
+				return resp, err
+			}
+		case ActionStaticCautious:
+			slog.Debug("fetch/smart: moderate risk, trying static with caution",
+				"domain", domain, "risk", fmt.Sprintf("%.2f", f.scorer.Risk(domain)))
+			// Fail-fast: use a shorter timeout for cautious static attempts
+			// so we escalate to browser quickly if static is blocked.
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, f.cautiousTimeout)
+			defer cancel()
+		}
+	}
+
 	slog.Debug("fetch/smart: auto mode — trying static first", "url", job.URL, "job_id", job.ID)
 
 	resp, err := f.static.Fetch(ctx, job)
@@ -172,36 +225,53 @@ func (f *SmartFetcher) fetchAuto(ctx context.Context, job *foxhound.Job) (*foxho
 		return nil, fmt.Errorf("fetch/smart: static fetch failed for %s: %w", job.URL, err)
 	}
 
-	if !f.detector.IsBlocked(resp) {
+	blocked := f.detector.IsBlocked(resp)
+
+	// Record outcome for learning
+	if f.scorer != nil {
+		f.scorer.RecordStatic(domain, blocked)
+	}
+
+	if !blocked {
 		slog.Debug("fetch/smart: static succeeded, no escalation needed",
-			"status", resp.StatusCode,
-			"url", job.URL,
-			"job_id", job.ID,
-		)
+			"status", resp.StatusCode, "url", job.URL, "job_id", job.ID)
 		return resp, nil
 	}
 
 	// Static response was blocked.
 	if f.browser == nil {
 		slog.Warn("fetch/smart: block detected but no browser fetcher configured, returning static result",
-			"status", resp.StatusCode,
-			"url", job.URL,
-			"job_id", job.ID,
-		)
+			"status", resp.StatusCode, "url", job.URL, "job_id", job.ID)
 		return resp, nil
 	}
 
 	slog.Info("fetch/smart: block detected, escalating to browser fetcher",
-		"status", resp.StatusCode,
-		"url", job.URL,
-		"job_id", job.ID,
-	)
+		"status", resp.StatusCode, "url", job.URL, "job_id", job.ID)
 
 	browserResp, err := f.browser.Fetch(ctx, job)
 	if err != nil {
 		return nil, fmt.Errorf("fetch/smart: browser escalation failed for %s: %w", job.URL, err)
 	}
+
+	// Record browser outcome too
+	if f.scorer != nil && browserResp != nil {
+		browserBlocked := f.detector.IsBlocked(browserResp)
+		f.scorer.RecordBrowser(domain, browserBlocked)
+	}
+
 	return browserResp, nil
+}
+
+// extractDomainSmart returns the domain for the given job, preferring
+// the explicit Domain field and falling back to parsing the URL.
+func extractDomainSmart(job *foxhound.Job) string {
+	if job.Domain != "" {
+		return job.Domain
+	}
+	if u, err := url.Parse(job.URL); err == nil {
+		return u.Hostname()
+	}
+	return "unknown"
 }
 
 // Close releases resources held by both the static and browser fetchers.

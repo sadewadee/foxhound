@@ -25,16 +25,20 @@ import (
 //	if err != nil { ... }
 //	defer pool.Release(page)
 type PagePool struct {
-	maxSize  int
-	create   func() (any, error)
-	destroy  func(any) error
-	reset    func(any) error
-	pages    chan any
-	created  atomic.Int64
-	acquired atomic.Int64
-	released atomic.Int64
-	mu       sync.Mutex
-	closed   bool
+	maxSize    int
+	reuseLimit int                // max reuses per page (0 = unlimited)
+	create     func() (any, error)
+	destroy    func(any) error
+	reset      func(any) error
+	pages      chan any
+	created    atomic.Int64
+	acquired   atomic.Int64
+	released   atomic.Int64
+	recycled   atomic.Int64       // pages destroyed due to reuse limit
+	mu         sync.Mutex
+	closed     bool
+	usageCount map[any]int64      // tracks reuse count per page handle
+	usageMu    sync.Mutex         // guards usageCount
 }
 
 // PagePoolOption configures a PagePool.
@@ -46,6 +50,14 @@ func WithPageReset(fn func(any) error) PagePoolOption {
 	return func(p *PagePool) { p.reset = fn }
 }
 
+// WithPoolReuseLimit sets the maximum number of times a page can be reused
+// before it is destroyed and replaced. Default 0 means unlimited.
+func WithPoolReuseLimit(n int) PagePoolOption {
+	return func(p *PagePool) {
+		p.reuseLimit = n
+	}
+}
+
 // NewPagePool creates a pool of reusable browser pages with the given capacity.
 // create is called to instantiate a new page; destroy is called when a page is
 // evicted or the pool is closed.
@@ -54,10 +66,11 @@ func NewPagePool(maxSize int, create func() (any, error), destroy func(any) erro
 		maxSize = 4
 	}
 	p := &PagePool{
-		maxSize: maxSize,
-		create:  create,
-		destroy: destroy,
-		pages:   make(chan any, maxSize),
+		maxSize:    maxSize,
+		create:     create,
+		destroy:    destroy,
+		pages:      make(chan any, maxSize),
+		usageCount: make(map[any]int64),
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -80,6 +93,9 @@ func (p *PagePool) Acquire(ctx context.Context) (any, error) {
 	select {
 	case page := <-p.pages:
 		p.acquired.Add(1)
+		p.usageMu.Lock()
+		p.usageCount[page]++
+		p.usageMu.Unlock()
 		return page, nil
 	default:
 	}
@@ -97,6 +113,9 @@ func (p *PagePool) Acquire(ctx context.Context) (any, error) {
 				return nil, err
 			}
 			p.acquired.Add(1)
+			p.usageMu.Lock()
+			p.usageCount[page]++
+			p.usageMu.Unlock()
 			slog.Debug("pagepool: created new page",
 				"total", p.created.Load(), "max", p.maxSize)
 			return page, nil
@@ -109,6 +128,9 @@ func (p *PagePool) Acquire(ctx context.Context) (any, error) {
 	select {
 	case page := <-p.pages:
 		p.acquired.Add(1)
+		p.usageMu.Lock()
+		p.usageCount[page]++
+		p.usageMu.Unlock()
 		return page, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -136,8 +158,34 @@ func (p *PagePool) Release(page any) {
 			if p.destroy != nil {
 				_ = p.destroy(page)
 			}
+			p.usageMu.Lock()
+			delete(p.usageCount, page)
+			p.usageMu.Unlock()
 			p.created.Add(-1)
 			p.released.Add(1)
+			return
+		}
+	}
+
+	// Check reuse limit — destroy the page if it has been used too many times.
+	if p.reuseLimit > 0 {
+		p.usageMu.Lock()
+		count := p.usageCount[page]
+		p.usageMu.Unlock()
+		if count >= int64(p.reuseLimit) {
+			// Page exhausted — destroy and decrement created count.
+			if p.destroy != nil {
+				if destroyErr := p.destroy(page); destroyErr != nil {
+					slog.Debug("pagepool: error destroying exhausted page", "err", destroyErr)
+				}
+			}
+			p.usageMu.Lock()
+			delete(p.usageCount, page)
+			p.usageMu.Unlock()
+			p.created.Add(-1)
+			p.recycled.Add(1)
+			p.released.Add(1)
+			slog.Debug("pagepool: page recycled after reuse limit", "limit", p.reuseLimit)
 			return
 		}
 	}
@@ -152,6 +200,9 @@ func (p *PagePool) Release(page any) {
 		if p.destroy != nil {
 			_ = p.destroy(page)
 		}
+		p.usageMu.Lock()
+		delete(p.usageCount, page)
+		p.usageMu.Unlock()
 		p.created.Add(-1)
 	}
 }
@@ -169,10 +220,16 @@ func (p *PagePool) Close() error {
 		}
 	}
 
+	// Clear usage tracking map.
+	p.usageMu.Lock()
+	p.usageCount = make(map[any]int64)
+	p.usageMu.Unlock()
+
 	slog.Debug("pagepool: closed",
 		"total_created", p.created.Load(),
 		"total_acquired", p.acquired.Load(),
-		"total_released", p.released.Load())
+		"total_released", p.released.Load(),
+		"total_recycled", p.recycled.Load())
 	return nil
 }
 
@@ -181,11 +238,13 @@ func (p *PagePool) Stats() PagePoolStats {
 	created := p.created.Load()
 	acquired := p.acquired.Load()
 	released := p.released.Load()
+	recycled := p.recycled.Load()
 	return PagePoolStats{
 		MaxSize:  p.maxSize,
 		Created:  created,
 		Acquired: acquired,
 		Released: released,
+		Recycled: recycled,
 		Idle:     int64(len(p.pages)),
 		Busy:     acquired - released,
 		Total:    created,
@@ -198,6 +257,7 @@ type PagePoolStats struct {
 	Created  int64
 	Acquired int64
 	Released int64
+	Recycled int64 // pages destroyed due to reuse limit
 	Idle     int64
 	Busy     int64 // currently checked out (Acquired - Released)
 	Total    int64 // created and not destroyed

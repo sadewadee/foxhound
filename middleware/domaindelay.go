@@ -3,6 +3,8 @@ package middleware
 import (
 	"context"
 	"log/slog"
+	"math"
+	"math/rand/v2"
 	"net/url"
 	"sync"
 	"time"
@@ -17,7 +19,7 @@ type DomainDelayConfig struct {
 	DefaultDelay time.Duration
 	// PerDomain overrides the default delay for specific domains.
 	PerDomain map[string]time.Duration
-	// Randomize adds ±25% jitter to the delay to appear more human.
+	// Randomize adds log-normal jitter to the delay to appear more human.
 	Randomize bool
 }
 
@@ -98,10 +100,25 @@ func (d *domainDelayMiddleware) Wrap(next foxhound.Fetcher) foxhound.Fetcher {
 
 // delayFor returns the configured delay for the given domain.
 func (d *domainDelayMiddleware) delayFor(domain string) time.Duration {
+	base := d.defaultDelay
 	if delay, ok := d.perDomain[domain]; ok {
-		return delay
+		base = delay
 	}
-	return d.defaultDelay
+	if d.randomize {
+		// Log-normal jitter centered on 1.0 with sigma=0.3 gives CV ~0.31,
+		// closer to real human inter-request time variance than uniform ±25%.
+		// The result scales the base delay by a factor with mode ~0.96, mean ~1.05.
+		factor := math.Exp(rand.NormFloat64() * 0.3)
+		// Clamp to [0.5, 2.5] to prevent extreme outliers
+		if factor < 0.5 {
+			factor = 0.5
+		}
+		if factor > 2.5 {
+			factor = 2.5
+		}
+		base = time.Duration(float64(base) * factor)
+	}
+	return base
 }
 
 // extractDomain gets the domain from the job, preferring the Domain field.

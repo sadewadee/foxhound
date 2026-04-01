@@ -123,21 +123,24 @@ func WithPersistSession(persist bool) CamoufoxOption {
 // Stub build (!playwright tag): Fetch always returns errPlaywrightNotConfigured.
 // Real build  ( playwright tag): see camoufox_playwright.go.
 type CamoufoxFetcher struct {
-	identity       *identity.Profile
-	blockImages    bool
-	headless       string
-	timeout        time.Duration
-	proxyURL       string // SOCKS5 or HTTP proxy URL
-	extensionPath  string // path to Firefox extension dir (e.g. NopeCHA)
-	maxRequests    int    // restart browser after this many requests (0 = disabled)
-	persistSession bool   // reuse BrowserContext across requests when true
-	initScript     string // JS injected into every new page via AddInitScript
-	userDataDir    string // persistent profile dir; triggers LaunchPersistentContext
+	identity        *identity.Profile
+	blockImages     bool
+	headless        string
+	timeout         time.Duration
+	proxyURL        string           // SOCKS5 or HTTP proxy URL
+	extensionPath   string           // path to Firefox extension dir (e.g. NopeCHA)
+	maxRequests     int              // restart browser after this many requests (0 = disabled)
+	persistSession  bool             // reuse BrowserContext across requests when true
+	initScript      string           // JS injected into every new page via AddInitScript
+	userDataDir     string           // persistent profile dir; triggers LaunchPersistentContext
 	cdpURL          string           // connect to an existing browser via CDP instead of launching
 	useRealChrome   bool             // use pw.Chromium with channel=chrome instead of Firefox
 	capturePatterns []*regexp.Regexp // URL patterns for XHR/fetch response capture
 	poolSize        int              // max pooled pages (0 = disabled)
-	cookies        []BrowserCookie  // cookies to inject into browser context before navigation
+	pageReuseLimit  int              // max reuses per pooled page (0 = unlimited)
+	cookies         []BrowserCookie  // cookies to inject into browser context before navigation
+	nopechaHasKey   bool             // true when NopeCHA extension has an API key configured
+	tempDirs        []string         // temp directories to clean up on Close/restart
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -210,6 +213,17 @@ func WithRealChrome(use bool) CamoufoxOption {
 func WithPoolSize(n int) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.poolSize = n
+	}
+}
+
+// WithPageReuseLimit sets the maximum number of requests a pooled page handles
+// before being destroyed and replaced. This prevents long-lived pages from
+// accumulating state that increases detection risk. Default 0 means unlimited.
+// Recommended: 50-200 for anti-detection scraping.
+// In the stub build this stores the value but has no effect.
+func WithPageReuseLimit(n int) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.pageReuseLimit = n
 	}
 }
 
