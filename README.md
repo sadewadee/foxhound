@@ -47,58 +47,124 @@ High-performance Go scraping framework with native Camoufox anti-detection, dual
 ```bash
 git clone https://github.com/sadewadee/foxhound.git
 cd foxhound
-go build -o foxhound ./cmd/foxhound/
+go build -tags playwright -o foxhound ./cmd/foxhound/
 foxhound init myproject && cd myproject
 go mod tidy
-foxhound run --config config.yaml          # default: headed mode
-foxhound run --config config.yaml --headless  # headless Camoufox
+foxhound run --config config.yaml
 ```
 
-Scrape books.toscrape.com in under 20 lines:
+### Google Maps — Scroll feed, collect businesses, extract contacts
 
 ```go
+// Generate a consistent identity (UA + TLS + headers + OS all match)
+id := identity.Generate(identity.WithBrowser(identity.BrowserFirefox))
+profile := behavior.CarefulProfile().Jitter() // ±15% per-session parameter variance
+
+browser, _ := fetch.NewCamoufox(
+    fetch.WithBrowserIdentity(id),
+    fetch.WithBehaviorProfile(profile),
+    fetch.WithStorageState("session.json"), // persist session across runs
+)
+defer browser.Close()
+
+// SmartFetcher with Bayesian domain learning — auto-escalates to browser when blocked
+scorer := fetch.NewDomainScorer(fetch.SocialMediaScoreConfig())
+smart := fetch.NewSmart(static, browser, fetch.WithDomainScorer(scorer))
+
+// Trail: search → scroll feed → collect all business URLs
+trail := engine.NewTrail("maps-search").
+    Navigate("https://www.google.com/maps").
+    Fill("input#searchboxinput", "restaurant in bali").
+    Click("button#searchbox-searchbutton").
+    WaitOptional("div[role='feed']", 10*time.Second).
+    InfiniteScrollInUntil("div[role='feed']", "div.Nv2PK", 50, 200).
+    Evaluate(`() => document.querySelectorAll('.Nv2PK').length`)
+
 h := engine.NewHunt(engine.HuntConfig{
-    Name:    "books",
-    Domain:  "books.toscrape.com",
-    Walkers: 3,
-    Fetcher: fetch.NewStealth(fetch.WithIdentity(identity.Generate())),
-    Queue:   queue.NewMemoryQueue(),
+    Name:            "maps",
+    Walkers:         3,
+    Seeds:           trail.ToJobs(),
+    Fetcher:         middleware.Chain(
+        middleware.NewCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
+        middleware.NewAutoThrottle(middleware.AutoThrottleConfig{
+            TargetConcurrency: 1, MinDelay: 2 * time.Second, MaxDelay: 15 * time.Second,
+        }),
+    ).Wrap(smart),
+    Queue:           queue.NewReliable(queue.NewMemory(1000), queue.DefaultReliableConfig()),
+    BehaviorProfile: profile,
     Processor: foxhound.ProcessorFunc(func(ctx context.Context, resp *foxhound.Response) (*foxhound.Result, error) {
-        doc, _ := parse.NewDocument(resp)
+        // Auto-detect page type and extract accordingly
+        result, _ := parse.AutoExtract(resp)
+        if result.Type == parse.ContentListing {
+            var items []*foxhound.Item
+            for _, l := range result.Listings {
+                items = append(items, l.AsItem())
+            }
+            return &foxhound.Result{Items: items}, nil
+        }
+        // Fallback: extract contacts from business website
         item := foxhound.NewItem()
-        item.Set("title", doc.Text("h1"))
+        item.Set("url", resp.URL)
+        item.Set("emails", parse.ExtractEmails(resp))
+        item.Set("phones", parse.ExtractPhones(resp))
         return &foxhound.Result{Items: []*foxhound.Item{item}}, nil
     }),
-    Seeds: []*foxhound.Job{{URL: "http://books.toscrape.com/", FetchMode: foxhound.FetchStatic}},
+    Writers: []foxhound.Writer{jsonlWriter},
 })
 h.Run(context.Background())
 ```
 
-### Trail API — Fill + Infinite Scroll
+### Trail API — Login + Search + Infinite Scroll + JS Extract
 
 ```go
-trail := engine.NewTrail(fetcher).
-    Navigate("https://example.com/search").
-    Fill("input[name=q]", "foxhound scraper").
-    Click("button[type=submit]").
-    WaitFor(".results").
-    InfiniteScrollUntil(".results-container", func(count int) bool {
-        return count >= 100 // stop after 100 items loaded
-    }).
-    Evaluate(`document.querySelectorAll(".item").length`). // custom JS
-    Extract(".result-item", map[string]string{
-        "title": "h3::text",
-        "url":   "a::attr(href)",
-    })
+// Login trail (reusable across sessions with WithStorageState)
+login := engine.Login("ig-login",
+    "https://www.instagram.com/accounts/login/",
+    "input[name='username']", "input[name='password']", "button[type='submit']",
+    os.Getenv("IG_USER"), os.Getenv("IG_PASS"),
+)
 
-items, err := trail.Run(ctx)
+// Feed scraping trail
+feed := engine.NewTrail("ig-feed").
+    Navigate("https://www.instagram.com/explore/").
+    WaitOptional("article", 10*time.Second).
+    InfiniteScrollUntil("article", 100, 500).
+    Evaluate(`() => {
+        const posts = document.querySelectorAll('a[href*="/p/"]');
+        return Array.from(posts).map(a => a.href);
+    }`)
+```
+
+### Auto-Detection — Let foxhound figure out the page type
+
+```go
+result, _ := parse.AutoExtract(resp)
+switch result.Type {
+case parse.ContentArticle:
+    fmt.Println(result.Article.Title, result.Article.WordCount, "words")
+case parse.ContentListing:
+    for _, listing := range result.Listings {
+        fmt.Println(listing.Name, listing.Phone, listing.Rating)
+    }
+case parse.ContentProduct:
+    fmt.Println("Product page detected")
+}
+
+// Extract preloaded JS data (Next.js, Nuxt, Redux, Apollo)
+data, _ := parse.ExtractPreloadedData(resp)
+fmt.Println("Framework:", data.Framework) // "nextjs", "nuxt", "react"...
+
+// Detect pagination and follow next pages
+links := parse.DetectPagination(resp) // multi-signal scoring (50pt threshold)
+for _, link := range links {
+    fmt.Println(link.Direction, link.URL, "score:", link.Score)
+}
 ```
 
 ## Real Scraping Results
 
 | Target | Mode | Items | Block Avoidance | Notes |
 |--------|------|-------|-----------------|-------|
-| books.toscrape.com | Static | **1,000 books** | 100% | 50 pages, 15s, 0 blocks |
 | Google Maps (10 queries) | Camoufox + proxy | **100 places** | 100% | 1,297 items/hour, 0 CAPTCHAs |
 | Alibaba (yoga mat) | Camoufox + proxy | **10 products** | 100% | Prices + suppliers extracted |
 | bot.sannysoft.com | Camoufox | 29/30 PASS | — | webdriver NOT detected |
