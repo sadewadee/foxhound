@@ -22,8 +22,12 @@ package fetch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"regexp"
 	"time"
 
@@ -45,6 +49,19 @@ type BrowserCookie struct {
 	Path     string
 	Secure   bool
 	HttpOnly bool
+}
+
+// StorageState represents the full browser session state (cookies + localStorage + sessionStorage).
+type StorageState struct {
+	Cookies    []BrowserCookie `json:"cookies"`
+	Origins    []OriginStorage `json:"origins"`
+	ExportedAt time.Time       `json:"exported_at"`
+}
+
+// OriginStorage represents localStorage/sessionStorage for a single origin.
+type OriginStorage struct {
+	Origin       string            `json:"origin"`
+	LocalStorage map[string]string `json:"local_storage"`
 }
 
 // CamoufoxOption is a functional option for configuring a CamoufoxFetcher.
@@ -138,9 +155,10 @@ type CamoufoxFetcher struct {
 	capturePatterns []*regexp.Regexp // URL patterns for XHR/fetch response capture
 	poolSize        int              // max pooled pages (0 = disabled)
 	pageReuseLimit  int              // max reuses per pooled page (0 = unlimited)
-	cookies         []BrowserCookie  // cookies to inject into browser context before navigation
-	nopechaHasKey   bool             // true when NopeCHA extension has an API key configured
-	tempDirs        []string         // temp directories to clean up on Close/restart
+	cookies          []BrowserCookie  // cookies to inject into browser context before navigation
+	nopechaHasKey    bool             // true when NopeCHA extension has an API key configured
+	tempDirs         []string         // temp directories to clean up on Close/restart
+	storageStatePath string           // path to load/save storage state JSON
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -227,6 +245,14 @@ func WithPageReuseLimit(n int) CamoufoxOption {
 	}
 }
 
+// WithStorageState sets a file path for session state persistence.
+// In the stub build this stores the value but has no effect.
+func WithStorageState(path string) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.storageStatePath = path
+	}
+}
+
 // NewCamoufox creates a CamoufoxFetcher. In the stub build no browser is
 // launched; the constructor stores the configuration and returns immediately.
 func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
@@ -262,3 +288,49 @@ func (f *CamoufoxFetcher) detectCloudflare(_ interface{}) string { return "" }
 
 // handleCloudflare is a no-op stub. Real implementation is in camoufox_playwright.go.
 func (f *CamoufoxFetcher) handleCloudflare(_ interface{}) bool { return false }
+
+// ExportStorageState is a stub; always returns an error in the non-playwright build.
+func (f *CamoufoxFetcher) ExportStorageState() (*StorageState, error) {
+	return nil, errPlaywrightNotConfigured
+}
+
+// SaveStorageState exports and saves the session state to the configured file path.
+// In the stub build, this falls back to saving the in-memory cookie list.
+func (f *CamoufoxFetcher) SaveStorageState() error {
+	if f.storageStatePath == "" {
+		return nil
+	}
+	state := &StorageState{
+		Cookies:    f.cookies,
+		ExportedAt: time.Now(),
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("fetch/camoufox: marshal storage state: %w", err)
+	}
+	dir := filepath.Dir(f.storageStatePath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("fetch/camoufox: create storage state dir: %w", err)
+	}
+	return os.WriteFile(f.storageStatePath, data, 0o644)
+}
+
+// LoadStorageState reads saved state from the configured file path.
+// Returns (nil, nil) when no path is set or the file does not exist yet.
+func (f *CamoufoxFetcher) LoadStorageState() (*StorageState, error) {
+	if f.storageStatePath == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(f.storageStatePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("fetch/camoufox: read storage state: %w", err)
+	}
+	var state StorageState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("fetch/camoufox: parse storage state: %w", err)
+	}
+	return &state, nil
+}

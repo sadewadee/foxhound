@@ -35,8 +35,8 @@ func TestExtractEmails_RealAddresses(t *testing.T) {
 		name  string
 		email string
 	}{
-		{"simple", "info@example.com"},
-		{"subdomain", "support@mail.example.org"},
+		{"simple", "info@acmecorp.com"},
+		{"subdomain", "support@mail.acmecorp.org"},
 		{"plus-tag", "user.name+tag@domain.co.uk"},
 		{"hyphen-domain", "hello@my-company.io"},
 	}
@@ -54,10 +54,10 @@ func TestExtractEmails_RealAddresses(t *testing.T) {
 
 // TestExtractEmails_MailtoLink verifies that mailto: hrefs are extracted.
 func TestExtractEmails_MailtoLink(t *testing.T) {
-	html := `<html><body><a href="mailto:contact@example.com">Email us</a></body></html>`
+	html := `<html><body><a href="mailto:contact@acmecorp.com">Email us</a></body></html>`
 	resp := makeResp(html)
 	got := parse.ExtractEmails(resp)
-	if !containsStr(got, "contact@example.com") {
+	if !containsStr(got, "contact@acmecorp.com") {
 		t.Errorf("mailto link not extracted, got %v", got)
 	}
 }
@@ -140,19 +140,19 @@ func TestExtractEmails_DigitsOnlyLocalRejected(t *testing.T) {
 // TestExtractEmails_DeduplicatesCaseInsensitive checks that duplicates are collapsed.
 func TestExtractEmails_DeduplicatesCaseInsensitive(t *testing.T) {
 	html := `<html><body>
-		<p>INFO@Example.COM</p>
-		<p>info@example.com</p>
+		<p>INFO@Acmecorp.COM</p>
+		<p>info@acmecorp.com</p>
 	</body></html>`
 	resp := makeResp(html)
 	got := parse.ExtractEmails(resp)
 	count := 0
 	for _, v := range got {
-		if v == "info@example.com" {
+		if v == "info@acmecorp.com" {
 			count++
 		}
 	}
 	if count != 1 {
-		t.Errorf("expected exactly 1 occurrence of info@example.com, got %d (all: %v)", count, got)
+		t.Errorf("expected exactly 1 occurrence of info@acmecorp.com, got %d (all: %v)", count, got)
 	}
 }
 
@@ -258,5 +258,117 @@ func TestExtractPhones_DeduplicatesNumbers(t *testing.T) {
 	got := parse.ExtractPhones(resp)
 	if len(got) > 1 {
 		t.Errorf("expected dedup to produce 1 result, got %d: %v", len(got), got)
+	}
+}
+
+// ─── Issue #33: False positive fixes ─────────────────────────────────────────
+
+// TestExtractEmails_AvifIcoImageRejected ensures .avif and .ico image filenames are filtered.
+func TestExtractEmails_AvifIcoImageRejected(t *testing.T) {
+	cases := []string{
+		"photo@hd.avif",
+		"favicon@2x.ico",
+	}
+	for _, fake := range cases {
+		t.Run(fake, func(t *testing.T) {
+			html := `<html><body><p>` + fake + `</p></body></html>`
+			resp := makeResp(html)
+			got := parse.ExtractEmails(resp)
+			if containsStr(got, fake) {
+				t.Errorf("image filename %q should have been rejected, got %v", fake, got)
+			}
+		})
+	}
+}
+
+// TestExtractEmails_NoReplyRejected ensures noreply/no-reply addresses are filtered.
+func TestExtractEmails_NoReplyRejected(t *testing.T) {
+	cases := []string{
+		"noreply@company.com",
+		"no-reply@company.com",
+		"donotreply@company.com",
+		"mailer-daemon@company.com",
+	}
+	for _, fake := range cases {
+		t.Run(fake, func(t *testing.T) {
+			html := `<html><body><p>` + fake + `</p></body></html>`
+			resp := makeResp(html)
+			got := parse.ExtractEmails(resp)
+			if containsStr(got, fake) {
+				t.Errorf("no-reply address %q should have been rejected, got %v", fake, got)
+			}
+		})
+	}
+}
+
+// TestExtractEmails_ReservedDomainRejected ensures RFC 2606 reserved domains are filtered.
+func TestExtractEmails_ReservedDomainRejected(t *testing.T) {
+	cases := []string{
+		"test@example.com",
+		"user@example.org",
+		"admin@example.net",
+		"foo@test.com",
+	}
+	for _, fake := range cases {
+		t.Run(fake, func(t *testing.T) {
+			html := `<html><body><p>` + fake + `</p></body></html>`
+			resp := makeResp(html)
+			got := parse.ExtractEmails(resp)
+			if containsStr(got, fake) {
+				t.Errorf("reserved domain address %q should have been rejected, got %v", fake, got)
+			}
+		})
+	}
+}
+
+// TestExtractPhones_IPAddressRejected ensures IP-address-like strings are not treated as phones.
+func TestExtractPhones_IPAddressRejected(t *testing.T) {
+	html := `<html><body><p>192.168.1.100</p></body></html>`
+	resp := makeResp(html)
+	got := parse.ExtractPhones(resp)
+	for _, v := range got {
+		cleaned := strings.Map(func(r rune) rune {
+			if r >= '0' && r <= '9' {
+				return r
+			}
+			return -1
+		}, v)
+		if cleaned == "1921681100" {
+			t.Errorf("IP address %q should have been rejected, got %v", v, got)
+		}
+	}
+}
+
+// TestExtractPhones_VersionNumberRejected ensures version strings are not treated as phones.
+func TestExtractPhones_VersionNumberRejected(t *testing.T) {
+	html := `<html><body><p>2024.01.15</p></body></html>`
+	resp := makeResp(html)
+	got := parse.ExtractPhones(resp)
+	for _, v := range got {
+		if strings.Contains(v, "2024") && strings.Contains(v, "01") && strings.Contains(v, "15") {
+			t.Errorf("version number %q should have been rejected, got %v", v, got)
+		}
+	}
+}
+
+// TestExtractPhones_DescendingSequentialRejected ensures descending runs like 9876543210 are filtered.
+func TestExtractPhones_DescendingSequentialRejected(t *testing.T) {
+	html := `<html><body><p>9876543210</p></body></html>`
+	resp := makeResp(html)
+	got := parse.ExtractPhones(resp)
+	if containsStr(got, "9876543210") {
+		t.Errorf("descending sequential digits %q should have been rejected, got %v", "9876543210", got)
+	}
+}
+
+// TestExtractPhones_CSSDimensionRejected ensures CSS dimension values are not treated as phones.
+func TestExtractPhones_CSSDimensionRejected(t *testing.T) {
+	html := `<html><body><p>width: 1920px height: 1080px</p></body></html>`
+	resp := makeResp(html)
+	got := parse.ExtractPhones(resp)
+	for _, v := range got {
+		if strings.Contains(v, "1920") || strings.Contains(v, "1080") {
+			t.Errorf("CSS dimension %q should have been rejected, got %v", v, got)
+		}
 	}
 }
