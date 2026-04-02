@@ -2,6 +2,7 @@ package monitor_test
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,12 +22,21 @@ func (m *mockSource) Snapshot() monitor.StatsSnapshot {
 // mockSink implements StatsSink and counts Record calls.
 type mockSink struct {
 	calls atomic.Int64
+	mu    sync.Mutex
 	last  monitor.StatsSnapshot
 }
 
 func (m *mockSink) Record(s monitor.StatsSnapshot) {
 	m.calls.Add(1)
+	m.mu.Lock()
 	m.last = s
+	m.mu.Unlock()
+}
+
+func (m *mockSink) Last() monitor.StatsSnapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.last
 }
 
 func TestStatsCollector_CallsRecordOnSinks(t *testing.T) {
@@ -51,11 +61,12 @@ func TestStatsCollector_CallsRecordOnSinks(t *testing.T) {
 	if sink.calls.Load() == 0 {
 		t.Fatal("Expected sink.Record to be called at least once")
 	}
-	if sink.last.Requests != 42 {
-		t.Errorf("Expected Requests=42 in snapshot, got %d", sink.last.Requests)
+	last := sink.Last()
+	if last.Requests != 42 {
+		t.Errorf("Expected Requests=42 in snapshot, got %d", last.Requests)
 	}
-	if sink.last.Items != 100 {
-		t.Errorf("Expected Items=100 in snapshot, got %d", sink.last.Items)
+	if last.Items != 100 {
+		t.Errorf("Expected Items=100 in snapshot, got %d", last.Items)
 	}
 }
 
