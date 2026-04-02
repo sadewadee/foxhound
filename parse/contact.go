@@ -16,14 +16,23 @@ var (
 
 // imageExtensions are file extensions that indicate an email-like string is
 // actually an image filename (e.g. logo@2x.png).
-var imageExtensions = []string{".png", ".jpg", ".jpeg", ".gif", ".svg", ".js", ".css", ".webp"}
+var imageExtensions = []string{".png", ".jpg", ".jpeg", ".gif", ".svg", ".js", ".css", ".webp", ".avif", ".bmp", ".tiff", ".ico"}
 
 // spamDomains are infrastructure/CDN domains whose addresses should not be
 // returned as contact emails.
 var spamDomains = []string{
 	"sentry.io", "wixpress.com", "cloudflare.com",
 	"gstatic.com", "googleapis.com", "w3.org",
+	"fontawesome.com", "jquery.com", "bootstrapcdn.com",
+	"unpkg.com", "cdnjs.cloudflare.com", "github.com",
+	"githubusercontent.com",
 }
+
+// noReplyPrefixes are local-part prefixes that indicate automated/no-reply addresses.
+var noReplyPrefixes = []string{"noreply@", "no-reply@", "donotreply@", "mailer-daemon@"}
+
+// reservedDomains are RFC 2606 reserved domains and common test domains.
+var reservedDomains = []string{"example.com", "example.org", "example.net", "test.com"}
 
 // isLikelyEmail returns false for strings that match the email regex but are
 // clearly not real contact addresses.
@@ -42,6 +51,13 @@ func isLikelyEmail(email string) bool {
 		}
 	}
 
+	// Reject no-reply/automated addresses.
+	for _, prefix := range noReplyPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return false
+		}
+	}
+
 	// Reject known infrastructure/CDN domains.
 	atIdx := strings.LastIndex(lower, "@")
 	if atIdx < 0 {
@@ -50,6 +66,13 @@ func isLikelyEmail(email string) bool {
 	domain := lower[atIdx+1:]
 	for _, d := range spamDomains {
 		if domain == d || strings.HasSuffix(domain, "."+d) {
+			return false
+		}
+	}
+
+	// Reject RFC 2606 reserved domains and common test domains.
+	for _, d := range reservedDomains {
+		if domain == d {
 			return false
 		}
 	}
@@ -70,8 +93,16 @@ func isLikelyEmail(email string) bool {
 	return true
 }
 
+// Regex patterns for phone false-positive detection.
+var (
+	ipAddrRe    = regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$`)
+	versionRe   = regexp.MustCompile(`\d+\.\d+\.\d+`)
+	cssDimRe    = regexp.MustCompile(`\d+(?:px|em|rem|%)`)
+)
+
 // isLikelyPhone returns false for digit strings that are clearly not real phone
-// numbers (all-same digits, sequential runs, suspicious prefixes).
+// numbers (all-same digits, sequential runs, suspicious prefixes, IP addresses,
+// version numbers, and CSS dimensions).
 func isLikelyPhone(cleaned string) bool {
 	// Strip leading '+' for pattern checks.
 	digits := strings.TrimPrefix(cleaned, "+")
@@ -91,20 +122,55 @@ func isLikelyPhone(cleaned string) bool {
 		return false
 	}
 
-	// Reject sequential digit runs (e.g. 1234567890, 0123456789).
-	sequential := true
+	// Reject ascending sequential digit runs (e.g. 1234567890, 0123456789).
+	ascending := true
 	for i := 1; i < len(digits); i++ {
 		if digits[i] != digits[i-1]+1 {
-			sequential = false
+			ascending = false
 			break
 		}
 	}
-	if sequential {
+	if ascending {
+		return false
+	}
+
+	// Reject descending sequential digit runs (e.g. 9876543210).
+	descending := true
+	for i := 1; i < len(digits); i++ {
+		if digits[i-1] != digits[i]+1 {
+			descending = false
+			break
+		}
+	}
+	if descending {
 		return false
 	}
 
 	// Reject numbers starting with suspicious prefixes.
 	if strings.HasPrefix(digits, "0000") || strings.HasPrefix(digits, "9999") {
+		return false
+	}
+
+	return true
+}
+
+// isLikelyPhoneRaw checks the raw (unstripped) candidate for patterns that
+// indicate the string is not a real phone number. Called before digit stripping.
+func isLikelyPhoneRaw(raw string) bool {
+	// Reject IP addresses (e.g. 192.168.1.100).
+	if ipAddrRe.MatchString(raw) {
+		return false
+	}
+
+	// Reject version numbers (e.g. 2024.01.15, v1.2.3).
+	stripped := strings.TrimPrefix(raw, "v")
+	stripped = strings.TrimPrefix(stripped, "V")
+	if versionRe.MatchString(stripped) {
+		return false
+	}
+
+	// Reject CSS dimensions (e.g. 100px, 1.5em, 2rem, 50%).
+	if cssDimRe.MatchString(raw) {
 		return false
 	}
 
@@ -203,6 +269,9 @@ func ExtractPhones(resp *foxhound.Response) []string {
 	if err != nil {
 		var raw []string
 		for _, m := range phoneRe.FindAllString(string(resp.Body), -1) {
+			if !isLikelyPhoneRaw(m) {
+				continue
+			}
 			cleaned := strings.Map(func(r rune) rune {
 				if r >= '0' && r <= '9' || r == '+' {
 					return r
@@ -222,6 +291,10 @@ func ExtractPhones(resp *foxhound.Response) []string {
 	// addPhone adds a candidate phone number. skipPatternCheck bypasses
 	// isLikelyPhone for high-confidence sources such as tel: links.
 	addPhone := func(p string, skipPatternCheck bool) {
+		// Check raw string patterns before stripping (IP, version, CSS dims).
+		if !skipPatternCheck && !isLikelyPhoneRaw(p) {
+			return
+		}
 		// Strip non-digit, non-plus characters for dedup key and length check.
 		cleaned := strings.Map(func(r rune) rune {
 			if r >= '0' && r <= '9' || r == '+' {

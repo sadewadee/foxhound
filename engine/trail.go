@@ -94,6 +94,19 @@ func NewTrail(name string) *Trail {
 	return &Trail{Name: name}
 }
 
+// Login builds a login trail that navigates to the login page, fills
+// credentials, and submits the form. The returned trail can be further
+// chained with additional steps (e.g. WaitOptional for a post-login element).
+func Login(name, loginURL, userSelector, passSelector, submitSelector, username, password string) *Trail {
+	return NewTrail(name).
+		Navigate(loginURL).
+		WaitOptional("body", 5*time.Second).
+		Fill(userSelector, username).
+		Fill(passSelector, password).
+		Click(submitSelector).
+		WaitOptional("body", 10*time.Second)
+}
+
 // NoWarmup disables the automatic homepage warm-up visit that ToJobs()
 // prepends by default. Use this when speed is more important than stealth,
 // or when the trail already starts at the homepage.

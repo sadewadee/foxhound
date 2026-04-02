@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	foxhound "github.com/sadewadee/foxhound"
 )
@@ -26,12 +27,14 @@ type PersistentCookies struct {
 
 // storedCookie is the JSON-serializable form of a cookie.
 type storedCookie struct {
-	Name     string `json:"name"`
-	Value    string `json:"value"`
-	Domain   string `json:"domain"`
-	Path     string `json:"path"`
-	Secure   bool   `json:"secure"`
-	HttpOnly bool   `json:"http_only"`
+	Name     string    `json:"name"`
+	Value    string    `json:"value"`
+	Domain   string    `json:"domain"`
+	Path     string    `json:"path"`
+	Secure   bool      `json:"secure"`
+	HttpOnly bool      `json:"http_only"`
+	Expires  time.Time `json:"expires,omitempty"`
+	MaxAge   int       `json:"max_age,omitempty"`
 }
 
 // storedEntry groups cookies by origin URL for serialisation.
@@ -58,13 +61,20 @@ func NewPersistentCookies(filePath string) (*PersistentCookies, error) {
 // Wrap implements foxhound.Middleware.
 func (pc *PersistentCookies) Wrap(next foxhound.Fetcher) foxhound.Fetcher {
 	return foxhound.FetcherFunc(func(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
+		// Clone the job so we never mutate the caller's struct. This is
+		// important when retry middleware re-uses the same Job pointer across
+		// multiple attempts: mutating shared headers causes a data race.
+		clonedJob := *job
+		clonedJob.Headers = job.Headers.Clone()
+		if clonedJob.Headers == nil {
+			clonedJob.Headers = make(http.Header)
+		}
+		job = &clonedJob
+
 		// Inject cookies into job headers.
 		u, _ := url.Parse(job.URL)
 		if u != nil {
 			cookies := pc.jar.Cookies(u)
-			if len(cookies) > 0 && job.Headers == nil {
-				job.Headers = make(http.Header)
-			}
 			for _, c := range cookies {
 				job.Headers.Add("Cookie", c.String())
 			}
@@ -112,6 +122,8 @@ func (pc *PersistentCookies) Save() error {
 				Path:     c.Path,
 				Secure:   c.Secure,
 				HttpOnly: c.HttpOnly,
+				Expires:  c.Expires,
+				MaxAge:   c.MaxAge,
 			})
 		}
 		entries = append(entries, storedEntry{URL: rawURL, Cookies: sc})
@@ -161,6 +173,8 @@ func (pc *PersistentCookies) Load() error {
 				Path:     sc.Path,
 				Secure:   sc.Secure,
 				HttpOnly: sc.HttpOnly,
+				Expires:  sc.Expires,
+				MaxAge:   sc.MaxAge,
 			})
 		}
 		pc.jar.SetCookies(u, cookies)
