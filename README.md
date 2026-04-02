@@ -6,7 +6,7 @@
   <strong>Go Scraping Framework with Native Camoufox Anti-Detection</strong>
 </p>
 
-# Foxhound v0.0.7
+# Foxhound v0.0.8
 
 High-performance Go scraping framework with native Camoufox anti-detection, dual-mode fetching, and 13-layer middleware.
 
@@ -19,6 +19,7 @@ High-performance Go scraping framework with native Camoufox anti-detection, dual
 - **Structured data extraction**: JSON-LD, OpenGraph, NextData, NuxtData extractors + contact deobfuscation (CloudFlare cfemail)
 - **NopeCHA auto-download**: CAPTCHA-solving extension fetched and configured automatically at runtime
 - **9 export formats**: JSON, JSONL, CSV, Markdown, Text, XML, SQLite, PostgreSQL, Webhook
+- **Parsing engine**: HTML table extraction (colspan/rowspan), JS preloaded data (Next.js/Nuxt/Redux), directory listings (JSON-LD/Microdata/DOM), pagination detection, and auto-detection with Readability-style article scoring
 - **Adaptive parsing**: CSS pseudo-selectors (`::text`, `::attr`), similarity matching, auto-selector generation + sitemap/RSS/Atom parsing
 - **Streaming API**: `Hunt.Stream(ctx)` for real-time item processing via Go channels
 - **Checkpoint/resume**: auto-save hunt state every N items
@@ -143,6 +144,7 @@ go test -bench=. -benchmem ./benchmarks/
 | [docs/cli.md](docs/cli.md) | All CLI commands and flags |
 | [docs/api.md](docs/api.md) | Go types, interfaces, Hunt/Stream API |
 | [docs/anti-detection.md](docs/anti-detection.md) | Identity system, TLS, behavior simulation |
+| [docs/parsing.md](docs/parsing.md) | Table, preload, directory, pagination, auto-detection parsers |
 | [docs/middleware.md](docs/middleware.md) | All 13 middleware, chain order |
 | [docs/pipeline.md](docs/pipeline.md) | Pipeline stages and all 9 export formats |
 | [docs/proxy.md](docs/proxy.md) | Proxy pool, rotation, providers, geo matching |
