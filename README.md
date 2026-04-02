@@ -172,33 +172,47 @@ for _, link := range links {
 
 ## Benchmarks
 
-### CSS Selection — 5,000 elements (Apple M1)
+Measured on **hachibi** (AMD Ryzen 7 5700G, Docker container, 2 cores / 4GB RAM, Ubuntu 24.04).
+
+### CSS Selection — 5,000 elements
 
 | Library | Language | Time | vs Foxhound |
 |---------|----------|------|-------------|
-| **Foxhound CSS** | Go | **8.6ms** | **1.0x** |
-| Raw goquery | Go | 8.8ms | 1.0x |
-| Raw lxml | Python/C | 195.8ms | 22.8x slower |
-| Python CSS (lxml-based) | Python/C | 205.0ms | 23.8x slower |
-| BeautifulSoup | Python | 245.6ms | 28.6x slower |
+| **Foxhound CSS** | Go | **13.6ms** | **1.0x** |
+| Raw goquery | Go | 13.0ms | 0.96x |
+| stdlib html | Go | 17.7ms | 1.3x slower |
+| Raw lxml | Python/C | 195.8ms | 14.4x slower |
+| BeautifulSoup | Python | 245.6ms | 18.1x slower |
 
-Go's runtime + goquery CSS engine significantly outperforms Python-based parsers on the same HTML.
+### Foxhound Internal Benchmarks (5,000 elements)
 
-### Foxhound Internal Benchmarks
+| Method | Time | Memory | Allocs | Notes |
+|--------|------|--------|--------|-------|
+| Foxhound CSS | 13.6ms | 6.5 MB | 100K | <1% overhead vs raw goquery |
+| Foxhound Adaptive | 17.3ms | 6.2 MB | 95K | Zero overhead when selector works |
+| Foxhound Schema | 31.3ms | 13.3 MB | 320K | 3 fields per item |
+| Foxhound TextExtract | 22.5ms | 10.0 MB | 270K | 3 fields per item |
+| FindByText | 24.6ms | 12.1 MB | 165K | Full DOM text search |
+| Regex extract | 6.7ms | 1.1 MB | 15K | Pattern matching on body |
+| Similarity score | **96ns** | **0 B** | **0** | Zero allocation |
+| Item.ToJSON | 1.2µs | 432 B | 10 | — |
+| Item.ToMarkdown | 716ns | 376 B | 8 | — |
 
-| Method | Time (5K) | Memory | Notes |
-|--------|-----------|--------|-------|
-| Foxhound CSS | 8.6ms | 6.5 MB | <1% overhead vs raw goquery |
-| Foxhound Adaptive | 8.4ms | 6.2 MB | Zero overhead when selector works |
-| Foxhound Schema | 16.2ms | 13.3 MB | 3 fields per item |
-| Foxhound TextExtract | 13.8ms | 10.0 MB | 3 fields per item |
-| Similarity score | **77ns** | 0 B | Zero allocation |
-| Item.ToJSON | 672ns | 432 B | — |
-| Item.ToMarkdown | 407ns | 376 B | — |
+### Scaling by Document Size
+
+| Benchmark | 1K elements | 5K elements | 10K elements | Scaling |
+|-----------|-------------|-------------|--------------|---------|
+| Foxhound CSS | 2.3ms | 13.6ms | 29.6ms | ~linear |
+| Regex extract | 1.5ms | 6.7ms | 15.7ms | ~linear |
+| stdlib html | 3.1ms | 17.7ms | 31.4ms | ~linear |
 
 ```bash
 # Run yourself
 go test -bench=. -benchmem ./benchmarks/
+
+# Run in Docker with resource limits
+docker run --cpus=2 --memory=4g foxhound-benchmark:latest \
+  go test -bench=. -benchmem ./benchmarks/
 ```
 
 ## Documentation

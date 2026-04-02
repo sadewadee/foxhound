@@ -5,13 +5,22 @@ import (
 	"time"
 )
 
+// avgFactorAt returns the average of n FactorAt calls to smooth per-call noise.
+func avgFactorAt(f *SessionFatigue, d time.Duration, n int) float64 {
+	var sum float64
+	for i := 0; i < n; i++ {
+		sum += f.FactorAt(d)
+	}
+	return sum / float64(n)
+}
+
 func TestFatigueWarmupSlowsEarlyActions(t *testing.T) {
 	f := NewSessionFatigue(DefaultFatigueConfig())
 	f.StartAt(time.Now())
 
-	factor := f.FactorAt(0)
+	factor := avgFactorAt(f, 0, 100)
 	if factor < 1.3 {
-		t.Fatalf("Expected warmup factor > 1.3 at t=0, got %f", factor)
+		t.Fatalf("Expected avg warmup factor > 1.3 at t=0, got %f", factor)
 	}
 }
 
@@ -19,9 +28,9 @@ func TestFatigueLateSessionSlows(t *testing.T) {
 	f := NewSessionFatigue(DefaultFatigueConfig())
 	f.StartAt(time.Now())
 
-	factor := f.FactorAt(30 * time.Minute)
+	factor := avgFactorAt(f, 30*time.Minute, 100)
 	if factor < 1.1 {
-		t.Fatalf("Expected fatigue factor > 1.1 at t=30min, got %f", factor)
+		t.Fatalf("Expected avg fatigue factor > 1.1 at t=30min, got %f", factor)
 	}
 }
 
@@ -29,15 +38,15 @@ func TestFatigueMiddleSessionIsFastest(t *testing.T) {
 	f := NewSessionFatigue(DefaultFatigueConfig())
 	f.StartAt(time.Now())
 
-	early := f.FactorAt(0)
-	cruise := f.FactorAt(5 * time.Minute)
-	late := f.FactorAt(30 * time.Minute)
+	early := avgFactorAt(f, 0, 100)
+	cruise := avgFactorAt(f, 5*time.Minute, 100)
+	late := avgFactorAt(f, 30*time.Minute, 100)
 
 	if cruise >= early {
-		t.Fatalf("Cruise factor (%f) should be less than early (%f)", cruise, early)
+		t.Fatalf("Avg cruise factor (%f) should be less than avg early (%f)", cruise, early)
 	}
 	if cruise >= late {
-		t.Fatalf("Cruise factor (%f) should be less than late (%f)", cruise, late)
+		t.Fatalf("Avg cruise factor (%f) should be less than avg late (%f)", cruise, late)
 	}
 }
 
@@ -53,10 +62,14 @@ func TestFatigueAdjustDelay(t *testing.T) {
 	f.StartAt(time.Now())
 
 	base := 1 * time.Second
-	adjusted := f.AdjustDelay(base)
-	// At t=0 warmup factor ~1.4, so adjusted should be > base
-	if adjusted <= base {
-		t.Fatalf("Expected adjusted delay > base at session start, got %v vs %v", adjusted, base)
+	// Average to smooth noise
+	var sum time.Duration
+	for i := 0; i < 50; i++ {
+		sum += f.AdjustDelay(base)
+	}
+	avg := sum / 50
+	if avg <= base {
+		t.Fatalf("Expected avg adjusted delay > base at session start, got %v vs %v", avg, base)
 	}
 }
 
@@ -70,7 +83,7 @@ func TestFatigueCarefulProfile(t *testing.T) {
 	f := NewSessionFatigue(cfg)
 	f.StartAt(time.Now())
 
-	factor := f.FactorAt(0)
+	factor := avgFactorAt(f, 0, 100)
 	if factor < 1.4 {
 		t.Fatalf("Careful profile should have higher warmup, got %f", factor)
 	}
