@@ -2,6 +2,22 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.9] — 2026-04-02
+
+### Added
+- **Storage state export/import** (`fetch/camoufox_playwright.go`): `WithStorageState(path)` saves/loads browser session to JSON. Auto-saves on Close, auto-loads on startup.
+- **Login trail helper** (`engine/trail.go`): `engine.Login()` convenience for building login flows
+- **Reliable queue** (`queue/reliable.go`): `ReliableQueue` wrapper with Ack/Nack/DLQ semantics, stale job recovery, `RetryDLQ()`
+- **Stats collector** (`monitor/collector.go`): `StatsCollector` bridges any `StatsSource` to sinks (Prometheus, logging, alerting)
+- **LogSink** for structured periodic stats logging
+
+### Fixed
+- PersistentCookies: added Expires/MaxAge fields, clone Job before mutation to prevent data races
+- Contact extraction (#33): email rejects .avif/.bmp/.tiff/.ico, no-reply addresses, RFC 2606 domains, infrastructure domains; phone rejects IP addresses, version numbers, CSS dimensions, descending sequences
+
+### Closed Issues
+#33
+
 ## [v0.0.8] — 2026-04-02
 
 ### Added
