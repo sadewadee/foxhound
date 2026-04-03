@@ -1468,22 +1468,7 @@ func (f *CamoufoxFetcher) handleRecaptcha(page playwright.Page) {
 				return
 			}
 
-			slog.Info("fetch/camoufox: reCAPTCHA checkbox clicked but not solved, waiting for solver extension...")
-			// Wait for solver extension (NopeCHA) to handle image challenge.
-			for wait := 0; wait < 30; wait++ {
-				time.Sleep(1 * time.Second)
-				checked2, _ := cb.GetAttribute("aria-checked")
-				if checked2 == "true" {
-					slog.Info("fetch/camoufox: reCAPTCHA SOLVED by extension!")
-					f.submitAfterCaptcha(page)
-					time.Sleep(2 * time.Second)
-					page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-						State: playwright.LoadStateNetworkidle,
-					})
-					return
-				}
-			}
-			slog.Warn("fetch/camoufox: reCAPTCHA image challenge not solved in time")
+			slog.Warn("fetch/camoufox: reCAPTCHA checkbox clicked but image challenge appeared — no extension loaded to solve it")
 			return
 		}
 	}
@@ -1612,21 +1597,7 @@ func (f *CamoufoxFetcher) handleHCaptcha(page playwright.Page) {
 				return
 			}
 
-			slog.Info("fetch/camoufox: hCaptcha checkbox clicked but not solved, waiting for solver extension...")
-			for wait := 0; wait < 30; wait++ {
-				time.Sleep(1 * time.Second)
-				checked2, _ := cb.GetAttribute("aria-checked")
-				if checked2 == "true" {
-					slog.Info("fetch/camoufox: hCaptcha SOLVED by extension!")
-					f.submitAfterCaptcha(page)
-					time.Sleep(2 * time.Second)
-					page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-						State: playwright.LoadStateNetworkidle,
-					})
-					return
-				}
-			}
-			slog.Warn("fetch/camoufox: hCaptcha image challenge not solved in time")
+			slog.Warn("fetch/camoufox: hCaptcha checkbox clicked but image challenge appeared — no extension loaded to solve it")
 			return
 		}
 	}
@@ -1643,25 +1614,9 @@ func (f *CamoufoxFetcher) waitForExtensionSolve(page playwright.Page) {
 		slog.Debug("fetch/camoufox: captcha extension disabled, skipping solve wait")
 		return
 	}
-	// Give page JS + extension time to init and start solving.
-	time.Sleep(5 * time.Second)
 
-	content, _ := page.Content()
-	lower := strings.ToLower(content)
-
-	// Detect what captcha type is on the page.
-	var captchaType string
-	switch {
-	case strings.Contains(lower, "challenges.cloudflare.com/turnstile") || strings.Contains(lower, "cf-turnstile"):
-		captchaType = "turnstile"
-	case strings.Contains(lower, "hcaptcha.com") || strings.Contains(lower, "h-captcha"):
-		captchaType = "hcaptcha"
-	case strings.Contains(lower, "google.com/recaptcha") || strings.Contains(lower, "g-recaptcha"):
-		captchaType = "recaptcha"
-	case strings.Contains(lower, "geetest.com") || strings.Contains(lower, "gt_captcha"):
-		captchaType = "geetest"
-	}
-
+	// Detect captcha FIRST — skip immediately when no captcha is present.
+	captchaType := f.detectCaptchaType(page)
 	if captchaType == "" {
 		return
 	}
@@ -1669,60 +1624,83 @@ func (f *CamoufoxFetcher) waitForExtensionSolve(page playwright.Page) {
 	slog.Info("fetch/camoufox: captcha detected, waiting for extension to solve",
 		"type", captchaType)
 
-	// Poll for solve completion — check every second for up to 15s.
-	for i := 0; i < 15; i++ {
-		time.Sleep(1 * time.Second)
+	// Give extension time to init and start solving now that we know there's work.
+	time.Sleep(3 * time.Second)
 
-		solved := false
-		switch captchaType {
-		case "turnstile":
-			// Turnstile solved when hidden input has a token value.
-			val, _ := page.Evaluate(`() => {
-				const inp = document.querySelector('input[name="cf-turnstile-response"]');
-				return inp && inp.value && inp.value.length > 10;
-			}`)
-			if b, ok := val.(bool); ok && b {
-				solved = true
-			}
-		case "recaptcha":
-			// reCAPTCHA solved when textarea#g-recaptcha-response has value.
-			val, _ := page.Evaluate(`() => {
-				const ta = document.querySelector('textarea[name="g-recaptcha-response"]');
-				return ta && ta.value && ta.value.length > 10;
-			}`)
-			if b, ok := val.(bool); ok && b {
-				solved = true
-			}
-		case "hcaptcha":
-			// hCaptcha solved when textarea[name="h-captcha-response"] has value.
-			val, _ := page.Evaluate(`() => {
-				const ta = document.querySelector('textarea[name="h-captcha-response"]');
-				return ta && ta.value && ta.value.length > 10;
-			}`)
-			if b, ok := val.(bool); ok && b {
-				solved = true
-			}
-		case "geetest":
-			// GeeTest solved when validate field is populated.
-			val, _ := page.Evaluate(`() => {
-				const inp = document.querySelector('input[name="geetest_validate"], .geetest_success');
-				return inp != null;
-			}`)
-			if b, ok := val.(bool); ok && b {
-				solved = true
-			}
-		}
-
-		if solved {
+	// Poll for solve completion — check-then-sleep to avoid trailing delay.
+	for i := 0; i < 20; i++ {
+		if f.isCaptchaSolved(page, captchaType) {
 			slog.Info("fetch/camoufox: extension solved captcha!",
 				"type", captchaType, "seconds", i+1)
 			f.submitAfterCaptcha(page)
 			time.Sleep(1 * time.Second)
 			return
 		}
+		time.Sleep(1 * time.Second)
 	}
 	slog.Warn("fetch/camoufox: extension did not solve captcha in time",
 		"type", captchaType)
+}
+
+// detectCaptchaType checks the page content for known captcha indicators.
+// Returns the captcha type string or "" if none detected.
+func (f *CamoufoxFetcher) detectCaptchaType(page playwright.Page) string {
+	content, err := page.Content()
+	if err != nil {
+		slog.Debug("fetch/camoufox: failed to get page content for captcha detection", "err", err)
+		return ""
+	}
+	lower := strings.ToLower(content)
+
+	switch {
+	case strings.Contains(lower, "challenges.cloudflare.com/turnstile") || strings.Contains(lower, "cf-turnstile"):
+		return "turnstile"
+	case strings.Contains(lower, "hcaptcha.com") || strings.Contains(lower, "h-captcha"):
+		return "hcaptcha"
+	case strings.Contains(lower, "google.com/recaptcha") || strings.Contains(lower, "g-recaptcha"):
+		return "recaptcha"
+	case strings.Contains(lower, "geetest.com") || strings.Contains(lower, "gt_captcha"):
+		return "geetest"
+	default:
+		return ""
+	}
+}
+
+// isCaptchaSolved checks whether the captcha of the given type has been solved
+// by verifying that a response token exists in the DOM.
+func (f *CamoufoxFetcher) isCaptchaSolved(page playwright.Page, captchaType string) bool {
+	var js string
+	switch captchaType {
+	case "turnstile":
+		js = `() => {
+			const inp = document.querySelector('input[name="cf-turnstile-response"]');
+			return inp && inp.value && inp.value.length > 10;
+		}`
+	case "recaptcha":
+		js = `() => {
+			const ta = document.querySelector('textarea[name="g-recaptcha-response"]');
+			return ta && ta.value && ta.value.length > 10;
+		}`
+	case "hcaptcha":
+		js = `() => {
+			const ta = document.querySelector('textarea[name="h-captcha-response"]');
+			return ta && ta.value && ta.value.length > 10;
+		}`
+	case "geetest":
+		js = `() => {
+			const inp = document.querySelector('input[name="geetest_validate"]');
+			return inp && inp.value && inp.value.length > 10;
+		}`
+	default:
+		return false
+	}
+	val, err := page.Evaluate(js)
+	if err != nil {
+		slog.Debug("fetch/camoufox: captcha solve check failed", "type", captchaType, "err", err)
+		return false
+	}
+	b, ok := val.(bool)
+	return ok && b
 }
 
 // detectCloudflare inspects the fully-loaded page content and returns the type
@@ -1780,13 +1758,10 @@ func (f *CamoufoxFetcher) detectCloudflare(page playwright.Page) string {
 //   - turnstile: locate the Turnstile iframe and click the checkbox; if not
 //     found, wait 5 s for managed auto-resolution.
 //   - under_attack: wait up to 15 s for the extended JS challenge to complete.
-func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page) bool {
-	cfType := f.detectCloudflare(page)
+func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page, cfType string) bool {
 	if cfType == "" {
 		return false
 	}
-
-	slog.Info("fetch/camoufox: Cloudflare challenge detected", "type", cfType)
 
 	switch cfType {
 	case "js_challenge":
@@ -2196,7 +2171,7 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 		}
 		slog.Info("fetch/camoufox: Cloudflare challenge detected",
 			"type", cfType, "attempt", cfAttempt+1, "url", job.URL)
-		if !f.handleCloudflare(page) {
+		if !f.handleCloudflare(page, cfType) {
 			slog.Warn("fetch/camoufox: Cloudflare handling did not resolve challenge",
 				"attempt", cfAttempt+1)
 			break
