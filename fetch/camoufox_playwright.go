@@ -198,7 +198,6 @@ type CamoufoxFetcher struct {
 	pool            *PagePool                  // page pool (non-nil when poolSize > 0 and !persistSession)
 	cookies          []BrowserCookie            // cookies to inject into browser context before navigation
 	behaviorProfile  *behavior.BehaviorProfile  // optional profile for scroll/keyboard configs
-	nopechaHasKey    bool                       // true when NopeCHA extension has an API key configured
 	tempDirs         []string                   // temp directories to clean up on Close/restart
 	storageStatePath string                     // path to load/save storage state JSON
 }
@@ -399,10 +398,6 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 		slog.Info("fetch/camoufox: addon injected via CAMOU_CONFIG",
 			"path", absExt)
 
-		// After extension is installed, check if NopeCHA has an API key.
-		if strings.Contains(f.extensionPath, "nopecha") {
-			f.nopechaHasKey = f.checkNopeCHAKey()
-		}
 	}
 
 	// --- Browser acquisition: CDP connect > persistent context > normal launch ---
@@ -1639,27 +1634,6 @@ func (f *CamoufoxFetcher) handleHCaptcha(page playwright.Page) {
 	slog.Warn("fetch/camoufox: hCaptcha found but could not locate clickable checkbox")
 }
 
-// checkNopeCHAKey checks if the NopeCHA extension has an API key configured.
-func (f *CamoufoxFetcher) checkNopeCHAKey() bool {
-	// Check manifest.json or config.json in the extension directory for API key.
-	configPaths := []string{
-		filepath.Join(f.extensionPath, "manifest.json"),
-		filepath.Join(f.extensionPath, "config.json"),
-	}
-	for _, path := range configPaths {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		// Look for non-empty key field.
-		content := string(data)
-		if strings.Contains(content, `"key"`) && !strings.Contains(content, `"key":""`) && !strings.Contains(content, `"key": ""`) {
-			return true
-		}
-	}
-	return false
-}
-
 // waitForExtensionSolve detects captcha type on the page and waits for the
 // solver extension (NopeCHA) to solve it. Used when extension is loaded —
 // no manual clicking needed, the extension handles everything.
@@ -1669,11 +1643,6 @@ func (f *CamoufoxFetcher) waitForExtensionSolve(page playwright.Page) {
 		slog.Debug("fetch/camoufox: captcha extension disabled, skipping solve wait")
 		return
 	}
-	if !f.nopechaHasKey {
-		slog.Debug("fetch/camoufox: NopeCHA has no API key, skipping extension solve wait")
-		return
-	}
-
 	// Give page JS + extension time to init and start solving.
 	time.Sleep(5 * time.Second)
 

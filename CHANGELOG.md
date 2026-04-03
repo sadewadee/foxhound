@@ -2,6 +2,17 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.10] — 2026-04-04
+
+### Fixed
+- **NopeCHA extension solve skipped** (#36): removed incorrect `checkNopeCHAKey()` gate that treated the browser extension signing key in `manifest.json` as an API key. NopeCHA browser extension solves captchas without an API key — the gate caused `waitForExtensionSolve()` to exit immediately, making the extension a pure detection signal with zero benefit.
+
+### Removed
+- `checkNopeCHAKey()` function and `nopechaHasKey` field from `CamoufoxFetcher`
+
+### Closed Issues
+#36
+
 ## [v0.0.9] — 2026-04-02
 
 ### Added

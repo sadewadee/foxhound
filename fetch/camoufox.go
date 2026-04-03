@@ -156,7 +156,6 @@ type CamoufoxFetcher struct {
 	poolSize        int              // max pooled pages (0 = disabled)
 	pageReuseLimit  int              // max reuses per pooled page (0 = unlimited)
 	cookies          []BrowserCookie  // cookies to inject into browser context before navigation
-	nopechaHasKey    bool             // true when NopeCHA extension has an API key configured
 	tempDirs         []string         // temp directories to clean up on Close/restart
 	storageStatePath string           // path to load/save storage state JSON
 }
