@@ -190,6 +190,7 @@ func (f *SmartFetcher) fetchBrowser(ctx context.Context, job *foxhound.Job) (*fo
 // deciding whether to attempt a static fetch or skip directly to browser.
 func (f *SmartFetcher) fetchAuto(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
 	domain := extractDomainSmart(job)
+	parentCtx := ctx // preserve original context for browser escalation
 
 	// Check learned risk score
 	if f.scorer != nil {
@@ -222,6 +223,16 @@ func (f *SmartFetcher) fetchAuto(ctx context.Context, job *foxhound.Job) (*foxho
 
 	resp, err := f.static.Fetch(ctx, job)
 	if err != nil {
+		// Static fetch error (timeout, DNS, connection) — escalate to browser
+		// instead of treating as terminal failure.
+		if f.browser != nil {
+			slog.Info("fetch/smart: static fetch error, escalating to browser",
+				"err", err, "url", job.URL)
+			if f.scorer != nil {
+				f.scorer.RecordStatic(domain, true) // treat error as block
+			}
+			return f.browser.Fetch(parentCtx, job)
+		}
 		return nil, fmt.Errorf("fetch/smart: static fetch failed for %s: %w", job.URL, err)
 	}
 
@@ -248,7 +259,7 @@ func (f *SmartFetcher) fetchAuto(ctx context.Context, job *foxhound.Job) (*foxho
 	slog.Info("fetch/smart: block detected, escalating to browser fetcher",
 		"status", resp.StatusCode, "url", job.URL, "job_id", job.ID)
 
-	browserResp, err := f.browser.Fetch(ctx, job)
+	browserResp, err := f.browser.Fetch(parentCtx, job)
 	if err != nil {
 		return nil, fmt.Errorf("fetch/smart: browser escalation failed for %s: %w", job.URL, err)
 	}

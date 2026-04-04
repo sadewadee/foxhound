@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -91,7 +92,10 @@ func (p *PagePool) Acquire(ctx context.Context) (any, error) {
 
 	// Try non-blocking first.
 	select {
-	case page := <-p.pages:
+	case page, ok := <-p.pages:
+		if !ok || page == nil {
+			return nil, errors.New("pagepool: pool closed")
+		}
 		p.acquired.Add(1)
 		p.usageMu.Lock()
 		p.usageCount[page]++
@@ -126,7 +130,10 @@ func (p *PagePool) Acquire(ctx context.Context) (any, error) {
 	slog.Debug("pagepool: at capacity, waiting for release",
 		"capacity", p.maxSize)
 	select {
-	case page := <-p.pages:
+	case page, ok := <-p.pages:
+		if !ok || page == nil {
+			return nil, errors.New("pagepool: pool closed")
+		}
 		p.acquired.Add(1)
 		p.usageMu.Lock()
 		p.usageCount[page]++
@@ -147,6 +154,11 @@ func (p *PagePool) Release(page any) {
 		if p.destroy != nil {
 			_ = p.destroy(page)
 		}
+		p.created.Add(-1)
+		p.released.Add(1)
+		p.usageMu.Lock()
+		delete(p.usageCount, page)
+		p.usageMu.Unlock()
 		return
 	}
 	p.mu.Unlock()
@@ -288,15 +300,28 @@ func (p *PagePool) WarmUp(n int) int {
 
 	created := 0
 	for i := 0; i < n; i++ {
-		if p.created.Load() >= int64(p.maxSize) {
+		// Use CAS to atomically claim a creation slot (same as Acquire).
+		claimed := false
+		for {
+			cur := p.created.Load()
+			if cur >= int64(p.maxSize) {
+				break
+			}
+			if p.created.CompareAndSwap(cur, cur+1) {
+				claimed = true
+				break
+			}
+		}
+		if !claimed {
 			break
 		}
+
 		page, err := p.create()
 		if err != nil {
+			p.created.Add(-1)
 			slog.Warn("pagepool: warmup create failed", "err", err, "created_so_far", created)
 			break
 		}
-		p.created.Add(1)
 		select {
 		case p.pages <- page:
 			created++

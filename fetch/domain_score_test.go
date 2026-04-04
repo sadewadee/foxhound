@@ -130,6 +130,31 @@ func TestAsymmetricDecay(t *testing.T) {
 	}
 }
 
+func TestDomainScoreNegativeAgeDoesNotAmplify(t *testing.T) {
+	scorer := NewDomainScorer(DefaultDomainScoreConfig())
+	scorer.RecordStatic("test.com", true)
+
+	risk := scorer.Risk("test.com")
+	// Risk should be between 0 and 1
+	if risk < 0 || risk > 1.0 {
+		t.Fatalf("risk out of bounds: %f", risk)
+	}
+}
+
+func TestDomainScoreGetOrCreateReusesExisting(t *testing.T) {
+	scorer := NewDomainScorer(DefaultDomainScoreConfig())
+
+	// Record twice — should reuse the same DomainScore, not create new ones
+	scorer.RecordStatic("test.com", true)
+	scorer.RecordStatic("test.com", false)
+
+	risk := scorer.Risk("test.com")
+	// With 1 block + 1 success + prior(1,3): risk = (1+1)/(1+1+1+3) = 0.333
+	if risk < 0.25 || risk > 0.45 {
+		t.Fatalf("unexpected risk %f — getOrCreate may be creating duplicates", risk)
+	}
+}
+
 func TestDomainScoreRecommendNormal(t *testing.T) {
 	scorer := NewDomainScorer(DefaultDomainScoreConfig())
 

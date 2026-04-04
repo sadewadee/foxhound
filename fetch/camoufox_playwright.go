@@ -1631,7 +1631,7 @@ func (f *CamoufoxFetcher) waitForExtensionSolve(page playwright.Page) {
 	for i := 0; i < 20; i++ {
 		if f.isCaptchaSolved(page, captchaType) {
 			slog.Info("fetch/camoufox: extension solved captcha!",
-				"type", captchaType, "seconds", i+1)
+				"type", captchaType, "elapsed_seconds", 3+i)
 			f.submitAfterCaptcha(page)
 			time.Sleep(1 * time.Second)
 			return
@@ -1673,8 +1673,11 @@ func (f *CamoufoxFetcher) isCaptchaSolved(page playwright.Page, captchaType stri
 	switch captchaType {
 	case "turnstile":
 		js = `() => {
-			const inp = document.querySelector('input[name="cf-turnstile-response"]');
-			return inp && inp.value && inp.value.length > 10;
+			const inputs = document.querySelectorAll('input[name="cf-turnstile-response"]');
+			for (const input of inputs) {
+				if (input.value && input.value.length > 10) return true;
+			}
+			return false;
 		}`
 	case "recaptcha":
 		js = `() => {
@@ -1711,22 +1714,17 @@ func (f *CamoufoxFetcher) isCaptchaSolved(page playwright.Page, captchaType stri
 //   - "turnstile"     — Cloudflare Turnstile widget (visible or managed/invisible)
 //   - "under_attack"  — Under Attack Mode (extended JS challenge)
 func (f *CamoufoxFetcher) detectCloudflare(page playwright.Page) string {
-	content, _ := page.Content()
+	content, err := page.Content()
+	if err != nil {
+		slog.Debug("fetch/camoufox: detectCloudflare page.Content failed", "err", err)
+		return ""
+	}
 	lower := strings.ToLower(content)
 
-	// JS Challenge — "Checking your browser" / "Just a moment" interstitial
-	if strings.Contains(lower, "checking your browser") ||
-		strings.Contains(lower, "just a moment") ||
-		strings.Contains(lower, "cf-browser-verification") ||
-		strings.Contains(lower, "challenge-platform") {
-		return "js_challenge"
-	}
-
-	// Turnstile widget — but only if it hasn't been solved yet.
-	// When solved, the hidden input cf-turnstile-response gets a token value.
+	// Turnstile widget — check FIRST because Turnstile pages also contain
+	// "challenge-platform" which would falsely match js_challenge.
 	if strings.Contains(lower, "challenges.cloudflare.com/turnstile") ||
 		strings.Contains(lower, "cf-turnstile") {
-		// Check if any cf-turnstile-response input already has a token value.
 		solved, _ := page.Evaluate(`() => {
 			const inputs = document.querySelectorAll('input[name="cf-turnstile-response"]');
 			for (const input of inputs) {
@@ -1740,9 +1738,17 @@ func (f *CamoufoxFetcher) detectCloudflare(page playwright.Page) string {
 		return "turnstile"
 	}
 
-	// Under Attack Mode
-	if strings.Contains(lower, "cf-chl-bypass") ||
-		(strings.Contains(lower, "ray id") && strings.Contains(lower, "cloudflare")) {
+	// JS Challenge — "Checking your browser" / "Just a moment" interstitial.
+	// NOTE: "challenge-platform" removed — it appears in Turnstile pages too.
+	if strings.Contains(lower, "checking your browser") ||
+		strings.Contains(lower, "just a moment") ||
+		strings.Contains(lower, "cf-browser-verification") {
+		return "js_challenge"
+	}
+
+	// Under Attack Mode — require cf-chl-bypass specifically, not just "ray id" + "cloudflare"
+	// which matches normal Cloudflare error page footers.
+	if strings.Contains(lower, "cf-chl-bypass") {
 		return "under_attack"
 	}
 
@@ -1765,13 +1771,15 @@ func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page, cfType string) 
 
 	switch cfType {
 	case "js_challenge":
-		// Cloudflare JS challenge auto-resolves after ~5 s when the browser
-		// passes Cloudflare's JS fingerprinting checks.  Poll until the
-		// challenge page disappears or 12 s elapses.
 		slog.Info("fetch/camoufox: waiting for Cloudflare JS challenge to resolve...")
 		for i := 0; i < 12; i++ {
 			time.Sleep(1 * time.Second)
-			if f.detectCloudflare(page) == "" {
+			// Lightweight check: JS challenge pages have specific markers in DOM.
+			gone, _ := page.Evaluate(`() => {
+				const body = document.body ? document.body.innerText.toLowerCase() : '';
+				return !body.includes('checking your browser') && !body.includes('just a moment');
+			}`)
+			if val, ok := gone.(bool); ok && val {
 				slog.Info("fetch/camoufox: Cloudflare JS challenge resolved!")
 				page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
 					State: playwright.LoadStateNetworkidle,
@@ -1908,7 +1916,15 @@ func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page, cfType string) 
 		}
 		for i := 0; i < waitSecs; i++ {
 			time.Sleep(1 * time.Second)
-			if f.detectCloudflare(page) == "" {
+			// Lightweight: check if Turnstile markup is gone (page redirected) OR token is set.
+			gone, _ := page.Evaluate(`() => {
+				const html = document.documentElement.innerHTML.toLowerCase();
+				if (!html.includes('cf-turnstile') && !html.includes('challenges.cloudflare.com/turnstile')) return true;
+				const inputs = document.querySelectorAll('input[name="cf-turnstile-response"]');
+				for (const inp of inputs) { if (inp.value && inp.value.length > 10) return true; }
+				return false;
+			}`)
+			if val, ok := gone.(bool); ok && val {
 				slog.Info("fetch/camoufox: Turnstile challenge resolved!")
 				page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
 					State: playwright.LoadStateNetworkidle,
@@ -1928,11 +1944,14 @@ func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page, cfType string) 
 		slog.Warn("fetch/camoufox: Turnstile challenge did not resolve in time")
 
 	case "under_attack":
-		// Extended JS challenge — may require up to 10–15 s.
 		slog.Info("fetch/camoufox: Cloudflare Under Attack mode, waiting...")
 		for i := 0; i < 15; i++ {
 			time.Sleep(1 * time.Second)
-			if f.detectCloudflare(page) == "" {
+			gone, _ := page.Evaluate(`() => {
+				const html = document.documentElement.innerHTML.toLowerCase();
+				return !html.includes('cf-chl-bypass');
+			}`)
+			if val, ok := gone.(bool); ok && val {
 				slog.Info("fetch/camoufox: Under Attack mode resolved!")
 				page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
 					State: playwright.LoadStateNetworkidle,
@@ -1951,10 +1970,14 @@ func (f *CamoufoxFetcher) submitAfterCaptcha(page playwright.Page) {
 	submitSelectors := []string{
 		"#captcha-form input[type='submit']",
 		"#captcha-form button[type='submit']",
-		"button:has-text('Submit')",
-		"button:has-text('Continue')",
-		"button:has-text('Verify')",
-		"input[type='submit']",
+		"#challenge-form input[type='submit']",
+		"#challenge-form button[type='submit']",
+		"#captcha-form button:has-text('Submit')",
+		"#captcha-form button:has-text('Verify')",
+		"#challenge-form button:has-text('Continue')",
+		"#challenge-form button:has-text('Verify')",
+		"form[action*='captcha'] button[type='submit']",
+		"form[action*='challenge'] button[type='submit']",
 	}
 	for _, sel := range submitSelectors {
 		el, err := page.QuerySelector(sel)
@@ -1966,7 +1989,10 @@ func (f *CamoufoxFetcher) submitAfterCaptcha(page playwright.Page) {
 			continue
 		}
 		time.Sleep(time.Duration(500+rand.IntN(500)) * time.Millisecond)
-		el.Click()
+		if err := el.Click(); err != nil {
+			slog.Debug("fetch/camoufox: submitAfterCaptcha click failed", "selector", sel, "err", err)
+			continue
+		}
 		slog.Info("fetch/camoufox: submitted form after CAPTCHA solve", "selector", sel)
 		return
 	}
@@ -2138,17 +2164,14 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 		"timeout_ms", timeoutMs,
 	)
 
-	// Use "load" instead of "networkidle" when an extension is loaded —
-	// solver extensions (NopeCHA) make ongoing API requests that prevent
-	// the network from ever becoming idle.
 	waitUntil := playwright.WaitUntilStateNetworkidle
-	if f.hasExtension {
-		waitUntil = playwright.WaitUntilStateLoad
-	}
-	// When job has explicit Wait steps, use faster domcontentloaded —
-	// the Wait step handles element readiness, so networkidle is redundant.
 	if hasWaitStep(job) {
 		waitUntil = playwright.WaitUntilStateDomcontentloaded
+	}
+	// Extension needs at least "load" to ensure content scripts are injected.
+	// This takes priority over the faster domcontentloaded.
+	if f.hasExtension {
+		waitUntil = playwright.WaitUntilStateLoad
 	}
 
 	start := time.Now()
@@ -2167,7 +2190,14 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 	for cfAttempt := 0; cfAttempt < 3; cfAttempt++ {
 		cfType := f.detectCloudflare(page)
 		if cfType == "" {
-			break // No challenge detected
+			break
+		}
+		// When extension is present, let it handle Turnstile —
+		// manual clicking in handleCloudflare conflicts with the extension's solver.
+		if cfType == "turnstile" && f.hasExtension {
+			slog.Debug("fetch/camoufox: Turnstile detected, deferring to extension solver",
+				"url", job.URL)
+			break
 		}
 		slog.Info("fetch/camoufox: Cloudflare challenge detected",
 			"type", cfType, "attempt", cfAttempt+1, "url", job.URL)
@@ -2176,23 +2206,31 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 				"attempt", cfAttempt+1)
 			break
 		}
-		// Brief wait for page to settle after challenge resolution.
 		time.Sleep(2 * time.Second)
 	}
 
-	// Human behaviour simulation — makes page interaction look natural to
-	// anti-bot behavioural analysis (Layer 4 defence).
-	f.simulateHumanBehavior(page)
+	// Human behaviour simulation — only when the page is real content,
+	// not a Cloudflare challenge page where random interactions are harmful.
+	if f.detectCloudflare(page) == "" {
+		f.simulateHumanBehavior(page)
+	}
 
-	// Dismiss cookie consent banners if present.
-	f.handleCookieConsent(page)
+	// Dismiss cookie consent banners — only on real content pages.
+	if f.detectCloudflare(page) == "" {
+		f.handleCookieConsent(page)
+	}
 
 	if f.hasExtension {
-		// Extension (NopeCHA) handles clicking + image solving autonomously.
-		// Just wait for it to finish.
 		f.waitForExtensionSolve(page)
+		// Fallback: if extension didn't solve, try manual checkbox click.
+		// detectCaptchaType returning non-empty means captcha is still unsolved.
+		if ct := f.detectCaptchaType(page); ct != "" {
+			slog.Warn("fetch/camoufox: extension did not solve, falling back to manual",
+				"type", ct)
+			f.handleRecaptcha(page)
+			f.handleHCaptcha(page)
+		}
 	} else {
-		// Manual checkbox click when no extension is loaded.
 		f.handleRecaptcha(page)
 		f.handleHCaptcha(page)
 	}

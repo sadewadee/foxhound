@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Foxhound is a Go scraping framework with native Camoufox (Firefox fork) anti-detection. It uses dual-mode fetching: a TLS-impersonating HTTP client for static pages and Camoufox via playwright-go for JS-heavy/protected pages, with automatic escalation when blocks are detected.
 
-**Status**: v0.0.10. 18 packages, 1200+ tests. NopeCHA CAPTCHA extension auto-downloads on first launch. Only issue #27 (SERP docs), #29 (leech/seed), #34 (proxy intelligence) remain open.
+**Status**: v0.0.11. 18 packages, 1200+ tests. NopeCHA CAPTCHA extension auto-downloads on first launch. Only issue #27 (SERP docs), #29 (leech/seed), #34 (proxy intelligence) remain open.
 
 **Browser**: Camoufox only. No Chromium, Nightly, or other browsers.
 

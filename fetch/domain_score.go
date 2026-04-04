@@ -176,10 +176,16 @@ func (ds *DomainScorer) decayFactor(age time.Duration) float64 {
 	if ds.config.DecayHalflife <= 0 {
 		return 1.0
 	}
+	if age < 0 {
+		age = 0
+	}
 	return math.Exp(-float64(age) * math.Ln2 / float64(ds.config.DecayHalflife))
 }
 
 func (ds *DomainScorer) getOrCreate(domain string) *DomainScore {
+	if val, ok := ds.scores.Load(domain); ok {
+		return val.(*DomainScore)
+	}
 	val, _ := ds.scores.LoadOrStore(domain, &DomainScore{
 		lastUpdate: time.Now(),
 	})

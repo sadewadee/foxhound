@@ -241,3 +241,81 @@ func TestPagePool_CreateError(t *testing.T) {
 		t.Error("expected create error")
 	}
 }
+
+// TestPagePool_CloseUnblocksAcquireWithError verifies that closing the pool
+// unblocks a goroutine waiting in Acquire with an error (not a nil page).
+func TestPagePool_CloseUnblocksAcquireWithError(t *testing.T) {
+	pool := fetch.NewPagePool(1,
+		func() (any, error) { return "page", nil },
+		func(p any) error { return nil },
+	)
+
+	// Fill the pool to capacity.
+	p, _ := pool.Acquire(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		// This will block because pool is at capacity and no pages available.
+		_, err := pool.Acquire(context.Background())
+		errCh <- err
+	}()
+
+	// Give goroutine time to block on Acquire.
+	time.Sleep(50 * time.Millisecond)
+
+	// Close the pool — blocked Acquire should get an error, not nil page.
+	pool.Close()
+	pool.Release(p) // release the checked-out page after close
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected error from Acquire after Close, got nil")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Acquire did not unblock after Close")
+	}
+}
+
+// TestPagePool_WarmUpConcurrentWithAcquire verifies that concurrent WarmUp
+// and Acquire calls do not exceed maxSize.
+func TestPagePool_WarmUpConcurrentWithAcquire(t *testing.T) {
+	var createCount atomic.Int64
+	pool := fetch.NewPagePool(4,
+		func() (any, error) {
+			createCount.Add(1)
+			return createCount.Load(), nil
+		},
+		func(p any) error { return nil },
+	)
+	defer pool.Close()
+
+	var wg sync.WaitGroup
+
+	// Concurrent WarmUp
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		pool.WarmUp(4)
+	}()
+
+	// Concurrent Acquires
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p, err := pool.Acquire(context.Background())
+			if err != nil {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+			pool.Release(p)
+		}()
+	}
+
+	wg.Wait()
+
+	if createCount.Load() > 4 {
+		t.Fatalf("created %d pages, max should be 4", createCount.Load())
+	}
+}

@@ -32,6 +32,7 @@ import (
 	"time"
 
 	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/behavior"
 	"github.com/sadewadee/foxhound/identity"
 )
 
@@ -155,6 +156,7 @@ type CamoufoxFetcher struct {
 	capturePatterns []*regexp.Regexp // URL patterns for XHR/fetch response capture
 	poolSize        int              // max pooled pages (0 = disabled)
 	pageReuseLimit  int              // max reuses per pooled page (0 = unlimited)
+	behaviorProfile  *behavior.BehaviorProfile // optional profile for scroll/keyboard configs
 	cookies          []BrowserCookie  // cookies to inject into browser context before navigation
 	tempDirs         []string         // temp directories to clean up on Close/restart
 	storageStatePath string           // path to load/save storage state JSON
@@ -249,6 +251,14 @@ func WithPageReuseLimit(n int) CamoufoxOption {
 func WithStorageState(path string) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.storageStatePath = path
+	}
+}
+
+// WithBehaviorProfile sets the behavior profile for scroll and keyboard configs.
+// In the stub build this stores the value but has no effect.
+func WithBehaviorProfile(p *behavior.BehaviorProfile) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.behaviorProfile = p
 	}
 }
 

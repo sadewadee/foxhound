@@ -2,6 +2,37 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.11] — 2026-04-04
+
+### Fixed — Captcha/Cloudflare Handling
+- **Turnstile misclassified as js_challenge**: `challenge-platform` appears in Turnstile pages — reordered `detectCloudflare` to check Turnstile first, removed ambiguous marker
+- **under_attack false positive**: "ray id" + "cloudflare" matched all CF error footers — tightened to `cf-chl-bypass` only
+- **5s+ wasted on unresolved CF pages**: `simulateHumanBehavior` + `handleCookieConsent` now skip when Cloudflare challenge is still active
+- **Double Turnstile handling**: Cloudflare loop manual click conflicted with NopeCHA extension — defers Turnstile to extension when loaded
+- **22+ page.Content() calls per Turnstile page**: poll loops in `handleCloudflare` replaced with lightweight `page.Evaluate` JS checks
+- **Extension elapsed time log off by 3s**: now includes the 3s init sleep in reported seconds
+- **Multi-widget Turnstile inconsistency**: `isCaptchaSolved` used `querySelector` (first only) while `detectCloudflare` used `querySelectorAll` — now consistent
+- **submitAfterCaptcha broad selectors**: `button:has-text('Continue')` and `input[type='submit']` could click unrelated buttons — scoped to captcha/challenge forms
+- **waitUntil override order**: `hasWaitStep` overrode `hasExtension`, causing `domcontentloaded` before extension content scripts loaded — extension now wins
+- **No fallback from extension to manual**: if NopeCHA fails, now falls back to `handleRecaptcha`/`handleHCaptcha`
+- **detectCloudflare swallowed page.Content() errors**: now logs at debug level
+
+### Fixed — SmartFetcher
+- **Cautious timeout poisoned browser escalation**: the shortened context was reused for `browser.Fetch`, causing immediate failure — now preserves parent context
+- **Static fetch error was terminal**: timeout/DNS/connection errors now escalate to browser instead of returning error
+
+### Fixed — DomainScorer
+- **Negative clock drift amplified scores**: `decayFactor` with negative `time.Since` produced values > 1.0 — now clamps age to zero
+- **Unnecessary allocation in getOrCreate**: `sync.Map.LoadOrStore` eagerly allocated `DomainScore` on every call — added fast-path `Load` check
+
+### Fixed — PagePool
+- **Close() sent nil to blocked acquirers**: caused panic — `Acquire` now returns error when channel closes
+- **Release after Close leaked counters**: `created` not decremented, `usageCount` not cleaned — now properly tracked
+- **WarmUp race with Acquire**: non-atomic `Load`+`Add` could exceed `maxSize` — now uses CAS like `Acquire`
+
+### Fixed — Build
+- **WithBehaviorProfile missing from non-playwright build**: stub `camoufox.go` lacked the option function and struct field — compile error when used without `-tags playwright`
+
 ## [v0.0.10] — 2026-04-04
 
 ### Fixed
