@@ -886,7 +886,7 @@ func (f *CamoufoxFetcher) Fetch(ctx context.Context, job *foxhound.Job) (*foxhou
 	ch := make(chan result, 1)
 
 	go func() {
-		resp, err := f.navigate(job)
+		resp, err := f.navigate(ctx, job)
 		ch <- result{resp, err}
 	}()
 
@@ -2046,12 +2046,12 @@ func hasWaitStep(job *foxhound.Job) bool {
 
 // navigate performs the actual playwright navigation. It is called from a
 // goroutine so that context cancellation can abort it cleanly.
-func (f *CamoufoxFetcher) navigate(job *foxhound.Job) (*foxhound.Response, error) {
+func (f *CamoufoxFetcher) navigate(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
 	// When a page pool is active, acquire a pre-warmed page+context instead of
 	// creating a fresh BrowserContext for every request. The pool resets cookies
 	// and navigates to about:blank between uses to prevent session bleed.
 	if f.pool != nil {
-		pooledAny, err := f.pool.Acquire(context.Background())
+		pooledAny, err := f.pool.Acquire(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("fetch/camoufox: acquiring pooled page for %s: %w", job.URL, err)
 		}
