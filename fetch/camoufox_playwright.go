@@ -200,6 +200,8 @@ type CamoufoxFetcher struct {
 	behaviorProfile  *behavior.BehaviorProfile  // optional profile for scroll/keyboard configs
 	tempDirs         []string                   // temp directories to clean up on Close/restart
 	storageStatePath string                     // path to load/save storage state JSON
+	socksBridge      *socks5Bridge              // local SOCKS5 bridge for authenticated proxies (nil when not needed)
+	skipExtension    bool                       // skip auto-loading NopeCHA addon (API solver active)
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -217,6 +219,15 @@ func WithBrowserProxy(proxyURL string) CamoufoxOption {
 func WithExtensionPath(path string) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.extensionPath = path
+	}
+}
+
+// WithSkipExtension prevents the NopeCHA addon from being auto-loaded.
+// Use when the NopeCHA Token API solver is active — the API and addon
+// should not run simultaneously.
+func WithSkipExtension() CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.skipExtension = true
 	}
 }
 
@@ -314,6 +325,21 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 		return nil, fmt.Errorf("fetch/camoufox: starting playwright runtime: %w", err)
 	}
 
+	// If the proxy is SOCKS5 with auth credentials, start a local bridge
+	// because Firefox/Playwright does not support SOCKS5 authentication.
+	// Detection is automatic from the URL — no flags needed.
+	if upstream, user, pass, ok := needsSocks5Bridge(f.proxyURL); ok {
+		bridge, err := newSocks5Bridge(upstream, user, pass)
+		if err != nil {
+			pw.Stop()
+			return nil, fmt.Errorf("fetch/camoufox: starting SOCKS5 auth bridge: %w", err)
+		}
+		f.socksBridge = bridge
+		f.proxyURL = "socks5://" + bridge.localAddr
+		slog.Info("fetch/camoufox: SOCKS5 auth bridge started",
+			"local", bridge.localAddr, "upstream", upstream)
+	}
+
 	// Locate or auto-install the Camoufox binary.
 	// Camoufox is a C++ patched Firefox with built-in anti-fingerprinting:
 	// canvas, WebGL, audio, font, navigator — all spoofed at engine level.
@@ -346,6 +372,13 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 		proxyOpt := parsePlaywrightProxy(f.proxyURL)
 		launchOpts.Proxy = proxyOpt
 		slog.Info("fetch/camoufox: proxy configured", "server", proxyOpt.Server)
+	}
+
+	// When skipExtension is true (NopeCHA API solver active), do not
+	// auto-download or load the addon — API and addon must not run together.
+	if f.skipExtension && f.extensionPath == "" {
+		f.extensionPath = "none"
+		slog.Info("fetch/camoufox: NopeCHA addon skipped — API solver active")
 	}
 
 	// Auto-load NopeCHA extension by default unless explicitly disabled.
@@ -2663,6 +2696,17 @@ func (f *CamoufoxFetcher) Close() error {
 
 	// Clean up temporary directories after all browser resources are freed.
 	f.cleanTempDirs()
+
+	// Shut down the SOCKS5 auth bridge if it was started.
+	if f.socksBridge != nil {
+		if err := f.socksBridge.Close(); err != nil {
+			slog.Warn("fetch/camoufox: error closing SOCKS5 bridge", "err", err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("fetch/camoufox: closing SOCKS5 bridge: %w", err)
+			}
+		}
+		f.socksBridge = nil
+	}
 
 	return firstErr
 }

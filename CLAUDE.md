@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Foxhound is a Go scraping framework with native Camoufox (Firefox fork) anti-detection. It uses dual-mode fetching: a TLS-impersonating HTTP client for static pages and Camoufox via playwright-go for JS-heavy/protected pages, with automatic escalation when blocks are detected.
 
-**Status**: v0.0.11. 18 packages, 1200+ tests. NopeCHA CAPTCHA extension auto-downloads on first launch. Only issue #27 (SERP docs), #29 (leech/seed), #34 (proxy intelligence) remain open.
+**Status**: v0.0.12. 18 packages, 1200+ tests. NopeCHA CAPTCHA extension auto-downloads on first launch. Only issue #27 (SERP docs), #29 (leech/seed), #34 (proxy intelligence) remain open.
 
 **Browser**: Camoufox only. No Chromium, Nightly, or other browsers.
 
@@ -115,7 +115,7 @@ foxhound/
   engine/         — hunt, walker, trail, scheduler, retry, stats, collect (ItemList/HuntMetrics/HuntResult)
   identity/       — profile generation, embedded device/TLS/header databases (60 profiles)
   fetch/          — stealth (HTTP+headers), camoufox (browser), smart (auto-router), capture (XHR), pagepool,
-                    domain_score.go (Bayesian domain risk scoring)
+                    domain_score.go (Bayesian domain risk scoring), socks5_bridge.go (transparent SOCKS5 auth relay)
   proxy/          — pool (+ GetForGeo), health, cooldown, static provider
   proxy/providers — brightdata, oxylabs, smartproxy adapters
   behavior/       — timing (log-normal), mouse (bezier), scroll, keyboard, navigation, profiles,
@@ -133,7 +133,7 @@ foxhound/
   queue/          — memory (heap), redis (sorted set), sqlite (persistent)
   cache/          — memory (LRU+TTL), file (SHA256), redis, sqlite
   monitor/        — stats (atomic counters), prometheus (isolated registry), alerting (webhook rules)
-  captcha/        — detect (cloudflare/recaptcha/hcaptcha/geetest), capsolver, twocaptcha, turnstile
+  captcha/        — detect (cloudflare/recaptcha/hcaptcha/geetest), capsolver, twocaptcha, nopecha (Token API), turnstile
   cmd/foxhound/   — CLI: init, run, check, proxy-test, shell, browser-shell, resume, curl2fox, preview
   examples/       — ecommerce (books.toscrape.com), travel, realtime price monitor
 ```

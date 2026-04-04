@@ -498,6 +498,11 @@ func runHuntWithQueue(cfg *foxhound.Config, overrideQueue foxhound.Queue) error 
 		if cfg.Fetch.Browser.ExtensionPath != "" {
 			camoufoxOpts = append(camoufoxOpts, fetch.WithExtensionPath(cfg.Fetch.Browser.ExtensionPath))
 		}
+		// Skip NopeCHA addon when NopeCHA API solver is active —
+		// the API and addon must not run simultaneously.
+		if cfg.Captcha.Enabled && strings.ToLower(cfg.Captcha.Provider) == "nopecha" && cfg.Captcha.APIKey != "" {
+			camoufoxOpts = append(camoufoxOpts, fetch.WithSkipExtension())
+		}
 		cf, err := fetch.NewCamoufox(camoufoxOpts...)
 		if err != nil {
 			slog.Warn("fetch: camoufox initialisation failed, continuing static-only",
@@ -605,6 +610,9 @@ func runHuntWithQueue(cfg *foxhound.Config, overrideQueue foxhound.Queue) error 
 		case "twocaptcha", "2captcha":
 			captchaSolver = captcha.NewTwoCaptcha(cfg.Captcha.APIKey)
 			slog.Info("captcha: twocaptcha enabled")
+		case "nopecha":
+			captchaSolver = captcha.NewNopeCHA(cfg.Captcha.APIKey)
+			slog.Info("captcha: nopecha token API enabled")
 		default:
 			slog.Warn("captcha: unknown provider", "provider", cfg.Captcha.Provider)
 		}

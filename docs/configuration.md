@@ -123,7 +123,7 @@ monitor:
 
 captcha:
   enabled: false
-  provider: capsolver                # "capsolver" | "twocaptcha"
+  provider: capsolver                # "capsolver" | "twocaptcha" | "nopecha"
   api_key: ${CAPSOLVER_API_KEY}
 
 behavior:
@@ -227,8 +227,8 @@ Webhook alerting fires when error or block rates cross thresholds.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | false | Enable CAPTCHA auto-solving. |
-| `provider` | string | — | `capsolver` or `twocaptcha`. |
-| `api_key` | string | — | API key for the solver service. |
+| `provider` | string | — | `capsolver`, `twocaptcha`, or `nopecha`. When `nopecha` is set with a valid API key, the NopeCHA browser addon is skipped (API and addon don't run simultaneously). |
+| `api_key` | string | — | API key for the solver service. For NopeCHA, use `${NOPECHA_API_KEY}`. |
 
 ### behavior
 

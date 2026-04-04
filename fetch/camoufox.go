@@ -160,6 +160,7 @@ type CamoufoxFetcher struct {
 	cookies          []BrowserCookie  // cookies to inject into browser context before navigation
 	tempDirs         []string         // temp directories to clean up on Close/restart
 	storageStatePath string           // path to load/save storage state JSON
+	skipExtension    bool             // skip auto-loading NopeCHA addon (API solver active)
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -251,6 +252,16 @@ func WithPageReuseLimit(n int) CamoufoxOption {
 func WithStorageState(path string) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.storageStatePath = path
+	}
+}
+
+// WithSkipExtension prevents the NopeCHA addon from being auto-loaded.
+// Use when the NopeCHA Token API solver is active — the API and addon
+// should not run simultaneously.
+// In the stub build this stores the value but has no effect.
+func WithSkipExtension() CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.skipExtension = true
 	}
 }
 

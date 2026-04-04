@@ -171,7 +171,7 @@ type AlertingExportConfig struct {
 // CaptchaConfig configures CAPTCHA detection and solving.
 type CaptchaConfig struct {
 	Enabled  bool   `yaml:"enabled"`
-	Provider string `yaml:"provider"` // "capsolver" | "twocaptcha"
+	Provider string `yaml:"provider"` // "capsolver" | "twocaptcha" | "nopecha"
 	APIKey   string `yaml:"api_key"`
 }
 

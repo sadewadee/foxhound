@@ -2,6 +2,26 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.12] — 2026-04-04
+
+### Added — SOCKS5 Auth Proxy Bridge
+- **Transparent SOCKS5 auth bridge for browser path**: Firefox/Playwright does not support SOCKS5 proxies with authentication (Mozilla bug #122752, open since 2002). Foxhound now auto-detects `socks5://user:pass@host:port` and spawns a local unauthenticated SOCKS5 listener that relays traffic to the upstream proxy with credentials. Zero config — works from the URL protocol alone.
+- **New file `fetch/socks5_bridge.go`**: server-side SOCKS5 handshake (RFC 1928, CONNECT only), bidirectional relay via `io.Copy`, proper goroutine lifecycle with `sync.WaitGroup`
+- **Bridge survives browser restarts**: independent of browser lifecycle, persists across `restart()` cycles
+- **4 new tests**: `TestNeedsSocks5Bridge` (9 cases), `TestSocks5BridgeStartClose`, `TestSocks5BridgeRelay` (end-to-end), `TestSocks5BridgeUnsupportedCmd`
+
+### Added — NopeCHA Token API Solver
+- **New captcha provider `"nopecha"`**: implements `Solver` interface using NopeCHA Token API (`POST /token/` → poll `GET /token/?id=`). Supports Turnstile (1 credit), hCaptcha (5 credits), reCAPTCHA v2 (20 credits).
+- **Conditional addon loading**: when `captcha.provider: "nopecha"` with a valid API key, the NopeCHA browser addon is NOT loaded — API and addon never run simultaneously. When API key is absent/invalid, addon loads as fallback (default behavior unchanged).
+- **New file `captcha/nopecha.go`**: `NopeCHA` struct with `Solve()` and `Balance()` methods
+- **New option `WithSkipExtension()`**: prevents NopeCHA addon auto-load when API solver is active
+- **7 new tests**: Turnstile, reCAPTCHA, hCaptcha solve + payload validation + balance + error + context cancel
+- **Config**: `captcha.provider: "nopecha"`, `captcha.api_key: "${NOPECHA_API_KEY}"`
+
+### Changed
+- **Version bumped to v0.0.12**
+- **`golang.org/x/net`** promoted from indirect to direct dependency (for `proxy.SOCKS5()` in bridge)
+
 ## [v0.0.11] — 2026-04-04
 
 ### Fixed — Captcha/Cloudflare Handling

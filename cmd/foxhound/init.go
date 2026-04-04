@@ -219,5 +219,6 @@ func envExampleTemplate() string {
 # Captcha solvers (optional)
 # CAPSOLVER_API_KEY=
 # TWOCAPTCHA_API_KEY=
+# NOPECHA_API_KEY=
 `
 }

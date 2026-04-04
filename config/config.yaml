@@ -115,6 +115,17 @@ queue:
   backend: memory
 
 # ---------------------------------------------------------------------------
+# CAPTCHA Solving
+# ---------------------------------------------------------------------------
+# captcha:
+#   enabled: false
+#   provider: nopecha                 # "capsolver" | "twocaptcha" | "nopecha"
+#   api_key: ${NOPECHA_API_KEY}       # API key for the solver service
+#   # When provider is "nopecha" with a valid key, the NopeCHA browser addon
+#   # is skipped — API and addon don't run simultaneously. When the key is
+#   # absent or invalid, the addon auto-loads as fallback.
+
+# ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 logging:
