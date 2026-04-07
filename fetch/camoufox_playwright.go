@@ -1681,6 +1681,12 @@ func (f *CamoufoxFetcher) handleHCaptcha(page playwright.Page) {
 // waitForExtensionSolve detects captcha type on the page and waits for the
 // solver extension (NopeCHA) to solve it. Used when extension is loaded —
 // no manual clicking needed, the extension handles everything.
+//
+// Per-type timeout budgets reflect realistic solve times:
+//   - turnstile:  20s (usually <5s, allow buffer)
+//   - hcaptcha:   45s (image challenges take ~20-30s)
+//   - recaptcha:  90s (Enterprise/v3 can take 30-60s)
+//   - geetest:    45s (slider+image, ~20-30s)
 func (f *CamoufoxFetcher) waitForExtensionSolve(page playwright.Page) {
 	// Early exit if the extension was explicitly disabled — nothing can solve.
 	if !f.hasExtension || f.extensionPath == "none" {
@@ -1694,25 +1700,40 @@ func (f *CamoufoxFetcher) waitForExtensionSolve(page playwright.Page) {
 		return
 	}
 
+	// Per-type budget — reCAPTCHA Enterprise can take 30-60s.
+	budget := 30 * time.Second
+	switch captchaType {
+	case "turnstile":
+		budget = 20 * time.Second
+	case "hcaptcha", "geetest":
+		budget = 45 * time.Second
+	case "recaptcha":
+		budget = 90 * time.Second
+	}
+
 	slog.Info("fetch/camoufox: captcha detected, waiting for extension to solve",
-		"type", captchaType)
+		"type", captchaType, "budget", budget)
 
 	// Give extension time to init and start solving now that we know there's work.
-	time.Sleep(3 * time.Second)
+	initWait := 3 * time.Second
+	time.Sleep(initWait)
 
 	// Poll for solve completion — check-then-sleep to avoid trailing delay.
-	for i := 0; i < 20; i++ {
+	deadline := time.Now().Add(budget)
+	pollInterval := 1 * time.Second
+	for time.Now().Before(deadline) {
 		if f.isCaptchaSolved(page, captchaType) {
+			elapsed := int(time.Since(deadline.Add(-budget)).Seconds())
 			slog.Info("fetch/camoufox: extension solved captcha!",
-				"type", captchaType, "elapsed_seconds", 3+i)
+				"type", captchaType, "elapsed_seconds", elapsed)
 			f.submitAfterCaptcha(page)
 			time.Sleep(1 * time.Second)
 			return
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(pollInterval)
 	}
 	slog.Warn("fetch/camoufox: extension did not solve captcha in time",
-		"type", captchaType)
+		"type", captchaType, "budget", budget)
 }
 
 // detectCaptchaType checks the page content for known captcha indicators.
@@ -1753,9 +1774,33 @@ func (f *CamoufoxFetcher) isCaptchaSolved(page playwright.Page, captchaType stri
 			return false;
 		}`
 	case "recaptcha":
+		// reCAPTCHA v2/v3/Enterprise: token can land in multiple places.
+		// Check all textareas (some Enterprise widgets create multiple),
+		// then fall back to the grecaptcha API if available.
 		js = `() => {
-			const ta = document.querySelector('textarea[name="g-recaptcha-response"]');
-			return ta && ta.value && ta.value.length > 10;
+			// 1. Standard textarea (v2 + Enterprise checkbox flow)
+			const tas = document.querySelectorAll('textarea[name^="g-recaptcha-response"]');
+			for (const ta of tas) {
+				if (ta.value && ta.value.length > 10) return true;
+			}
+			// 2. grecaptcha API (v2 + Enterprise programmatic)
+			try {
+				if (typeof grecaptcha !== 'undefined' && grecaptcha.getResponse) {
+					const r = grecaptcha.getResponse();
+					if (r && r.length > 10) return true;
+				}
+				// Enterprise namespace
+				if (typeof grecaptcha !== 'undefined' && grecaptcha.enterprise && grecaptcha.enterprise.getResponse) {
+					const r = grecaptcha.enterprise.getResponse();
+					if (r && r.length > 10) return true;
+				}
+			} catch (e) {}
+			// 3. Hidden inputs sometimes used by Enterprise
+			const hidden = document.querySelectorAll('input[name="g-recaptcha-response"], input[name^="g-recaptcha-response-"]');
+			for (const inp of hidden) {
+				if (inp.value && inp.value.length > 10) return true;
+			}
+			return false;
 		}`
 	case "hcaptcha":
 		js = `() => {
@@ -2334,9 +2379,11 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 
 	if f.hasExtension {
 		f.waitForExtensionSolve(page)
-		// Fallback: if extension didn't solve, try manual checkbox click.
-		// detectCaptchaType returning non-empty means captcha is still unsolved.
-		if ct := f.detectCaptchaType(page); ct != "" {
+		// Fallback: only run manual handling if a captcha is present AND unsolved.
+		// detectCaptchaType returning non-empty just means captcha markup exists —
+		// after a successful solve the markup is still there, only the token is set.
+		// We must check isCaptchaSolved to avoid running manual fallback after success.
+		if ct := f.detectCaptchaType(page); ct != "" && !f.isCaptchaSolved(page, ct) {
 			slog.Warn("fetch/camoufox: extension did not solve, falling back to manual",
 				"type", ct)
 			f.handleRecaptcha(page)

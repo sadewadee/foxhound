@@ -2,6 +2,17 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.15] — 2026-04-07
+
+### Fixed — Captcha Solving
+- **NopeCHA "solved then fallback" bug** (`fetch/camoufox_playwright.go`): after extension successfully solved a reCAPTCHA, the post-solve check used `detectCaptchaType()` which only checks for captcha markup presence — markup remains in DOM after a successful solve, only the response token is filled. Now correctly uses `isCaptchaSolved()` to verify the token is present before falling back to manual handling.
+- **Captcha solve timeout too short** (23s for all types): replaced fixed 20-iteration loop with per-type budgets — turnstile 20s, hcaptcha 45s, geetest 45s, **recaptcha 90s** (Enterprise can take 30-60s).
+- **reCAPTCHA detection too narrow**: `isCaptchaSolved` only checked `textarea[name="g-recaptcha-response"]`. Now checks all `g-recaptcha-response*` textareas, the `grecaptcha.getResponse()` API, the `grecaptcha.enterprise.getResponse()` namespace, and hidden inputs used by Enterprise widgets.
+
+### Verified
+- NopeCHA addon successfully solves reCAPTCHA v2 on `nopecha.com/demo/recaptcha` in ~40 seconds via Camoufox
+- reCAPTCHA Enterprise (used by Salesforce LWR sites like Yoga Alliance) is **NOT solvable** by the free NopeCHA addon — requires paid API key (NopeCHA Token API, CapSolver, or 2Captcha)
+
 ## [v0.0.14] — 2026-04-07
 
 ### Fixed — Security (24 fixes)
