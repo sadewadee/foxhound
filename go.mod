@@ -35,7 +35,7 @@ require (
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/gaukas/clienthellod v0.4.2 // indirect
 	github.com/gaukas/godicttls v0.0.4 // indirect
-	github.com/go-jose/go-jose/v3 v3.0.4 // indirect
+	github.com/go-jose/go-jose/v3 v3.0.5 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/klauspost/compress v1.18.2 // indirect
