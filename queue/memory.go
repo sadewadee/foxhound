@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	foxhound "github.com/sadewadee/foxhound"
@@ -66,6 +67,7 @@ type memoryQueue struct {
 	cond   *sync.Cond
 	h      jobHeap
 	closed bool
+	length atomic.Int64 // atomic length for lock-free Len()
 }
 
 // NewMemoryQueue creates a thread-safe, priority-ordered in-memory queue.
@@ -92,6 +94,7 @@ func (q *memoryQueue) Push(_ context.Context, job *foxhound.Job) error {
 		job.CreatedAt = time.Now()
 	}
 	heap.Push(&q.h, &jobItem{job: job})
+	q.length.Add(1)
 	slog.Debug("queue: pushed job", "id", job.ID, "url", job.URL, "priority", job.Priority, "depth", job.Depth)
 	q.cond.Signal()
 	return nil
@@ -123,15 +126,15 @@ func (q *memoryQueue) Pop(ctx context.Context) (*foxhound.Job, error) {
 	}
 
 	item := heap.Pop(&q.h).(*jobItem)
+	q.length.Add(-1)
 	slog.Debug("queue: popped job", "id", item.job.ID, "url", item.job.URL, "priority", item.job.Priority)
 	return item.job, nil
 }
 
 // Len returns the number of jobs currently in the queue.
+// Uses an atomic counter to avoid lock contention with Push/Pop.
 func (q *memoryQueue) Len() int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.h.Len()
+	return int(q.length.Load())
 }
 
 // Close marks the queue as closed and unblocks all waiting Pop calls.

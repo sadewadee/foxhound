@@ -56,10 +56,10 @@ type Article struct {
 	Title           string
 	Author          string
 	PublishedDate   string
-	Content         string        // cleaned HTML of main content
-	ContentText     string        // plain text
-	ContentMarkdown string        // markdown
-	Summary         string        // first ~200 chars of text
+	Content         string // cleaned HTML of main content
+	ContentText     string // plain text
+	ContentMarkdown string // markdown
+	Summary         string // first ~200 chars of text
 	Images          []string
 	Tags            []string
 	WordCount       int
@@ -106,8 +106,8 @@ func DetectContentType(resp *foxhound.Response) ContentType {
 		}
 	})
 
-	// Check JSON-LD for typed content.
-	jsonldType := detectJSONLDType(resp)
+	// Check JSON-LD for typed content (reuse already-parsed doc).
+	jsonldType := detectJSONLDTypeFromDoc(doc)
 
 	// 1. Listing signals (check first — more specific).
 	if listItems > 10 || cards > 5 {
@@ -160,8 +160,8 @@ func DetectContentType(resp *foxhound.Response) ContentType {
 // DetectContentType helpers
 // ---------------------------------------------------------------------------
 
-func detectJSONLDType(resp *foxhound.Response) string {
-	items, err := ExtractJSONLD(resp)
+func detectJSONLDTypeFromDoc(doc *goquery.Document) string {
+	items, err := ExtractJSONLDFromDoc(doc)
 	if err != nil || len(items) == 0 {
 		return ""
 	}
@@ -182,8 +182,12 @@ func detectJSONLDType(resp *foxhound.Response) string {
 }
 
 func hasProductSignals(doc *goquery.Document) bool {
-	// Check for price patterns in text.
+	// Check for price patterns in a limited portion of body text to avoid
+	// scanning 500KB+ pages. Price patterns appear in visible product areas.
 	body := doc.Find("body").Text()
+	if len(body) > 20000 {
+		body = body[:20000]
+	}
 	hasPrice := pricePattern.MatchString(body)
 
 	// Check for add-to-cart buttons.

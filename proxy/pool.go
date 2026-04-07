@@ -15,9 +15,9 @@ var ErrNoProxy = errors.New("proxy: no proxy available")
 
 // proxyEntry tracks runtime state for a single proxy inside the pool.
 type proxyEntry struct {
-	proxy       *Proxy
-	health      ProxyHealth
-	requestCount int
+	proxy         *Proxy
+	health        ProxyHealth
+	requestCount  int
 	bannedDomains map[string]struct{}
 }
 
@@ -34,6 +34,7 @@ func (e *proxyEntry) isAvailable(now time.Time) bool {
 type Pool struct {
 	mu          sync.Mutex
 	entries     []*proxyEntry
+	indexByURL  map[string]*proxyEntry // O(1) lookup by proxy URL
 	rotation    RotationStrategy
 	cooldown    time.Duration
 	maxRequests int
@@ -55,6 +56,7 @@ func NewPool(providers ...Provider) *Pool {
 		rotation:    PerRequest,
 		cooldown:    5 * time.Minute,
 		maxRequests: 0, // unlimited
+		indexByURL:  make(map[string]*proxyEntry),
 		sessionMap:  make(map[string]*Proxy),
 		domainMap:   make(map[string]*Proxy),
 	}
@@ -67,11 +69,16 @@ func NewPool(providers ...Provider) *Pool {
 			continue
 		}
 		for _, px := range proxies {
-			p.entries = append(p.entries, &proxyEntry{
+			// Normalize country/city at insertion time to avoid per-lookup allocations.
+			px.Country = strings.ToUpper(px.Country)
+			px.City = strings.ToLower(px.City)
+			entry := &proxyEntry{
 				proxy:         px,
 				health:        ProxyHealth{Alive: true, Score: 1.0},
 				bannedDomains: make(map[string]struct{}),
-			})
+			}
+			p.entries = append(p.entries, entry)
+			p.indexByURL[px.URL] = entry
 		}
 	}
 	slog.Info("proxy: pool initialised", "count", len(p.entries))
@@ -204,18 +211,18 @@ func (p *Pool) selectRoundRobin(now time.Time) *proxyEntry {
 	if n == 0 {
 		return nil
 	}
-	// Collect available entries in stable index order.
-	var available []*proxyEntry
-	for _, e := range p.entries {
+	// Use modular arithmetic on the full entries list, skipping unavailable
+	// entries. This avoids the inconsistent selection that occurs when the
+	// available set changes size between calls.
+	start := int(p.nextIdx.Add(1)-1) % n
+	for i := 0; i < n; i++ {
+		idx := (start + i) % n
+		e := p.entries[idx]
 		if e.isAvailable(now) && !(p.maxRequests > 0 && e.requestCount >= p.maxRequests) {
-			available = append(available, e)
+			return e
 		}
 	}
-	if len(available) == 0 {
-		return nil
-	}
-	idx := int(p.nextIdx.Add(1)-1) % len(available)
-	return available[idx]
+	return nil
 }
 
 // selectBest picks the available entry with the highest health score.
@@ -343,8 +350,8 @@ func (p *Pool) SetMaxRequests(n int) {
 // Falls back to any available proxy if no geo match is found.
 func (p *Pool) GetForGeo(ctx context.Context, country, city string) (*Proxy, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
+	// Normalize inputs once; proxy country/city are already normalized at insertion.
 	country = strings.ToUpper(country)
 	city = strings.ToLower(city)
 	now := time.Now()
@@ -352,8 +359,9 @@ func (p *Pool) GetForGeo(ctx context.Context, country, city string) (*Proxy, err
 	// First pass: exact match (country + city).
 	if city != "" {
 		for _, e := range p.entries {
-			if strings.ToUpper(e.proxy.Country) == country && strings.ToLower(e.proxy.City) == city {
+			if e.proxy.Country == country && e.proxy.City == city {
 				if e.isAvailable(now) {
+					p.mu.Unlock()
 					return e.proxy, nil
 				}
 			}
@@ -362,8 +370,9 @@ func (p *Pool) GetForGeo(ctx context.Context, country, city string) (*Proxy, err
 
 	// Second pass: country match only.
 	for _, e := range p.entries {
-		if strings.ToUpper(e.proxy.Country) == country {
+		if e.proxy.Country == country {
 			if e.isAvailable(now) {
+				p.mu.Unlock()
 				return e.proxy, nil
 			}
 		}
@@ -371,9 +380,7 @@ func (p *Pool) GetForGeo(ctx context.Context, country, city string) (*Proxy, err
 
 	// Fallback: any healthy proxy (release lock and delegate to Get).
 	p.mu.Unlock()
-	px, err := p.Get(ctx)
-	p.mu.Lock()
-	return px, err
+	return p.Get(ctx)
 }
 
 // Len returns the total number of proxies in the pool (including on cooldown).
@@ -390,14 +397,9 @@ func (p *Pool) Close() error {
 }
 
 // findEntry locates the pool entry for the given proxy by URL.
-// Caller must hold p.mu.
+// O(1) lookup via the index map. Caller must hold p.mu.
 func (p *Pool) findEntry(px *Proxy) *proxyEntry {
-	for _, e := range p.entries {
-		if e.proxy.URL == px.URL {
-			return e
-		}
-	}
-	return nil
+	return p.indexByURL[px.URL]
 }
 
 func min1(v float64) float64 {

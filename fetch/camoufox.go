@@ -141,26 +141,27 @@ func WithPersistSession(persist bool) CamoufoxOption {
 // Stub build (!playwright tag): Fetch always returns errPlaywrightNotConfigured.
 // Real build  ( playwright tag): see camoufox_playwright.go.
 type CamoufoxFetcher struct {
-	identity        *identity.Profile
-	blockImages     bool
-	headless        string
-	timeout         time.Duration
-	proxyURL        string           // SOCKS5 or HTTP proxy URL
-	extensionPath   string           // path to Firefox extension dir (e.g. NopeCHA)
-	maxRequests     int              // restart browser after this many requests (0 = disabled)
-	persistSession  bool             // reuse BrowserContext across requests when true
-	initScript      string           // JS injected into every new page via AddInitScript
-	userDataDir     string           // persistent profile dir; triggers LaunchPersistentContext
-	cdpURL          string           // connect to an existing browser via CDP instead of launching
-	useRealChrome   bool             // use pw.Chromium with channel=chrome instead of Firefox
-	capturePatterns []*regexp.Regexp // URL patterns for XHR/fetch response capture
-	poolSize        int              // max pooled pages (0 = disabled)
-	pageReuseLimit  int              // max reuses per pooled page (0 = unlimited)
+	identity         *identity.Profile
+	blockImages      bool
+	headless         string
+	timeout          time.Duration
+	proxyURL         string                    // SOCKS5 or HTTP proxy URL
+	extensionPath    string                    // path to Firefox extension dir (e.g. NopeCHA)
+	maxRequests      int                       // restart browser after this many requests (0 = disabled)
+	persistSession   bool                      // reuse BrowserContext across requests when true
+	initScript       string                    // JS injected into every new page via AddInitScript
+	userDataDir      string                    // persistent profile dir; triggers LaunchPersistentContext
+	cdpURL           string                    // connect to an existing browser via CDP instead of launching
+	useRealChrome    bool                      // use pw.Chromium with channel=chrome instead of Firefox
+	capturePatterns  []*regexp.Regexp          // URL patterns for XHR/fetch response capture
+	poolSize         int                       // max pooled pages (0 = disabled)
+	pageReuseLimit   int                       // max reuses per pooled page (0 = unlimited)
 	behaviorProfile  *behavior.BehaviorProfile // optional profile for scroll/keyboard configs
-	cookies          []BrowserCookie  // cookies to inject into browser context before navigation
-	tempDirs         []string         // temp directories to clean up on Close/restart
-	storageStatePath string           // path to load/save storage state JSON
-	skipExtension    bool             // skip auto-loading NopeCHA addon (API solver active)
+	cookies          []BrowserCookie           // cookies to inject into browser context before navigation
+	tempDirs         []string                  // temp directories to clean up on Close/restart
+	storageStatePath string                    // path to load/save storage state JSON
+	skipExtension    bool                      // skip auto-loading NopeCHA addon (API solver active)
+	displayMgr       *DisplayManager           // Xvfb manager (always nil in stub build)
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.

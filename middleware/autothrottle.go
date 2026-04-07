@@ -41,6 +41,9 @@ type domainThrottle struct {
 	latencies [10]float64
 	latCount  int
 	latIdx    int
+	// Pre-allocated scratch buffers for dampenOutlier (zero-alloc sort).
+	scratch [10]float64
+	devBuf  [10]float64
 }
 
 // addLatency records a latency sample in the ring buffer.
@@ -59,9 +62,9 @@ func (dt *domainThrottle) dampenOutlier(ms float64) float64 {
 		return ms // not enough data for dampening
 	}
 
-	// Copy and sort the active portion
+	// Copy into pre-allocated scratch buffer and sort (zero alloc).
 	n := dt.latCount
-	sorted := make([]float64, n)
+	sorted := dt.scratch[:n]
 	for i := 0; i < n; i++ {
 		idx := (dt.latIdx - n + i + len(dt.latencies)) % len(dt.latencies)
 		sorted[i] = dt.latencies[idx]
@@ -74,8 +77,8 @@ func (dt *domainThrottle) dampenOutlier(ms float64) float64 {
 		median = (sorted[n/2-1] + sorted[n/2]) / 2.0
 	}
 
-	// MAD (Median Absolute Deviation)
-	deviations := make([]float64, n)
+	// MAD (Median Absolute Deviation) using pre-allocated buffer.
+	deviations := dt.devBuf[:n]
 	for i, v := range sorted {
 		deviations[i] = math.Abs(v - median)
 	}

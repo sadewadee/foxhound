@@ -68,8 +68,8 @@ func DefaultBlockPatterns() []BlockPattern {
 			BodyContains: []string{"perimeterx", "px-captcha"},
 		},
 		{
-			Name:         "login-wall",
-			BodyContains: []string{"login", "sign in"},
+			Name:       "login-wall",
+			StatusCode: 302,
 		},
 	}
 }
@@ -134,27 +134,41 @@ func (bd *blockDetector) Wrap(next foxhound.Fetcher) foxhound.Fetcher {
 // detectBlock returns the first matching BlockPattern, or nil when the
 // response looks legitimate.
 func (bd *blockDetector) detectBlock(resp *foxhound.Response) *BlockPattern {
-	lower := strings.ToLower(string(resp.Body))
+	// Fast path: check status-code-only patterns first (zero alloc).
+	for i := range bd.patterns {
+		p := &bd.patterns[i]
+		if p.StatusCode != 0 && resp.StatusCode == p.StatusCode &&
+			len(p.BodyContains) == 0 && p.MinBodySize == 0 {
+			return p
+		}
+		// MaxBodySize is also a zero-alloc check.
+		if p.MaxBodySize > 0 && len(resp.Body) > p.MaxBodySize {
+			return p
+		}
+	}
+
+	// Only lowercase the body when body-based patterns need checking.
+	// Block pages are small, so scanning first 10KB is sufficient.
+	scanLen := len(resp.Body)
+	if scanLen > 10000 {
+		scanLen = 10000
+	}
+	lower := strings.ToLower(string(resp.Body[:scanLen]))
 
 	for i := range bd.patterns {
 		p := &bd.patterns[i]
 
 		// Status code gate: pattern requires a specific code and this isn't it.
 		if p.StatusCode != 0 && resp.StatusCode != p.StatusCode {
-			// Body-content checks still apply when no specific code was required.
-			// But if a code IS required and doesn't match, skip body check too.
-			// Exception: patterns like "access-denied" list a code but also body
-			// keywords — we want to match either.  Treat StatusCode as an OR
-			// condition with the body check below.
 			if len(p.BodyContains) == 0 && p.MinBodySize == 0 {
 				continue
 			}
 		}
 
-		// Status code match (alone is sufficient for patterns without body checks).
+		// Skip status-only patterns (already handled above).
 		if p.StatusCode != 0 && resp.StatusCode == p.StatusCode &&
 			len(p.BodyContains) == 0 && p.MinBodySize == 0 {
-			return p
+			continue
 		}
 
 		// Body content check.
@@ -165,17 +179,9 @@ func (bd *blockDetector) detectBlock(resp *foxhound.Response) *BlockPattern {
 		}
 
 		// Minimum body size check (empty-trap heuristic).
-		// A 200 OK with a body smaller than MinBodySize that also lacks <html
-		// is suspicious.
 		if p.MinBodySize > 0 && resp.StatusCode == 200 &&
 			len(resp.Body) < p.MinBodySize &&
 			!strings.Contains(lower, "<html") {
-			return p
-		}
-
-		// Maximum body size check: response body exceeds the expected maximum,
-		// which can indicate injected content or an unexpected page.
-		if p.MaxBodySize > 0 && len(resp.Body) > p.MaxBodySize {
 			return p
 		}
 	}

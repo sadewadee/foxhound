@@ -61,9 +61,9 @@ func (q *memQueue) Close() error {
 
 // stubFetcher returns a canned response for every job.
 type stubFetcher struct {
-	resp *foxhound.Response
-	err  error
-	mu   sync.Mutex
+	resp  *foxhound.Response
+	err   error
+	mu    sync.Mutex
 	calls int
 }
 
@@ -956,13 +956,13 @@ func TestStats_RecordProcessDuration_TrackedPerDomain(t *testing.T) {
 	if ds == nil {
 		t.Fatal("DomainStatsFor returned nil for recorded domain")
 	}
-	if ds.AvgProcessLatency == 0 {
+	if ds.AvgProcessLatency() == 0 {
 		t.Error("AvgProcessLatency: want > 0, got 0")
 	}
 	// Average of 100ms and 200ms = 150ms
 	want := 150 * time.Millisecond
-	if ds.AvgProcessLatency != want {
-		t.Errorf("AvgProcessLatency: want %v, got %v", want, ds.AvgProcessLatency)
+	if ds.AvgProcessLatency() != want {
+		t.Errorf("AvgProcessLatency: want %v, got %v", want, ds.AvgProcessLatency())
 	}
 }
 

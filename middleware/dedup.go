@@ -141,6 +141,13 @@ func canonicalURL(raw string) string {
 		return raw
 	}
 
+	u.Fragment = ""
+
+	// Fast path: no query string — skip sort+rebuild (common for link-following).
+	if u.RawQuery == "" {
+		return u.String()
+	}
+
 	// Sort query parameters.
 	q := u.Query()
 	keys := make([]string, 0, len(q))
@@ -154,6 +161,5 @@ func canonicalURL(raw string) string {
 		vals[k] = q[k]
 	}
 	u.RawQuery = vals.Encode()
-	u.Fragment = ""
 	return u.String()
 }

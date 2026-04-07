@@ -1,6 +1,6 @@
 [
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "14_0",
     "cores": 8,
     "memory": 8,
@@ -9,14 +9,17 @@
     "screen_h": 1600,
     "color_depth": 24,
     "pixel_ratio": 2.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/New_York",
     "locale": "en-US",
     "lat": 40.7128,
-    "lng": -74.0060
+    "lng": -74.006
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "14_1",
     "cores": 10,
     "memory": 16,
@@ -25,14 +28,17 @@
     "screen_h": 1964,
     "color_depth": 24,
     "pixel_ratio": 2.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Los_Angeles",
     "locale": "en-US",
     "lat": 34.0522,
     "lng": -118.2437
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "13_0",
     "cores": 8,
     "memory": 16,
@@ -41,14 +47,17 @@
     "screen_h": 1600,
     "color_depth": 24,
     "pixel_ratio": 2.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Chicago",
     "locale": "en-US",
     "lat": 41.8781,
     "lng": -87.6298
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "14_0",
     "cores": 12,
     "memory": 32,
@@ -57,14 +66,17 @@
     "screen_h": 1964,
     "color_depth": 24,
     "pixel_ratio": 2.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Chicago",
     "locale": "en-US",
     "lat": 29.7604,
     "lng": -95.3698
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "13_6",
     "cores": 8,
     "memory": 8,
@@ -73,14 +85,17 @@
     "screen_h": 1800,
     "color_depth": 24,
     "pixel_ratio": 2.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Phoenix",
     "locale": "en-US",
     "lat": 33.4484,
-    "lng": -112.0740
+    "lng": -112.074
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "14_1",
     "cores": 10,
     "memory": 16,
@@ -89,14 +104,17 @@
     "screen_h": 1600,
     "color_depth": 24,
     "pixel_ratio": 2.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/New_York",
     "locale": "en-US",
     "lat": 39.9526,
     "lng": -75.1652
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "14_0",
     "cores": 12,
     "memory": 24,
@@ -105,14 +123,17 @@
     "screen_h": 1964,
     "color_depth": 24,
     "pixel_ratio": 2.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Chicago",
     "locale": "en-US",
     "lat": 29.4241,
     "lng": -98.4936
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "13_6",
     "cores": 10,
     "memory": 16,
@@ -121,14 +142,17 @@
     "screen_h": 900,
     "color_depth": 24,
     "pixel_ratio": 2.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Chicago",
     "locale": "en-US",
     "lat": 32.7767,
-    "lng": -96.7970
+    "lng": -96.797
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "14_1",
     "cores": 12,
     "memory": 32,
@@ -137,14 +161,17 @@
     "screen_h": 1964,
     "color_depth": 24,
     "pixel_ratio": 2.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Denver",
     "locale": "en-US",
     "lat": 39.7392,
     "lng": -104.9903
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "14_0",
     "cores": 8,
     "memory": 16,
@@ -153,7 +180,10 @@
     "screen_h": 1050,
     "color_depth": 24,
     "pixel_ratio": 2.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Los_Angeles",
     "locale": "en-US",
     "lat": 47.6062,

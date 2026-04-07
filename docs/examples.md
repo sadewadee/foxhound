@@ -177,7 +177,7 @@ func main() {
         fetch.WithBrowserIdentity(profile),
         fetch.WithHeadless("virtual"),
         fetch.WithBlockImages(false), // Maps needs images for loading detection
-        fetch.WithBrowserTimeout(30*time.Second),
+        fetch.WithBrowserTimeout(60*time.Second),
     )
     if err != nil {
         log.Fatalf("camoufox init: %v", err)

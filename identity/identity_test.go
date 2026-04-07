@@ -1,6 +1,8 @@
 package identity_test
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -243,37 +245,92 @@ func TestGenerateWithGeo(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// CamoufoxEnv keys
+// CamoufoxEnv — CAMOU_CONFIG_N format (JSON chunked)
 // ---------------------------------------------------------------------------
 
-var expectedCamoufoxKeys = []string{
-	"CAMOU_CONFIG_SCREEN_W",
-	"CAMOU_CONFIG_SCREEN_H",
-	"CAMOU_CONFIG_PIXEL_RATIO",
-	"CAMOU_CONFIG_CORES",
-	"CAMOU_CONFIG_MEMORY",
-	"CAMOU_CONFIG_GPU",
-	"CAMOU_CONFIG_PLATFORM",
-	"CAMOU_CONFIG_TIMEZONE",
-	"CAMOU_CONFIG_LOCALE",
-	"CAMOU_CONFIG_LANGUAGES",
+func TestCamoufoxEnvContainsCAMOU_CONFIG_1(t *testing.T) {
+	p := identity.Generate()
+	if _, ok := p.CamoufoxEnv["CAMOU_CONFIG_1"]; !ok {
+		t.Error("CamoufoxEnv missing CAMOU_CONFIG_1 key")
+	}
 }
 
-func TestCamoufoxEnvContainsExpectedKeys(t *testing.T) {
+func TestCamoufoxEnvIsValidJSON(t *testing.T) {
 	p := identity.Generate()
-	for _, key := range expectedCamoufoxKeys {
-		if _, ok := p.CamoufoxEnv[key]; !ok {
-			t.Errorf("CamoufoxEnv missing key %q", key)
+	// Reassemble chunks
+	full := ""
+	for i := 1; ; i++ {
+		chunk, ok := p.CamoufoxEnv[fmt.Sprintf("CAMOU_CONFIG_%d", i)]
+		if !ok {
+			break
+		}
+		full += chunk
+	}
+	if full == "" {
+		t.Fatal("no CAMOU_CONFIG chunks found")
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(full), &config); err != nil {
+		t.Fatalf("CAMOU_CONFIG is not valid JSON: %v\nraw: %s", err, full)
+	}
+	// Verify expected keys exist in the JSON
+	expectedKeys := []string{
+		"screen.width", "screen.height", "navigator.userAgent",
+		"navigator.platform", "navigator.hardwareConcurrency",
+		"navigator.oscpu", "navigator.appVersion",
+		"navigator.language", "navigator.languages",
+		"window.devicePixelRatio", "timezone",
+	}
+	for _, key := range expectedKeys {
+		if _, ok := config[key]; !ok {
+			t.Errorf("CAMOU_CONFIG JSON missing key %q", key)
 		}
 	}
 }
 
-func TestCamoufoxEnvValuesNonEmpty(t *testing.T) {
+// TestCamoufoxConfigOmitsBrowserForgeProperties verifies that properties
+// handled by BrowserForge (WebGL, fonts, canvas) are NOT manually set.
+// BrowserForge auto-populates these with realistic statistical distributions
+// when they are absent from CAMOU_CONFIG.
+func TestCamoufoxConfigOmitsBrowserForgeProperties(t *testing.T) {
 	p := identity.Generate()
-	for _, key := range expectedCamoufoxKeys {
-		if p.CamoufoxEnv[key] == "" {
-			t.Errorf("CamoufoxEnv[%q] is empty", key)
+	config := p.BuildCamoufoxConfig()
+	browserForgeKeys := []string{
+		"webGl:vendor", "webGl:renderer", "webGl:parameters",
+		"webGl:supportedExtensions", "fonts",
+		"canvas:aaOffset", "canvas:aaCapOffset",
+	}
+	for _, key := range browserForgeKeys {
+		if _, ok := config[key]; ok {
+			t.Errorf("CAMOU_CONFIG should NOT set %q — BrowserForge handles it", key)
 		}
+	}
+}
+
+func TestMergeCamoufoxConfig(t *testing.T) {
+	p := identity.Generate()
+	extra := map[string]any{
+		"addons": []string{"/path/to/nopecha"},
+	}
+	env := p.MergeCamoufoxConfig(extra)
+	// Reassemble and verify addons are present
+	full := ""
+	for i := 1; ; i++ {
+		chunk, ok := env[fmt.Sprintf("CAMOU_CONFIG_%d", i)]
+		if !ok {
+			break
+		}
+		full += chunk
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(full), &config); err != nil {
+		t.Fatalf("merged config not valid JSON: %v", err)
+	}
+	if _, ok := config["addons"]; !ok {
+		t.Error("merged config missing addons key")
+	}
+	if _, ok := config["screen.width"]; !ok {
+		t.Error("merged config missing screen.width (fingerprint data lost)")
 	}
 }
 
@@ -352,21 +409,22 @@ func TestEmbeddedProfileDatabaseLoadsFirefoxWindows(t *testing.T) {
 		identity.WithBrowser(identity.BrowserFirefox),
 		identity.WithOS(identity.OSWindows),
 	)
-	// The embedded firefox_windows.json uses browser_ver "148.0".
-	if p.BrowserVer != "148.0" {
-		t.Errorf("BrowserVer: got %q, want '148.0' (from embedded firefox_windows.json)", p.BrowserVer)
+	// The embedded firefox_windows.json uses browser_ver "135.0"
+	// matching the installed Camoufox binary (Firefox 135.0.1).
+	if p.BrowserVer != "135.0" {
+		t.Errorf("BrowserVer: got %q, want '135.0' (from embedded firefox_windows.json)", p.BrowserVer)
 	}
 	if p.ScreenW == 0 || p.ScreenH == 0 {
 		t.Errorf("screen dimensions not populated from embedded profile: %dx%d", p.ScreenW, p.ScreenH)
 	}
 }
 
-// TestGetTLSProfileFirefox148 verifies that the TLS fingerprint data for
-// firefox_148.0 can be loaded from the embedded filesystem.
-func TestGetTLSProfileFirefox148(t *testing.T) {
-	tls := identity.GetTLSProfile("firefox_148.0")
+// TestGetTLSProfileFirefox135 verifies that the TLS fingerprint data for
+// firefox_135.0 can be loaded from the embedded filesystem.
+func TestGetTLSProfileFirefox135(t *testing.T) {
+	tls := identity.GetTLSProfile("firefox_135.0")
 	if tls == nil {
-		t.Fatal("GetTLSProfile(\"firefox_148.0\") returned nil; embedded tls file missing or corrupt")
+		t.Fatal("GetTLSProfile(\"firefox_135.0\") returned nil; embedded tls file missing or corrupt")
 	}
 	if tls.JA3 == "" {
 		t.Error("JA3 fingerprint is empty")

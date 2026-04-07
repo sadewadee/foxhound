@@ -101,7 +101,7 @@ This produces a profile where:
 - `profile.Platform` is `"Win32"` (not `"Linux x86_64"`)
 - `profile.ScreenW` / `profile.ScreenH` are a common Windows resolution
 - `profile.Timezone` is `"America/New_York"` (matches the declared locale)
-- `profile.CamoufoxEnv` contains `CAMOU_CONFIG_*` vars for browser mode
+- `profile.CamoufoxEnv` contains `CAMOU_CONFIG_N` JSON chunks for browser mode (screen, navigator, WebGL, fonts, canvas, geolocation, timezone)
 
 ### Why random UA rotation is dangerous
 
@@ -116,7 +116,7 @@ This produces a profile where:
 
 Camoufox is a patched Firefox fork that applies anti-fingerprinting at the C++ source level, not via JavaScript injection. This is critical: JavaScript overrides can be detected by checking `toString()` on patched functions, whereas C++ patches are invisible.
 
-Camoufox patches controlled via `CAMOU_CONFIG_*` environment variables (set from `identity.Profile.CamoufoxEnv`):
+Camoufox patches controlled via `CAMOU_CONFIG_N` environment variables containing a JSON blob (built by `identity.Profile.BuildCamoufoxConfig()`):
 
 - **Canvas fingerprint**: deterministic noise per session
 - **WebGL vendor/renderer**: configurable GPU string

@@ -14,6 +14,15 @@ var (
 	phoneRe = regexp.MustCompile(`(?:\+\d{1,3}[\s\-]?)?\(?\d{2,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{3,4}`)
 )
 
+// digitPlusFilter strips non-digit, non-plus characters. Package-level to
+// avoid closure allocation per phone candidate.
+func digitPlusFilter(r rune) rune {
+	if r >= '0' && r <= '9' || r == '+' {
+		return r
+	}
+	return -1
+}
+
 // imageExtensions are file extensions that indicate an email-like string is
 // actually an image filename (e.g. logo@2x.png).
 var imageExtensions = []string{".png", ".jpg", ".jpeg", ".gif", ".svg", ".js", ".css", ".webp", ".avif", ".bmp", ".tiff", ".ico"}
@@ -95,9 +104,9 @@ func isLikelyEmail(email string) bool {
 
 // Regex patterns for phone false-positive detection.
 var (
-	ipAddrRe    = regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$`)
-	versionRe   = regexp.MustCompile(`\d+\.\d+\.\d+`)
-	cssDimRe    = regexp.MustCompile(`\d+(?:px|em|rem|%)`)
+	ipAddrRe  = regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$`)
+	versionRe = regexp.MustCompile(`\d+\.\d+\.\d+`)
+	cssDimRe  = regexp.MustCompile(`\d+(?:px|em|rem|%)`)
 )
 
 // isLikelyPhone returns false for digit strings that are clearly not real phone
@@ -188,7 +197,7 @@ func DecodeCFEmail(encoded string) string {
 	if err != nil {
 		return ""
 	}
-	var result []byte
+	result := make([]byte, 0, (len(encoded)-2)/2)
 	for i := 2; i < len(encoded); i += 2 {
 		val, err := strconv.ParseInt(encoded[i:i+2], 16, 64)
 		if err != nil {
@@ -272,12 +281,7 @@ func ExtractPhones(resp *foxhound.Response) []string {
 			if !isLikelyPhoneRaw(m) {
 				continue
 			}
-			cleaned := strings.Map(func(r rune) rune {
-				if r >= '0' && r <= '9' || r == '+' {
-					return r
-				}
-				return -1
-			}, m)
+			cleaned := strings.Map(digitPlusFilter, m)
 			if len(cleaned) >= 10 && isLikelyPhone(cleaned) {
 				raw = append(raw, m)
 			}
@@ -296,12 +300,7 @@ func ExtractPhones(resp *foxhound.Response) []string {
 			return
 		}
 		// Strip non-digit, non-plus characters for dedup key and length check.
-		cleaned := strings.Map(func(r rune) rune {
-			if r >= '0' && r <= '9' || r == '+' {
-				return r
-			}
-			return -1
-		}, p)
+		cleaned := strings.Map(digitPlusFilter, p)
 		if len(cleaned) < 10 {
 			return
 		}

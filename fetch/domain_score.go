@@ -20,7 +20,7 @@ import (
 //
 //	effective_count = count * exp(-age / halflife)
 type DomainScore struct {
-	mu             sync.Mutex
+	mu             sync.RWMutex
 	staticSuccess  float64
 	staticBlocked  float64
 	browserSuccess float64
@@ -58,8 +58,8 @@ func DefaultDomainScoreConfig() DomainScoreConfig {
 // Prior Beta(3,1) = 75% prior block rate — escalates after just 1 blocked attempt.
 func SocialMediaScoreConfig() DomainScoreConfig {
 	return DomainScoreConfig{
-		PriorAlpha:          3.0,  // high prior on blocked
-		PriorBeta:           1.0,  // low prior on success
+		PriorAlpha:          3.0, // high prior on blocked
+		PriorBeta:           1.0, // low prior on success
 		EscalationThreshold: 0.6,
 		CautionThreshold:    0.3,
 		DecayHalflife:       24 * time.Hour, // blocks persist longer for social media
@@ -142,13 +142,14 @@ func (ds *DomainScorer) Risk(domain string) float64 {
 	}
 
 	score := val.(*DomainScore)
-	score.mu.Lock()
-	defer score.mu.Unlock()
+	score.mu.RLock()
+	defer score.mu.RUnlock()
 
 	age := time.Since(score.lastUpdate)
 	successDecay := ds.decayFactor(age)
-	// Blocks decay 4x slower — protection measures are usually persistent
-	blockDecay := ds.decayFactor(age / 4)
+	// Blocks decay 1.5x slower — protection measures are usually persistent
+	// but 4x was too aggressive and caused permanent escalation after transient blocks
+	blockDecay := ds.decayFactor(age * 2 / 3)
 
 	effectiveBlocked := score.staticBlocked * blockDecay
 	effectiveSuccess := score.staticSuccess * successDecay

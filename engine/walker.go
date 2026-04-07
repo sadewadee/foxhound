@@ -64,6 +64,10 @@ func (w *Walker) Run(ctx context.Context) error {
 			return nil
 		}
 
+		// Increment activeWalkers before processJob to close the race window
+		// between Pop returning and processJob starting where drainQueue could
+		// see queue=0 and activeWalkers=0 and terminate prematurely.
+		w.hunt.activeWalkers.Add(1)
 		w.processJob(ctx, job)
 	}
 }
@@ -72,9 +76,8 @@ func (w *Walker) Run(ctx context.Context) error {
 // enqueue discovered jobs. Retries are handled inline.
 func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 	jobStart := time.Now()
-	// Track this walker as in-flight so drainQueue does not cancel the context
-	// before discovered jobs are enqueued.
-	w.hunt.activeWalkers.Add(1)
+	// activeWalkers was already incremented by Run() before calling processJob
+	// to close the race window between Pop and here.
 	defer w.hunt.activeWalkers.Add(-1)
 
 	// Acquire global concurrency slot before doing any network I/O.
@@ -95,9 +98,11 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 		if delay > 0 {
 			w.logger.Debug("behavior: applying rhythm delay",
 				"delay", delay, "state", w.rhythm.State())
+			timer := time.NewTimer(delay)
 			select {
-			case <-time.After(delay):
+			case <-timer.C:
 			case <-ctx.Done():
+				timer.Stop()
 				return
 			}
 		}
@@ -134,9 +139,11 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 		w.logger.Warn("retrying job",
 			"url", job.URL, "attempt", attempt+1, "delay", delay, "err", fetchErr)
 
+		retryTimer := time.NewTimer(delay)
 		select {
-		case <-time.After(delay):
+		case <-retryTimer.C:
 		case <-ctx.Done():
+			retryTimer.Stop()
 			return
 		}
 	}
@@ -153,7 +160,7 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 
 	w.logger.Debug("fetch complete",
 		"url", job.URL, "status", resp.StatusCode, "bytes", len(resp.Body),
-		"duration", time.Since(start), "fetch_mode", resp.FetchMode)
+		"duration", fetchDuration, "fetch_mode", resp.FetchMode)
 
 	// CAPTCHA detection — if the response contains a CAPTCHA challenge,
 	// log it and count as blocked. Skip when the response came through the
@@ -168,7 +175,7 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 				"captcha_type", detection.Type,
 				"site_key", detection.SiteKey,
 			)
-			w.hunt.stats.RecordRequest(job.Domain, time.Since(start), nil, true)
+			w.hunt.stats.RecordBlock(job.Domain)
 			return
 		}
 	}

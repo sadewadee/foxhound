@@ -27,7 +27,7 @@ import (
 //	defer pool.Release(page)
 type PagePool struct {
 	maxSize    int
-	reuseLimit int                // max reuses per page (0 = unlimited)
+	reuseLimit int // max reuses per page (0 = unlimited)
 	create     func() (any, error)
 	destroy    func(any) error
 	reset      func(any) error
@@ -35,11 +35,11 @@ type PagePool struct {
 	created    atomic.Int64
 	acquired   atomic.Int64
 	released   atomic.Int64
-	recycled   atomic.Int64       // pages destroyed due to reuse limit
+	recycled   atomic.Int64 // pages destroyed due to reuse limit
 	mu         sync.Mutex
 	closed     bool
-	usageCount map[any]int64      // tracks reuse count per page handle
-	usageMu    sync.Mutex         // guards usageCount
+	usageCount map[any]int64 // tracks reuse count per page handle
+	usageMu    sync.Mutex    // guards usageCount
 }
 
 // PagePoolOption configures a PagePool.
@@ -116,6 +116,17 @@ func (p *PagePool) Acquire(ctx context.Context) (any, error) {
 				p.created.Add(-1) // release the slot on failure
 				return nil, err
 			}
+			// Check if pool was closed during page creation.
+			p.mu.Lock()
+			if p.closed {
+				p.mu.Unlock()
+				if p.destroy != nil {
+					_ = p.destroy(page)
+				}
+				p.created.Add(-1)
+				return nil, errors.New("pagepool: pool closed")
+			}
+			p.mu.Unlock()
 			p.acquired.Add(1)
 			p.usageMu.Lock()
 			p.usageCount[page]++

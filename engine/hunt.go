@@ -69,8 +69,11 @@ type HuntConfig struct {
 	// This enables the two-phase pattern: collect URLs first, process concurrently.
 	Pool Pool
 	// PoolFetchMode sets the FetchMode for jobs created from pool URLs.
-	// Defaults to FetchBrowser.
+	// Defaults to FetchBrowser when PoolFetchModeSet is false.
 	PoolFetchMode foxhound.FetchMode
+	// PoolFetchModeSet indicates the user explicitly set PoolFetchMode.
+	// When false and pool URLs exist, the mode defaults to FetchBrowser.
+	PoolFetchModeSet bool
 }
 
 // HuntState represents the lifecycle state of a Hunt.
@@ -200,7 +203,7 @@ func (h *Hunt) Run(ctx context.Context) error {
 			slog.Error("hunt: draining pool", "error", err)
 		}
 		fetchMode := h.config.PoolFetchMode
-		if fetchMode == 0 && len(poolURLs) > 0 {
+		if !h.config.PoolFetchModeSet && len(poolURLs) > 0 {
 			fetchMode = foxhound.FetchBrowser
 		}
 		for i, u := range poolURLs {
@@ -296,6 +299,9 @@ var drainSettleDelay = 50 * time.Millisecond
 // been popped but the processing walker has not yet enqueued its discovered
 // jobs.
 func (h *Hunt) drainQueue(ctx context.Context, cancel context.CancelFunc) {
+	ticker := time.NewTicker(drainPollInterval)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -304,13 +310,15 @@ func (h *Hunt) drainQueue(ctx context.Context, cancel context.CancelFunc) {
 		}
 
 		if h.config.Queue.Len() == 0 && h.activeWalkers.Load() == 0 {
-			// Both conditions met.  Apply a short settling delay to handle the
+			// Both conditions met. Apply a short settling delay to handle the
 			// tiny window between Pop returning and activeWalkers being
 			// incremented by the walker goroutine.
+			timer := time.NewTimer(drainSettleDelay)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return
-			case <-time.After(drainSettleDelay):
+			case <-timer.C:
 			}
 			// Re-check after the settle delay — a walker may have incremented
 			// activeWalkers or pushed a new job during that window.
@@ -323,7 +331,7 @@ func (h *Hunt) drainQueue(ctx context.Context, cancel context.CancelFunc) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(drainPollInterval):
+		case <-ticker.C:
 		}
 	}
 }

@@ -1,6 +1,6 @@
 [
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "6.1",
     "cores": 8,
     "memory": 16,
@@ -9,14 +9,17 @@
     "screen_h": 1080,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/New_York",
     "locale": "en-US",
     "lat": 40.7128,
-    "lng": -74.0060
+    "lng": -74.006
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "6.5",
     "cores": 16,
     "memory": 32,
@@ -25,14 +28,17 @@
     "screen_h": 1440,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Los_Angeles",
     "locale": "en-US",
     "lat": 34.0522,
     "lng": -118.2437
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "6.8",
     "cores": 12,
     "memory": 64,
@@ -41,14 +47,17 @@
     "screen_h": 2160,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-GB", "en"],
+    "languages": [
+      "en-GB",
+      "en"
+    ],
     "timezone": "Europe/London",
     "locale": "en-GB",
     "lat": 51.5074,
     "lng": -0.1278
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "6.1",
     "cores": 4,
     "memory": 8,
@@ -57,14 +66,18 @@
     "screen_h": 1080,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["de-DE", "de", "en"],
+    "languages": [
+      "de-DE",
+      "de",
+      "en"
+    ],
     "timezone": "Europe/Berlin",
     "locale": "de-DE",
-    "lat": 52.5200,
-    "lng": 13.4050
+    "lat": 52.52,
+    "lng": 13.405
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "6.5",
     "cores": 8,
     "memory": 16,
@@ -73,14 +86,18 @@
     "screen_h": 1200,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["nl-NL", "nl", "en"],
+    "languages": [
+      "nl-NL",
+      "nl",
+      "en"
+    ],
     "timezone": "Europe/Amsterdam",
     "locale": "nl-NL",
     "lat": 52.3676,
     "lng": 4.9041
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "6.8",
     "cores": 16,
     "memory": 32,
@@ -89,14 +106,18 @@
     "screen_h": 1440,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["fr-FR", "fr", "en"],
+    "languages": [
+      "fr-FR",
+      "fr",
+      "en"
+    ],
     "timezone": "Europe/Paris",
     "locale": "fr-FR",
     "lat": 48.8566,
     "lng": 2.3522
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "6.1",
     "cores": 8,
     "memory": 16,
@@ -105,14 +126,17 @@
     "screen_h": 1080,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Chicago",
     "locale": "en-US",
     "lat": 41.8781,
     "lng": -87.6298
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "6.5",
     "cores": 4,
     "memory": 8,
@@ -121,14 +145,17 @@
     "screen_h": 1080,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-GB", "en"],
+    "languages": [
+      "en-GB",
+      "en"
+    ],
     "timezone": "Europe/London",
     "locale": "en-GB",
     "lat": 51.5074,
     "lng": -0.1278
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "6.8",
     "cores": 12,
     "memory": 32,
@@ -137,14 +164,18 @@
     "screen_h": 1440,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["de-DE", "de", "en"],
+    "languages": [
+      "de-DE",
+      "de",
+      "en"
+    ],
     "timezone": "Europe/Berlin",
     "locale": "de-DE",
-    "lat": 52.5200,
-    "lng": 13.4050
+    "lat": 52.52,
+    "lng": 13.405
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "6.1",
     "cores": 16,
     "memory": 64,
@@ -153,7 +184,11 @@
     "screen_h": 2160,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["fr-FR", "fr", "en"],
+    "languages": [
+      "fr-FR",
+      "fr",
+      "en"
+    ],
     "timezone": "Europe/Paris",
     "locale": "fr-FR",
     "lat": 48.8566,

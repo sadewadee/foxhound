@@ -61,8 +61,15 @@ func Detect(resp *foxhound.Response) *DetectResult {
 		return result
 	}
 
+	// Only scan the first 10KB — CAPTCHA/block pages are small and markers
+	// always appear early. This avoids lowercasing 100KB+ of body text.
+	scanBody := resp.Body
+	if len(scanBody) > 10000 {
+		scanBody = scanBody[:10000]
+	}
+	lower := strings.ToLower(string(scanBody))
+	// Keep original body (full, original case) for site key extraction.
 	body := string(resp.Body)
-	lower := strings.ToLower(body)
 
 	switch {
 	case isTurnstile(lower):
@@ -99,19 +106,34 @@ func Detect(resp *foxhound.Response) *DetectResult {
 		return result
 	}
 
-	// Soft block: 200 OK but body explicitly says "access denied" in a small page.
-	if resp.StatusCode == 200 {
+	// Soft block: 200 OK but body explicitly says "access denied" in a small page
+	// with no normal page structure (no <nav, <footer, <main). The absence of
+	// normal structure is an additional signal to reduce false positives.
+	if resp.StatusCode == 200 && len(resp.Body) < 10000 {
 		softBlockPatterns := []string{"access denied", "permission denied", "blocked", "forbidden"}
-		for _, p := range softBlockPatterns {
-			if strings.Contains(lower, p) && len(resp.Body) < 10000 {
-				result.Type = CaptchaSoftBlock
-				return result
+		hasNormalStructure := strings.Contains(lower, "<nav") ||
+			strings.Contains(lower, "<footer") ||
+			strings.Contains(lower, "<main")
+		if !hasNormalStructure {
+			for _, p := range softBlockPatterns {
+				if strings.Contains(lower, p) {
+					result.Type = CaptchaSoftBlock
+					return result
+				}
 			}
 		}
 	}
 
 	// Empty trap: 200 OK but body is suspiciously small and lacks <html.
-	if resp.StatusCode == 200 && len(resp.Body) < 500 && !strings.Contains(lower, "<html") {
+	// Skip JSON/API responses based on Content-Type header.
+	contentType := ""
+	if resp.Headers != nil {
+		contentType = strings.ToLower(resp.Headers.Get("Content-Type"))
+	}
+	isAPI := strings.Contains(contentType, "application/json") ||
+		strings.Contains(contentType, "application/xml") ||
+		strings.Contains(contentType, "text/plain")
+	if resp.StatusCode == 200 && len(resp.Body) < 500 && !strings.Contains(lower, "<html") && !isAPI {
 		result.Type = CaptchaEmptyTrap
 		return result
 	}

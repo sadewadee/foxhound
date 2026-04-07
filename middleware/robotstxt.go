@@ -122,9 +122,10 @@ func parseRobotsTxt(body, userAgent string) *robotsRules {
 // robotsTxtMiddleware fetches and caches robots.txt per domain, skipping
 // disallowed URLs before they reach the underlying fetcher.
 type robotsTxtMiddleware struct {
-	userAgent string
-	mu        sync.Mutex
-	cache     map[string]*robotsRules // domain -> rules
+	userAgent  string
+	mu         sync.Mutex
+	cache      map[string]*robotsRules  // domain -> rules
+	inflight   map[string]chan struct{} // domain -> in-flight fetch signal
 	httpClient *http.Client
 }
 
@@ -144,6 +145,7 @@ func NewRobotsTxt(userAgent string) foxhound.Middleware {
 	return &robotsTxtMiddleware{
 		userAgent:  userAgent,
 		cache:      make(map[string]*robotsRules),
+		inflight:   make(map[string]chan struct{}),
 		httpClient: &http.Client{},
 	}
 }
@@ -170,23 +172,35 @@ func (m *robotsTxtMiddleware) Wrap(next foxhound.Fetcher) foxhound.Fetcher {
 }
 
 // rulesFor returns cached rules for domain, fetching /robots.txt on the first
-// call. On any fetch or parse error an allow-all rule set is returned and NOT
-// cached so that a transient network failure does not permanently allow all
-// requests without a real check.
+// call. Uses singleflight semantics to avoid thundering herd on the same domain.
 func (m *robotsTxtMiddleware) rulesFor(domain, scheme string) *robotsRules {
 	m.mu.Lock()
 	if rules, ok := m.cache[domain]; ok {
 		m.mu.Unlock()
 		return rules
 	}
+	// Check if another goroutine is already fetching for this domain.
+	if ch, ok := m.inflight[domain]; ok {
+		m.mu.Unlock()
+		// Wait for the in-flight fetch to complete.
+		<-ch
+		m.mu.Lock()
+		rules := m.cache[domain]
+		m.mu.Unlock()
+		return rules
+	}
+	// Mark this domain as in-flight.
+	ch := make(chan struct{})
+	m.inflight[domain] = ch
 	m.mu.Unlock()
 
 	rules := m.fetchRules(domain, scheme)
 
 	m.mu.Lock()
-	// Cache even on error so that we don't hammer a failing server.
 	m.cache[domain] = rules
+	delete(m.inflight, domain)
 	m.mu.Unlock()
+	close(ch)
 
 	return rules
 }

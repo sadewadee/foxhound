@@ -12,20 +12,38 @@ import (
 )
 
 // DomainStats holds per-domain request counters and latency tracking.
+// All fields use atomic operations so callers can read/write without locks.
 type DomainStats struct {
-	Requests   int64
-	Errors     int64
-	Blocked    int64
-	totalNanos int64 // accumulated fetch latency in nanoseconds
-	AvgLatency time.Duration
+	Requests   atomic.Int64
+	Errors     atomic.Int64
+	Blocked    atomic.Int64
+	totalNanos atomic.Int64 // accumulated fetch latency in nanoseconds
 
-	processNanos      int64 // accumulated end-to-end job latency in nanoseconds
-	processCount      int64
-	AvgProcessLatency time.Duration
+	processNanos atomic.Int64 // accumulated end-to-end job latency in nanoseconds
+	processCount atomic.Int64
+}
+
+// AvgLatency returns the average fetch latency for this domain.
+func (ds *DomainStats) AvgLatency() time.Duration {
+	reqs := ds.Requests.Load()
+	if reqs == 0 {
+		return 0
+	}
+	return time.Duration(ds.totalNanos.Load() / reqs)
+}
+
+// AvgProcessLatency returns the average end-to-end processing latency.
+func (ds *DomainStats) AvgProcessLatency() time.Duration {
+	count := ds.processCount.Load()
+	if count == 0 {
+		return 0
+	}
+	return time.Duration(ds.processNanos.Load() / count)
 }
 
 // Stats holds runtime metrics for a Hunt. All top-level counters use
 // atomic.Int64 so callers can read them without holding any lock.
+// Per-domain stats use sync.Map for lock-free read path.
 type Stats struct {
 	StartedAt      time.Time
 	RequestCount   atomic.Int64
@@ -36,16 +54,21 @@ type Stats struct {
 	EscalatedCount atomic.Int64
 	BytesReceived  atomic.Int64
 
-	mu          sync.RWMutex
-	domainStats map[string]*DomainStats
+	domainStats sync.Map // map[string]*DomainStats
 }
 
 // NewStats creates a Stats instance ready for use.
 func NewStats() *Stats {
 	return &Stats{
-		StartedAt:   time.Now(),
-		domainStats: make(map[string]*DomainStats),
+		StartedAt: time.Now(),
 	}
+}
+
+// getOrCreateDomain returns the DomainStats for the given domain, creating
+// one if it does not exist. Uses sync.Map.LoadOrStore for lock-free reads.
+func (s *Stats) getOrCreateDomain(domain string) *DomainStats {
+	val, _ := s.domainStats.LoadOrStore(domain, &DomainStats{})
+	return val.(*DomainStats)
 }
 
 // RecordRequest records a completed fetch attempt for the given domain.
@@ -54,31 +77,33 @@ func (s *Stats) RecordRequest(domain string, duration time.Duration, err error, 
 	s.RequestCount.Add(1)
 	if err != nil {
 		s.ErrorCount.Add(1)
+	} else if blocked {
+		s.BlockedCount.Add(1)
 	} else {
 		s.SuccessCount.Add(1)
 	}
-	if blocked {
-		s.BlockedCount.Add(1)
-	}
 
-	s.mu.Lock()
-	ds, ok := s.domainStats[domain]
-	if !ok {
-		ds = &DomainStats{}
-		s.domainStats[domain] = ds
-	}
-	ds.Requests++
+	ds := s.getOrCreateDomain(domain)
+	ds.Requests.Add(1)
 	if err != nil {
-		ds.Errors++
+		ds.Errors.Add(1)
 	}
 	if blocked {
-		ds.Blocked++
+		ds.Blocked.Add(1)
 	}
-	ds.totalNanos += duration.Nanoseconds()
-	if ds.Requests > 0 {
-		ds.AvgLatency = time.Duration(ds.totalNanos / ds.Requests)
-	}
-	s.mu.Unlock()
+	ds.totalNanos.Add(duration.Nanoseconds())
+}
+
+// RecordBlock increments the request and blocked counters without
+// double-counting the request as a success. Used when a block is detected
+// outside the normal fetch path (e.g. CAPTCHA detection in the walker).
+func (s *Stats) RecordBlock(domain string) {
+	s.RequestCount.Add(1)
+	s.BlockedCount.Add(1)
+
+	ds := s.getOrCreateDomain(domain)
+	ds.Requests.Add(1)
+	ds.Blocked.Add(1)
 }
 
 // RecordItems increments the scraped item counter by count.
@@ -100,30 +125,19 @@ func (s *Stats) RecordBytes(n int64) {
 // RecordProcessDuration records the end-to-end processing time for a job
 // (fetch + process + pipeline + write) for the given domain.
 func (s *Stats) RecordProcessDuration(domain string, duration time.Duration) {
-	s.mu.Lock()
-	ds, ok := s.domainStats[domain]
-	if !ok {
-		ds = &DomainStats{}
-		s.domainStats[domain] = ds
-	}
-	ds.processNanos += duration.Nanoseconds()
-	ds.processCount++
-	ds.AvgProcessLatency = time.Duration(ds.processNanos / ds.processCount)
-	s.mu.Unlock()
+	ds := s.getOrCreateDomain(domain)
+	ds.processNanos.Add(duration.Nanoseconds())
+	ds.processCount.Add(1)
 }
 
 // DomainStatsFor returns the DomainStats for the given domain, or nil if no
 // requests have been recorded for it.
 func (s *Stats) DomainStatsFor(domain string) *DomainStats {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	ds, ok := s.domainStats[domain]
+	val, ok := s.domainStats.Load(domain)
 	if !ok {
 		return nil
 	}
-	// Return a copy to avoid races on the caller side.
-	copy := *ds
-	return &copy
+	return val.(*DomainStats)
 }
 
 // ToMap returns a structured snapshot of current statistics suitable for
@@ -149,17 +163,18 @@ func (s *Stats) ToMap() map[string]any {
 		"req_per_sec":    rps,
 	}
 
-	s.mu.RLock()
-	domains := make(map[string]any, len(s.domainStats))
-	for domain, ds := range s.domainStats {
+	domains := make(map[string]any)
+	s.domainStats.Range(func(key, value any) bool {
+		domain := key.(string)
+		ds := value.(*DomainStats)
 		domains[domain] = map[string]any{
-			"requests":    ds.Requests,
-			"errors":      ds.Errors,
-			"blocked":     ds.Blocked,
-			"avg_latency": ds.AvgLatency.String(),
+			"requests":    ds.Requests.Load(),
+			"errors":      ds.Errors.Load(),
+			"blocked":     ds.Blocked.Load(),
+			"avg_latency": ds.AvgLatency().String(),
 		}
-	}
-	s.mu.RUnlock()
+		return true
+	})
 	result["domains"] = domains
 
 	return result
@@ -180,13 +195,14 @@ func (s *Stats) Summary() string {
 		s.BytesReceived.Load(),
 	)
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for domain, ds := range s.domainStats {
+	s.domainStats.Range(func(key, value any) bool {
+		domain := key.(string)
+		ds := value.(*DomainStats)
 		fmt.Fprintf(&b, " [%s: req=%d err=%d blocked=%d avg=%v proc_avg=%v]",
-			domain, ds.Requests, ds.Errors, ds.Blocked,
-			ds.AvgLatency.Truncate(time.Millisecond),
-			ds.AvgProcessLatency.Truncate(time.Millisecond))
-	}
+			domain, ds.Requests.Load(), ds.Errors.Load(), ds.Blocked.Load(),
+			ds.AvgLatency().Truncate(time.Millisecond),
+			ds.AvgProcessLatency().Truncate(time.Millisecond))
+		return true
+	})
 	return b.String()
 }

@@ -35,9 +35,9 @@ type deviceProfile struct {
 
 // TLSProfileData holds JA3/JA4 and HTTP/2 fingerprint data for a browser.
 type TLSProfileData struct {
-	JA3       string            `json:"ja3"`
-	JA4       string            `json:"ja4"`
-	HTTP2     HTTP2Settings     `json:"http2"`
+	JA3   string        `json:"ja3"`
+	JA4   string        `json:"ja4"`
+	HTTP2 HTTP2Settings `json:"http2"`
 }
 
 // HTTP2Settings holds HTTP/2 connection settings for fingerprinting.
@@ -135,7 +135,7 @@ func fallbackProfile(browser Browser, o OS) deviceProfile {
 
 	switch browser {
 	case BrowserFirefox:
-		dp.BrowserVer = "148.0"
+		dp.BrowserVer = "135.0"
 	case BrowserChrome:
 		dp.BrowserVer = "131.0.0.0"
 	}

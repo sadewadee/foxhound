@@ -92,35 +92,49 @@ func (rq *ReliableQueue) Pop(ctx context.Context) (*foxhound.Job, error) {
 		return job, err
 	}
 
+	key := job.ID
+	if key == "" {
+		key = job.URL
+	}
 	rq.mu.Lock()
-	rq.inFlight[job.URL] = &inFlightJob{
+	rq.inFlight[key] = &inFlightJob{
 		job:      job,
 		poppedAt: time.Now(),
-		attempts: rq.retryCount[job.URL] + 1,
+		attempts: rq.retryCount[key] + 1,
 	}
 	rq.mu.Unlock()
 
 	return job, nil
 }
 
+// jobKey returns the dedup key for a job, preferring ID over URL.
+func jobKey(job *foxhound.Job) string {
+	if job.ID != "" {
+		return job.ID
+	}
+	return job.URL
+}
+
 // Ack acknowledges successful processing of a job.
 func (rq *ReliableQueue) Ack(job *foxhound.Job) {
+	key := jobKey(job)
 	rq.mu.Lock()
 	defer rq.mu.Unlock()
-	delete(rq.inFlight, job.URL)
-	delete(rq.retryCount, job.URL)
+	delete(rq.inFlight, key)
+	delete(rq.retryCount, key)
 }
 
 // Nack signals that job processing failed. The job is re-queued or moved to DLQ.
 func (rq *ReliableQueue) Nack(ctx context.Context, job *foxhound.Job) {
+	key := jobKey(job)
 	rq.mu.Lock()
-	rq.retryCount[job.URL]++
-	attempts := rq.retryCount[job.URL]
-	delete(rq.inFlight, job.URL)
+	rq.retryCount[key]++
+	attempts := rq.retryCount[key]
+	delete(rq.inFlight, key)
 
 	if attempts >= rq.config.MaxRetries {
 		rq.dlq = append(rq.dlq, job)
-		delete(rq.retryCount, job.URL)
+		delete(rq.retryCount, key)
 		rq.mu.Unlock()
 		slog.Warn("queue/reliable: job moved to DLQ after max retries",
 			"url", job.URL, "attempts", attempts)

@@ -58,8 +58,8 @@ func CarefulProfile() *BehaviorProfile {
 		Name: ProfileCareful,
 
 		Timing: TimingConfig{
-			Mu:    1.5,  // median ≈ 4.5 s
-			Sigma: 0.5,  // narrower spread → more predictably slow
+			Mu:    1.5, // median ≈ 4.5 s
+			Sigma: 0.5, // narrower spread → more predictably slow
 			Min:   1 * time.Second,
 			Max:   60 * time.Second,
 		},
@@ -125,7 +125,7 @@ func ModerateProfile() *BehaviorProfile {
 		Name: ProfileModerate,
 
 		Timing: TimingConfig{
-			Mu:    1.0,  // median ≈ 2.7 s
+			Mu:    1.0, // median ≈ 2.7 s
 			Sigma: 0.8,
 			Min:   500 * time.Millisecond,
 			Max:   30 * time.Second,
@@ -159,7 +159,7 @@ func AggressiveProfile() *BehaviorProfile {
 		Name: ProfileAggressive,
 
 		Timing: TimingConfig{
-			Mu:    0.5,  // median ≈ 1.6 s
+			Mu:    0.5, // median ≈ 1.6 s
 			Sigma: 0.6,
 			Min:   200 * time.Millisecond,
 			Max:   10 * time.Second,
@@ -246,13 +246,41 @@ func (p *BehaviorProfile) JitterBy(frac float64) *BehaviorProfile {
 		return result
 	}
 
+	// clampInt ensures min <= max after independent jitter.
+	clampI := func(lo, hi int) (int, int) {
+		if lo > hi {
+			lo, hi = hi, lo
+		}
+		return lo, hi
+	}
+	// clampDuration ensures min <= max after independent jitter.
+	clampD := func(lo, hi time.Duration) (time.Duration, time.Duration) {
+		if lo > hi {
+			lo, hi = hi, lo
+		}
+		return lo, hi
+	}
+
+	timingMin, timingMax := clampD(jd(p.Timing.Min), jd(p.Timing.Max))
+	kbMin, kbMax := clampD(jd(p.Keyboard.MinDelay), jd(p.Keyboard.MaxDelay))
+	readMinPx, readMaxPx := clampI(ji(p.Scroll.ReadMinPx), ji(p.Scroll.ReadMaxPx))
+	scanMinPx, scanMaxPx := clampI(ji(p.Scroll.ScanMinPx), ji(p.Scroll.ScanMaxPx))
+	horizMinPx, horizMaxPx := clampI(ji(p.Scroll.HorizMinPx), ji(p.Scroll.HorizMaxPx))
+	horizScanMinPx, horizScanMaxPx := clampI(ji(p.Scroll.HorizScanMinPx), ji(p.Scroll.HorizScanMaxPx))
+	ppsMin, ppsMax := clampI(ji(p.Navigation.PagesPerSession.Min), ji(p.Navigation.PagesPerSession.Max))
+	sdMin, sdMax := clampD(jd(p.Navigation.SessionDuration.Min), jd(p.Navigation.SessionDuration.Max))
+	sgMin, sgMax := clampD(jd(p.Navigation.SessionGap.Min), jd(p.Navigation.SessionGap.Max))
+	burstMin, burstMax := clampI(ji(p.Rhythm.config.BurstMin), ji(p.Rhythm.config.BurstMax))
+	pauseMin, pauseMax := clampD(jd(p.Rhythm.config.PauseMin), jd(p.Rhythm.config.PauseMax))
+	longPauseMin, longPauseMax := clampD(jd(p.Rhythm.config.LongPauseMin), jd(p.Rhythm.config.LongPauseMax))
+
 	return &BehaviorProfile{
 		Name: p.Name,
 		Timing: TimingConfig{
 			Mu:    jf(p.Timing.Mu),
 			Sigma: jf(p.Timing.Sigma),
-			Min:   jd(p.Timing.Min),
-			Max:   jd(p.Timing.Max),
+			Min:   timingMin,
+			Max:   timingMax,
 		},
 		Mouse: MouseConfig{
 			Jitter:        jf(p.Mouse.Jitter),
@@ -260,39 +288,39 @@ func (p *BehaviorProfile) JitterBy(frac float64) *BehaviorProfile {
 			OvershootPx:   jf(p.Mouse.OvershootPx),
 		},
 		Scroll: ScrollConfig{
-			ReadMinPx:      ji(p.Scroll.ReadMinPx),
-			ReadMaxPx:      ji(p.Scroll.ReadMaxPx),
-			ScanMinPx:      ji(p.Scroll.ScanMinPx),
-			ScanMaxPx:      ji(p.Scroll.ScanMaxPx),
+			ReadMinPx:      readMinPx,
+			ReadMaxPx:      readMaxPx,
+			ScanMinPx:      scanMinPx,
+			ScanMaxPx:      scanMaxPx,
 			ReadPause:      jd(p.Scroll.ReadPause),
 			ScanPause:      jd(p.Scroll.ScanPause),
 			ScrollUpProb:   jf(p.Scroll.ScrollUpProb),
-			HorizMinPx:     ji(p.Scroll.HorizMinPx),
-			HorizMaxPx:     ji(p.Scroll.HorizMaxPx),
-			HorizScanMinPx: ji(p.Scroll.HorizScanMinPx),
-			HorizScanMaxPx: ji(p.Scroll.HorizScanMaxPx),
+			HorizMinPx:     horizMinPx,
+			HorizMaxPx:     horizMaxPx,
+			HorizScanMinPx: horizScanMinPx,
+			HorizScanMaxPx: horizScanMaxPx,
 		},
 		Keyboard: KeyboardConfig{
-			MinDelay:    jd(p.Keyboard.MinDelay),
-			MaxDelay:    jd(p.Keyboard.MaxDelay),
+			MinDelay:    kbMin,
+			MaxDelay:    kbMax,
 			TypoProb:    jf(p.Keyboard.TypoProb),
 			BigramModel: p.Keyboard.BigramModel,
 		},
 		Navigation: NavigationConfig{
-			PagesPerSession: Range{Min: ji(p.Navigation.PagesPerSession.Min), Max: ji(p.Navigation.PagesPerSession.Max)},
-			SessionDuration: DurationRange{Min: jd(p.Navigation.SessionDuration.Min), Max: jd(p.Navigation.SessionDuration.Max)},
-			SessionGap:      DurationRange{Min: jd(p.Navigation.SessionGap.Min), Max: jd(p.Navigation.SessionGap.Max)},
+			PagesPerSession: Range{Min: ppsMin, Max: ppsMax},
+			SessionDuration: DurationRange{Min: sdMin, Max: sdMax},
+			SessionGap:      DurationRange{Min: sgMin, Max: sgMax},
 			BackButtonProb:  jf(p.Navigation.BackButtonProb),
 			UselessPageProb: jf(p.Navigation.UselessPageProb),
 			SearchProb:      jf(p.Navigation.SearchProb),
 		},
 		Rhythm: NewRhythm(RhythmConfig{
-			BurstMin:      ji(p.Rhythm.config.BurstMin),
-			BurstMax:      ji(p.Rhythm.config.BurstMax),
-			PauseMin:      jd(p.Rhythm.config.PauseMin),
-			PauseMax:      jd(p.Rhythm.config.PauseMax),
-			LongPauseMin:  jd(p.Rhythm.config.LongPauseMin),
-			LongPauseMax:  jd(p.Rhythm.config.LongPauseMax),
+			BurstMin:      burstMin,
+			BurstMax:      burstMax,
+			PauseMin:      pauseMin,
+			PauseMax:      pauseMax,
+			LongPauseMin:  longPauseMin,
+			LongPauseMax:  longPauseMax,
 			LongPauseProb: jf(p.Rhythm.config.LongPauseProb),
 		}),
 		Fatigue: FatigueConfig{

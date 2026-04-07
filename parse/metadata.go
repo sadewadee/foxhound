@@ -16,7 +16,13 @@ func ExtractJSONLD(resp *foxhound.Response) ([]map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ExtractJSONLDFromDoc(doc)
+}
 
+// ExtractJSONLDFromDoc is like ExtractJSONLD but operates on an already-parsed
+// goquery.Document, avoiding a redundant HTML parse when the caller has already
+// parsed the response body.
+func ExtractJSONLDFromDoc(doc *goquery.Document) ([]map[string]any, error) {
 	var results []map[string]any
 	doc.Find("script[type='application/ld+json']").Each(func(_ int, s *goquery.Selection) {
 		raw := strings.TrimSpace(s.Text())
@@ -44,7 +50,11 @@ func ExtractOpenGraph(resp *foxhound.Response) map[string]string {
 	if err != nil {
 		return nil
 	}
+	return ExtractOpenGraphFromDoc(doc)
+}
 
+// ExtractOpenGraphFromDoc is like ExtractOpenGraph but accepts an already-parsed document.
+func ExtractOpenGraphFromDoc(doc *goquery.Document) map[string]string {
 	og := make(map[string]string)
 	doc.Find("meta[property^='og:']").Each(func(_ int, s *goquery.Selection) {
 		prop, _ := s.Attr("property")
@@ -62,7 +72,11 @@ func ExtractMeta(resp *foxhound.Response) map[string]string {
 	if err != nil {
 		return nil
 	}
+	return ExtractMetaFromDoc(doc)
+}
 
+// ExtractMetaFromDoc is like ExtractMeta but accepts an already-parsed document.
+func ExtractMetaFromDoc(doc *goquery.Document) map[string]string {
 	meta := make(map[string]string)
 	doc.Find("meta[name]").Each(func(_ int, s *goquery.Selection) {
 		name, _ := s.Attr("name")

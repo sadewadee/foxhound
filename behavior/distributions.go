@@ -102,8 +102,14 @@ func GaussianClamped(sigma, bound float64) float64 {
 			return s
 		}
 	}
-	// Fallback: return a sample within the center half
-	return rand.NormFloat64() * sigma * 0.5
+	// Fallback: return clamped value within bounds
+	v := rand.NormFloat64() * sigma * 0.5
+	if v < -bound {
+		v = -bound
+	} else if v > bound {
+		v = bound
+	}
+	return v
 }
 
 // LogNormalSample returns a sample from LogNormal(mu, sigma).

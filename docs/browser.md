@@ -24,7 +24,7 @@ Camoufox patches these browser APIs at the source level (not via JS injection):
 | `navigator.deviceMemory` | Set from profile |
 | `navigator.platform` | Matches OS in profile |
 
-All values are controlled via `CAMOU_CONFIG_*` environment variables derived from `identity.Profile.CamoufoxEnv`.
+All values are controlled via `CAMOU_CONFIG_N` environment variables containing a JSON blob built by `identity.Profile.BuildCamoufoxConfig()`. The JSON includes screen dimensions, navigator properties, WebGL vendor/renderer, OS-specific fonts, canvas noise, timezone, locale, and geolocation.
 
 ## Build Tags
 
@@ -87,7 +87,7 @@ The auto-download runs once per machine. Subsequent launches use the cached copy
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `WithBrowserIdentity(p)` | nil | Sets all `CAMOU_CONFIG_*` env vars from the profile |
+| `WithBrowserIdentity(p)` | nil | Sets `CAMOU_CONFIG_N` JSON env vars (screen, navigator, WebGL, fonts, canvas, geo) from the profile |
 | `WithHeadless(mode)` | `"virtual"` | Display mode: `"virtual"` (Xvfb), `"true"` (native headless), `"false"` (visible window) |
 | `WithBlockImages(bool)` | false | Block image/media/font requests. Cuts page-load time by 30-70% for content-only scraping. |
 | `WithBrowserTimeout(d)` | 60s | Per-navigation timeout |

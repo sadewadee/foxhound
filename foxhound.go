@@ -18,9 +18,29 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// anyToString converts a value to string efficiently using type switches for
+// common types, avoiding reflection-heavy fmt.Sprintf("%v", val).
+func anyToString(val any) string {
+	switch v := val.(type) {
+	case string:
+		return v
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(v)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
 
 // FetchMode indicates which fetcher to use for a request.
 type FetchMode int
@@ -65,11 +85,11 @@ const (
 	JobStepWait           = 2
 	JobStepExtract        = 3
 	JobStepScroll         = 4
-	JobStepInfiniteScroll = 5 // scroll to bottom until no new content loads
-	JobStepLoadMore       = 6 // click "load more" button repeatedly until gone
-	JobStepPaginate       = 7 // detect and follow pagination links
-	JobStepEvaluate       = 8 // execute custom JavaScript on the page
-	JobStepFill           = 9 // type text into input field with human-like keystrokes
+	JobStepInfiniteScroll = 5  // scroll to bottom until no new content loads
+	JobStepLoadMore       = 6  // click "load more" button repeatedly until gone
+	JobStepPaginate       = 7  // detect and follow pagination links
+	JobStepEvaluate       = 8  // execute custom JavaScript on the page
+	JobStepFill           = 9  // type text into input field with human-like keystrokes
 	JobStepCollect        = 10 // collect URLs from page into pool
 )
 
@@ -351,12 +371,16 @@ func (r *Response) Follow(selector string, opts ...FollowOption) []*Job {
 		}
 		seen[link] = struct{}{}
 
-		meta := make(map[string]any)
-		for k, v := range cfg.meta {
-			meta[k] = v
-		}
-		if cfg.callback != "" {
-			meta["callback"] = cfg.callback
+		// Only allocate meta map when there is data to put in it.
+		var meta map[string]any
+		if len(cfg.meta) > 0 || cfg.callback != "" || cfg.referer {
+			meta = make(map[string]any, len(cfg.meta)+2)
+			for k, v := range cfg.meta {
+				meta[k] = v
+			}
+			if cfg.callback != "" {
+				meta["callback"] = cfg.callback
+			}
 		}
 
 		job := &Job{
@@ -372,6 +396,9 @@ func (r *Response) Follow(selector string, opts ...FollowOption) []*Job {
 			CreatedAt:  time.Now(),
 		}
 		if cfg.referer {
+			if job.Meta == nil {
+				job.Meta = make(map[string]any, 1)
+			}
 			job.Meta["referer"] = r.URL
 		}
 		jobs = append(jobs, job)
@@ -549,6 +576,10 @@ type Job struct {
 	// When non-empty, the job requires a browser fetcher. The omitempty tag
 	// ensures backward compatibility with existing queue serialization.
 	Steps []JobStep `json:"steps,omitempty"`
+	// NavigationTimeout overrides the fetcher's default navigation timeout
+	// for this specific job. Useful for pages known to be slow (e.g. later
+	// pagination pages on Google SERP). Zero means use the fetcher default.
+	NavigationTimeout time.Duration `json:"navigation_timeout,omitempty"`
 	// DontFilter when true skips deduplication for this specific job.
 	// Useful for pages that need to be re-fetched (e.g. pagination, monitoring).
 	DontFilter bool `json:"dont_filter,omitempty"`
@@ -651,7 +682,7 @@ func (it *Item) ToCSVRow(columns []string) []string {
 		if !ok || val == nil {
 			row[i] = ""
 		} else {
-			row[i] = fmt.Sprintf("%v", val)
+			row[i] = anyToString(val)
 		}
 	}
 	return row
@@ -710,7 +741,7 @@ func (it *Item) Has(key string) bool {
 	if !ok || val == nil {
 		return false
 	}
-	return strings.TrimSpace(fmt.Sprintf("%v", val)) != ""
+	return strings.TrimSpace(anyToString(val)) != ""
 }
 
 // GetString returns the field value as a string. Returns "" if the field is
@@ -867,23 +898,22 @@ type Writer interface {
 	Close() error
 }
 
+// metadataHostSet is a package-level set of metadata/specification hosts
+// that should never be followed as real links (e.g. schema.org, w3.org).
+var metadataHostSet = map[string]struct{}{
+	"schema.org":     {},
+	"www.schema.org": {},
+	"w3.org":         {},
+	"www.w3.org":     {},
+	"xmlns.com":      {},
+	"purl.org":       {},
+	"ogp.me":         {},
+	"rdfs.org":       {},
+}
+
 // isMetadataHost returns true for hosts that are metadata/specification URIs,
 // not real web pages (e.g. schema.org, w3.org XML namespaces).
 func isMetadataHost(host string) bool {
-	metadataHosts := []string{
-		"schema.org",
-		"www.schema.org",
-		"w3.org",
-		"www.w3.org",
-		"xmlns.com",
-		"purl.org",
-		"ogp.me",
-		"rdfs.org",
-	}
-	for _, h := range metadataHosts {
-		if host == h {
-			return true
-		}
-	}
-	return false
+	_, ok := metadataHostSet[host]
+	return ok
 }

@@ -53,6 +53,9 @@ services:
       postgres:
         condition: service_healthy
     restart: on-failure:3
+    # Firefox/Camoufox needs ≥128 MB of shared memory for IPC between
+    # the main process and content processes. Docker default is 64 MB.
+    shm_size: "256m"
     deploy:
       resources:
         limits:

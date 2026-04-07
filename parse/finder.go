@@ -180,27 +180,18 @@ func (d *Document) FindByTextRegex(pattern string) []*Element {
 }
 
 // FindByAttr returns all elements where the named attribute exactly equals
-// value.
+// value. Uses CSS attribute selector for O(matched) instead of O(all nodes).
 func (d *Document) FindByAttr(attr, value string) []*Element {
-	var results []*Element
-	d.doc.Find("*").Each(func(_ int, s *goquery.Selection) {
-		if v, ok := s.Attr(attr); ok && v == value {
-			results = append(results, newElement(s, d))
-		}
-	})
-	return results
+	// Use CSS attribute selector: [attr='value']
+	selector := "[" + attr + "='" + strings.ReplaceAll(value, "'", "\\'") + "']"
+	return selectionToElements(d.doc.Find(selector), d)
 }
 
 // FindByAttrContains returns all elements where the named attribute contains
-// the given substring.
+// the given substring. Uses CSS attribute selector [attr*='substring'].
 func (d *Document) FindByAttrContains(attr, substring string) []*Element {
-	var results []*Element
-	d.doc.Find("*").Each(func(_ int, s *goquery.Selection) {
-		if v, ok := s.Attr(attr); ok && strings.Contains(v, substring) {
-			results = append(results, newElement(s, d))
-		}
-	})
-	return results
+	selector := "[" + attr + "*='" + strings.ReplaceAll(substring, "'", "\\'") + "']"
+	return selectionToElements(d.doc.Find(selector), d)
 }
 
 // selectionToElements converts a goquery.Selection into a slice of *Element.

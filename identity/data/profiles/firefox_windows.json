@@ -1,6 +1,6 @@
 [
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "10.0",
     "cores": 8,
     "memory": 16,
@@ -9,15 +9,18 @@
     "screen_h": 1080,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/New_York",
     "locale": "en-US",
     "lat": 40.7128,
-    "lng": -74.0060
+    "lng": -74.006
   },
   {
-    "browser_ver": "148.0",
-    "os_version": "11.0",
+    "browser_ver": "135.0",
+    "os_version": "10.0",
     "cores": 12,
     "memory": 32,
     "gpu": "NVIDIA GeForce RTX 3060",
@@ -25,14 +28,17 @@
     "screen_h": 1440,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Los_Angeles",
     "locale": "en-US",
     "lat": 34.0522,
     "lng": -118.2437
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "10.0",
     "cores": 6,
     "memory": 16,
@@ -41,15 +47,18 @@
     "screen_h": 1080,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Chicago",
     "locale": "en-US",
     "lat": 41.8781,
     "lng": -87.6298
   },
   {
-    "browser_ver": "148.0",
-    "os_version": "11.0",
+    "browser_ver": "135.0",
+    "os_version": "10.0",
     "cores": 16,
     "memory": 32,
     "gpu": "NVIDIA GeForce RTX 3060",
@@ -57,14 +66,17 @@
     "screen_h": 2160,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Chicago",
     "locale": "en-US",
     "lat": 29.7604,
     "lng": -95.3698
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "10.0",
     "cores": 4,
     "memory": 8,
@@ -73,15 +85,18 @@
     "screen_h": 768,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Phoenix",
     "locale": "en-US",
     "lat": 33.4484,
-    "lng": -112.0740
+    "lng": -112.074
   },
   {
-    "browser_ver": "148.0",
-    "os_version": "11.0",
+    "browser_ver": "135.0",
+    "os_version": "10.0",
     "cores": 8,
     "memory": 16,
     "gpu": "NVIDIA GeForce GTX 1660 SUPER",
@@ -89,14 +104,17 @@
     "screen_h": 1080,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/New_York",
     "locale": "en-US",
     "lat": 39.9526,
     "lng": -75.1652
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "10.0",
     "cores": 6,
     "memory": 16,
@@ -105,15 +123,18 @@
     "screen_h": 900,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Chicago",
     "locale": "en-US",
     "lat": 29.4241,
     "lng": -98.4936
   },
   {
-    "browser_ver": "148.0",
-    "os_version": "11.0",
+    "browser_ver": "135.0",
+    "os_version": "10.0",
     "cores": 12,
     "memory": 32,
     "gpu": "AMD Radeon RX 6700 XT",
@@ -121,14 +142,17 @@
     "screen_h": 1440,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Chicago",
     "locale": "en-US",
     "lat": 32.7767,
-    "lng": -96.7970
+    "lng": -96.797
   },
   {
-    "browser_ver": "148.0",
+    "browser_ver": "135.0",
     "os_version": "10.0",
     "cores": 8,
     "memory": 16,
@@ -137,15 +161,18 @@
     "screen_h": 1080,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Denver",
     "locale": "en-US",
     "lat": 39.7392,
     "lng": -104.9903
   },
   {
-    "browser_ver": "148.0",
-    "os_version": "11.0",
+    "browser_ver": "135.0",
+    "os_version": "10.0",
     "cores": 16,
     "memory": 32,
     "gpu": "Intel(R) Iris(R) Xe Graphics",
@@ -153,7 +180,10 @@
     "screen_h": 1080,
     "color_depth": 24,
     "pixel_ratio": 1.0,
-    "languages": ["en-US", "en"],
+    "languages": [
+      "en-US",
+      "en"
+    ],
     "timezone": "America/Los_Angeles",
     "locale": "en-US",
     "lat": 47.6062,

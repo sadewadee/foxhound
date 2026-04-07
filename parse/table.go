@@ -220,8 +220,12 @@ func parseTable(sel *goquery.Selection) *Table {
 	// Check <thead> first.
 	thead := sel.Find("thead")
 	if thead.Length() > 0 {
-		thead.Find("th, td").Each(func(_ int, cell *goquery.Selection) {
-			headers = append(headers, strings.TrimSpace(cell.Text()))
+		thead.Find("tr").First().Find("th, td").Each(func(_ int, cell *goquery.Selection) {
+			text := strings.TrimSpace(cell.Text())
+			cs := intAttr(cell, "colspan", 1)
+			for c := 0; c < cs; c++ {
+				headers = append(headers, text)
+			}
 		})
 	} else if isHeaderRow {
 		// First row is all <th> — use as headers.

@@ -14,7 +14,7 @@
 #   docker build --target runtime-static -t foxhound:static .
 #
 # Environment variables recognised at runtime:
-#   DISPLAY                   Virtual display (default :99, managed by Xvfb entrypoint)
+#   DISPLAY                   Set externally to skip Go-managed Xvfb (auto-managed when unset)
 #   PLAYWRIGHT_BROWSERS_PATH  Override playwright browser cache location
 #   FOXHOUND_DATA_DIR         Working directory for output, queues, caches (default /data)
 
@@ -176,11 +176,11 @@ USER foxhound
 WORKDIR /home/foxhound
 
 # Runtime environment variables.
-# DISPLAY points to the Xvfb virtual display started by the entrypoint.
+# DISPLAY is managed by Go's DisplayManager when headless=virtual (default).
+# Set DISPLAY externally to use your own Xvfb instance.
 # PLAYWRIGHT_BROWSERS_PATH tells playwright-go where Firefox lives.
 # FOXHOUND_DATA_DIR is the root for all persistent data.
-ENV DISPLAY=:99 \
-    PLAYWRIGHT_BROWSERS_PATH=/home/foxhound/.cache/ms-playwright \
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/foxhound/.cache/ms-playwright \
     FOXHOUND_DATA_DIR=/data
 
 # Expose the Prometheus metrics port.
@@ -190,8 +190,11 @@ EXPOSE 9090
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD curl -fsS http://localhost:9090/health || exit 1
 
-# Entrypoint: start a virtual framebuffer then hand off to foxhound.
-# Xvfb is backgrounded; the foxhound process replaces the shell so signals
-# (SIGTERM, SIGINT) are delivered directly to foxhound for graceful shutdown.
-ENTRYPOINT ["sh", "-c", "Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp & exec foxhound \"$@\"", "--"]
+# Entrypoint: foxhound now manages Xvfb internally when headless=virtual.
+# The Go DisplayManager handles start, health monitoring, crash recovery,
+# and cleanup. No shell wrapper needed — signals go directly to foxhound.
+#
+# If you need external Xvfb management (e.g. for debugging), set DISPLAY
+# before starting and foxhound will skip its own Xvfb.
+ENTRYPOINT ["foxhound"]
 CMD ["run"]

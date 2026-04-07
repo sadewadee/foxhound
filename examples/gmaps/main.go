@@ -3,29 +3,29 @@
 // Google Maps Scraper — demonstrates the collect-pool pattern.
 //
 // Flow:
-//   1. Navigate to Maps search → scroll feed → collect all profile URLs (Collect phase)
-//   2. Open each profile URL concurrently → extract business data (Process phase)
-//   3. (Optional) Visit business website → extract contacts (Enrichment phase)
+//  1. Navigate to Maps search → scroll feed → collect all profile URLs (Collect phase)
+//  2. Open each profile URL concurrently → extract business data (Process phase)
+//  3. (Optional) Visit business website → extract contacts (Enrichment phase)
 //
 // Usage:
 //
-//   # Default: in-memory pool
-//   go run -tags playwright ./examples/gmaps/ -query "yoga studio canggu bali"
+//	# Default: in-memory pool
+//	go run -tags playwright ./examples/gmaps/ -query "yoga studio canggu bali"
 //
-//   # SQLite pool (resumable)
-//   go run -tags playwright ./examples/gmaps/ -query "cafe seminyak" -pool sqlite -pool-dsn gmaps_pool.db
+//	# SQLite pool (resumable)
+//	go run -tags playwright ./examples/gmaps/ -query "cafe seminyak" -pool sqlite -pool-dsn gmaps_pool.db
 //
-//   # PostgreSQL pool (distributed)
-//   go run -tags playwright ./examples/gmaps/ -query "villa ubud" -pool postgres -pool-dsn "postgres://user:pass@localhost/foxhound?sslmode=disable"
+//	# PostgreSQL pool (distributed)
+//	go run -tags playwright ./examples/gmaps/ -query "villa ubud" -pool postgres -pool-dsn "postgres://user:pass@localhost/foxhound?sslmode=disable"
 //
-//   # With website enrichment
-//   go run -tags playwright ./examples/gmaps/ -query "yoga studio canggu bali" -enrich
+//	# With website enrichment
+//	go run -tags playwright ./examples/gmaps/ -query "yoga studio canggu bali" -enrich
 //
-//   # Visible browser
-//   go run -tags playwright ./examples/gmaps/ -query "yoga studio canggu bali" -headless false
+//	# Visible browser
+//	go run -tags playwright ./examples/gmaps/ -query "yoga studio canggu bali" -headless false
 //
-//   # Fast mode (no warm-up, aggressive timing)
-//   go run -tags playwright ./examples/gmaps/ -query "yoga studio canggu bali" -fast
+//	# Fast mode (no warm-up, aggressive timing)
+//	go run -tags playwright ./examples/gmaps/ -query "yoga studio canggu bali" -fast
 package main
 
 import (
@@ -238,16 +238,17 @@ func main() {
 	}
 
 	h := engine.NewHunt(engine.HuntConfig{
-		Name:            "gmaps-profiles",
-		Domain:          "www.google.com",
-		Walkers:         *workers,
-		Pool:            pool,
-		PoolFetchMode:   foxhound.FetchBrowser,
-		Fetcher:         cf,
-		Processor:       processor,
-		Queue:           queue.NewMemoryQueue(),
-		Writers:         []foxhound.Writer{jsonlWriter},
-		Pipelines:       []foxhound.Pipeline{pipelineChain},
+		Name:             "gmaps-profiles",
+		Domain:           "www.google.com",
+		Walkers:          *workers,
+		Pool:             pool,
+		PoolFetchMode:    foxhound.FetchBrowser,
+		PoolFetchModeSet: true,
+		Fetcher:          cf,
+		Processor:        processor,
+		Queue:            queue.NewMemoryQueue(),
+		Writers:          []foxhound.Writer{jsonlWriter},
+		Pipelines:        []foxhound.Pipeline{pipelineChain},
 		Middlewares: []foxhound.Middleware{
 			middleware.NewRateLimit(0.5, 1),
 		},

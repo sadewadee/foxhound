@@ -57,7 +57,7 @@ func (r *retryMiddleware) Wrap(next foxhound.Fetcher) foxhound.Fetcher {
 			}
 
 			resp, err = next.Fetch(ctx, job)
-			if err == nil && !blockedStatusCodes[resp.StatusCode] {
+			if err == nil && resp != nil && !blockedStatusCodes[resp.StatusCode] {
 				return resp, nil
 			}
 

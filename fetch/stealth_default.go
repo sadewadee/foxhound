@@ -23,6 +23,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"time"
@@ -90,10 +91,12 @@ type StealthFetcher struct {
 // NewStealth creates a StealthFetcher. Call with any number of StealthOption
 // functional options to configure identity, timeout, and proxy.
 func NewStealth(opts ...StealthOption) *StealthFetcher {
+	jar, _ := cookiejar.New(nil)
 	f := &StealthFetcher{
 		client: &http.Client{
 			Timeout:   defaultStealthTimeout,
 			Transport: &http.Transport{},
+			Jar:       jar,
 		},
 	}
 	for _, opt := range opts {
@@ -181,7 +184,9 @@ func (f *StealthFetcher) Fetch(ctx context.Context, job *foxhound.Job) (*foxhoun
 		reader = brotli.NewReader(httpResp.Body)
 	}
 
-	body, err := io.ReadAll(reader)
+	// Limit response body to 10MB to avoid unbounded memory allocation.
+	const maxResponseSize = 10 * 1024 * 1024
+	body, err := io.ReadAll(io.LimitReader(reader, maxResponseSize))
 	if err != nil {
 		return nil, fmt.Errorf("fetch/stealth: reading response body from %s: %w", job.URL, err)
 	}
@@ -225,7 +230,7 @@ func (f *StealthFetcher) Close() error {
 // minimal header set is applied so requests are always well-formed.
 func (f *StealthFetcher) applyIdentityHeaders(req *http.Request) {
 	if f.identity == nil {
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0")
 		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 		req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 		req.Header.Set("Accept-Encoding", "gzip, deflate, br")
@@ -239,17 +244,16 @@ func (f *StealthFetcher) applyIdentityHeaders(req *http.Request) {
 	// job-level headers after this function returns.
 	headerValues := map[string]string{
 		"User-Agent":                p.UA,
-		"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+		"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/png,image/svg+xml,*/*;q=0.8",
 		"Accept-Language":           buildAcceptLanguage(p.Languages),
-		"Accept-Encoding":           "gzip, deflate, br",
-		"Connection":                "keep-alive",
+		"Accept-Encoding":           "gzip, deflate, br, zstd",
 		"Upgrade-Insecure-Requests": "1",
 		"Sec-Fetch-Dest":            "document",
 		"Sec-Fetch-Mode":            "navigate",
 		"Sec-Fetch-Site":            "none",
 		"Sec-Fetch-User":            "?1",
+		"TE":                        "trailers",
 		"Priority":                  "u=0, i",
-		"Cache-Control":             "max-age=0",
 	}
 
 	// Apply headers in the canonical browser order to match the TLS fingerprint.
@@ -270,9 +274,12 @@ func (f *StealthFetcher) applyIdentityHeaders(req *http.Request) {
 }
 
 // buildAcceptLanguage constructs an Accept-Language header value from a list of
-// language tags, applying decreasing quality weights to all tags after the first.
+// language tags, matching Firefox's actual quality factor pattern.
 //
-// Example: ["en-US", "en"] → "en-US,en;q=0.7"
+// Firefox uses: primary,secondary;q=0.5 (for 2 langs) or
+// primary,second;q=0.8,third;q=0.5,fourth;q=0.3 (for more).
+//
+// Example: ["en-US", "en"] → "en-US,en;q=0.5"
 func buildAcceptLanguage(langs []string) string {
 	if len(langs) == 0 {
 		return "en-US,en;q=0.5"
@@ -281,16 +288,22 @@ func buildAcceptLanguage(langs []string) string {
 		return langs[0]
 	}
 
+	// Firefox quality factors: for 2 languages, second gets q=0.5.
+	// For 3+, they decrease: 0.8, 0.5, 0.3, 0.1
+	firefoxQ := []float64{0.8, 0.6, 0.4, 0.2}
+	if len(langs) == 2 {
+		// Special case: Firefox uses q=0.5 for 2-language configs
+		firefoxQ = []float64{0.5}
+	}
+
 	var b strings.Builder
 	b.WriteString(langs[0])
-	// Quality weight starts at 0.9 and decreases by 0.1 per additional tag,
-	// floored at 0.1 to remain valid.
-	q := 0.9
-	for _, lang := range langs[1:] {
-		fmt.Fprintf(&b, ",%s;q=%.1f", lang, q)
-		if q > 0.2 {
-			q -= 0.1
+	for i, lang := range langs[1:] {
+		q := 0.1
+		if i < len(firefoxQ) {
+			q = firefoxQ[i]
 		}
+		fmt.Fprintf(&b, ",%s;q=%.1f", lang, q)
 	}
 	return b.String()
 }

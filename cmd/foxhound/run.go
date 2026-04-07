@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/google/uuid"
 	foxhound "github.com/sadewadee/foxhound"
 	"github.com/sadewadee/foxhound/cache"
 	"github.com/sadewadee/foxhound/captcha"
@@ -29,7 +30,6 @@ import (
 	"github.com/sadewadee/foxhound/proxy"
 	proxyproviders "github.com/sadewadee/foxhound/proxy/providers"
 	"github.com/sadewadee/foxhound/queue"
-	"github.com/google/uuid"
 )
 
 // defaultProcessor extracts the page title and all same-domain links.
@@ -148,17 +148,18 @@ func buildQueue(backend, queueURL string) (foxhound.Queue, error) {
 
 // buildMiddlewares assembles the FULL middleware chain from config.
 // Order (outermost → innermost):
-//  0.  Concurrency    — limits parallel requests per domain (optional, outermost)
-//  1.  Metrics        — records all requests including retries
-//  2.  RateLimit      — enforces per-domain request rate
-//  3.  RobotsTxt      — respects robots.txt (optional)
-//  4.  DeltaFetch     — skips previously-scraped URLs (optional)
-//  5.  Dedup          — skips duplicate URLs within this run
-//  6.  AutoThrottle   — adapts delay based on server response time (optional)
-//  7.  Cookies        — persists cookies across requests (always, critical for anti-bot)
-//  7.5 BlockDetector  — detect and retry soft blocks (always, anti-bot)
-//  8.  Referer        — sets realistic Referer header (always, critical for anti-bot)
-//  9.  Redirect       — follows HTTP redirects (always)
+//  0. Concurrency    — limits parallel requests per domain (optional, outermost)
+//  1. Metrics        — records all requests including retries
+//  2. RateLimit      — enforces per-domain request rate
+//  3. RobotsTxt      — respects robots.txt (optional)
+//  4. DeltaFetch     — skips previously-scraped URLs (optional)
+//  5. Dedup          — skips duplicate URLs within this run
+//  6. AutoThrottle   — adapts delay based on server response time (optional)
+//  7. Cookies        — persists cookies across requests (always, critical for anti-bot)
+//     7.5 BlockDetector  — detect and retry soft blocks (always, anti-bot)
+//  8. Referer        — sets realistic Referer header (always, critical for anti-bot)
+//  9. Redirect       — follows HTTP redirects (always)
+//
 // 10.  DepthLimit     — limits crawl depth (optional)
 // 11.  Retry          — retries failed requests (always, innermost)
 func buildMiddlewares(cfg *foxhound.Config) []foxhound.Middleware {
@@ -494,6 +495,7 @@ func runHuntWithQueue(cfg *foxhound.Config, overrideQueue foxhound.Queue) error 
 			fetch.WithBrowserIdentity(prof),
 			fetch.WithBlockImages(cfg.Fetch.Browser.BlockImages),
 			fetch.WithHeadless(resolveHeadless(cfg.Fetch.Browser.Headless)),
+			fetch.WithBrowserTimeout(cfg.Fetch.Browser.Timeout.Duration),
 		}
 		if cfg.Fetch.Browser.ExtensionPath != "" {
 			camoufoxOpts = append(camoufoxOpts, fetch.WithExtensionPath(cfg.Fetch.Browser.ExtensionPath))

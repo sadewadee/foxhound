@@ -38,14 +38,15 @@ func TestHunt_PoolFeedsSeeds(t *testing.T) {
 	})
 
 	h := engine.NewHunt(engine.HuntConfig{
-		Name:          "pool-test",
-		Domain:        "example.com",
-		Walkers:       2,
-		Pool:          pool,
-		Fetcher:       fetcher,
-		Processor:     processor,
-		Queue:         q,
-		PoolFetchMode: foxhound.FetchStatic,
+		Name:             "pool-test",
+		Domain:           "example.com",
+		Walkers:          2,
+		Pool:             pool,
+		Fetcher:          fetcher,
+		Processor:        processor,
+		Queue:            q,
+		PoolFetchMode:    foxhound.FetchStatic,
+		PoolFetchModeSet: true,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

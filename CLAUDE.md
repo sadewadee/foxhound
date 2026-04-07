@@ -65,6 +65,17 @@ Every request uses a complete, internally-consistent identity profile: UA + TLS 
 id := identity.Generate(identity.WithBrowser(identity.BrowserFirefox), identity.WithOS(identity.OSWindows))
 ```
 
+### Camoufox Fingerprint Config (CAMOU_CONFIG)
+The identity system builds a JSON config for Camoufox via `Profile.BuildCamoufoxConfig()`. This JSON is chunked into `CAMOU_CONFIG_1`, `CAMOU_CONFIG_2`, ... env vars (max 2000 bytes each). The config includes:
+- Screen dimensions (`screen.width`, `screen.height`, etc.)
+- Navigator properties (`navigator.userAgent`, `navigator.platform`, `navigator.oscpu`, etc.)
+- WebGL vendor/renderer strings matched to the declared GPU
+- OS-specific font lists (Windows/macOS/Linux)
+- Canvas noise (`canvas:aaOffset`)
+- Timezone, locale, geolocation
+
+When the Camoufox binary is active, `buildContextOptions()` does NOT set UserAgent, Locale, or TimezoneId via Playwright — Camoufox handles these at C++ level. The addon config (NopeCHA) is merged into the same JSON blob via `Profile.MergeCamoufoxConfig()`.
+
 ### Key Terminology
 - **Hunt** (`engine/hunt.go`): scraping campaign orchestrator — seeds queue, launches walkers, collects stats
 - **Trail** (`engine/trail.go`): fluent navigation path builder (Navigate → Click → Fill → Wait → Scroll → Evaluate → Extract)

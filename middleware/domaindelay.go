@@ -73,26 +73,28 @@ func (d *domainDelayMiddleware) Wrap(next foxhound.Fetcher) foxhound.Fetcher {
 		d.mu.Lock()
 		last, exists := d.lastReqs[domain]
 		now := time.Now()
+		var wait time.Duration
 		if exists {
 			elapsed := now.Sub(last)
 			if elapsed < delay {
-				wait := delay - elapsed
-				d.mu.Unlock()
-
-				slog.Debug("domain-delay: throttling request",
-					"domain", domain, "delay", wait, "url", job.URL)
-
-				select {
-				case <-time.After(wait):
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
-
-				d.mu.Lock()
+				wait = delay - elapsed
 			}
 		}
-		d.lastReqs[domain] = time.Now()
+		// Reserve the time slot before releasing the lock so other goroutines
+		// see the updated value and compute their own wait correctly.
+		d.lastReqs[domain] = now.Add(wait)
 		d.mu.Unlock()
+
+		if wait > 0 {
+			slog.Debug("domain-delay: throttling request",
+				"domain", domain, "delay", wait, "url", job.URL)
+
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
 
 		return next.Fetch(ctx, job)
 	})

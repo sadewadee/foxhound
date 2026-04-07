@@ -58,7 +58,6 @@ func DefaultCircuitBreakerConfig() CircuitBreakerConfig {
 // outcome records a single request result.
 type outcome struct {
 	success bool
-	at      time.Time
 }
 
 // domainCircuit holds per-domain circuit breaker state.
@@ -75,7 +74,7 @@ type domainCircuit struct {
 
 // record adds an outcome and returns the current failure rate.
 func (dc *domainCircuit) record(success bool) float64 {
-	dc.outcomes[dc.outIdx] = outcome{success: success, at: time.Now()}
+	dc.outcomes[dc.outIdx] = outcome{success: success}
 	dc.outIdx = (dc.outIdx + 1) % len(dc.outcomes)
 	if dc.outCount < len(dc.outcomes) {
 		dc.outCount++
@@ -189,9 +188,11 @@ func (cb *circuitBreakerMiddleware) Wrap(next foxhound.Fetcher) foxhound.Fetcher
 		if dc.state == CircuitHalfOpen {
 			dc.probing = false
 			if success {
-				// Recovery — close the circuit
+				// Recovery — close the circuit and reset sliding window
 				dc.state = CircuitClosed
 				dc.trips = 0
+				dc.outCount = 0
+				dc.outIdx = 0
 				slog.Info("circuitbreaker: half-open probe succeeded, circuit closed", "domain", domain)
 			} else {
 				// Still failing — re-open with increased backoff

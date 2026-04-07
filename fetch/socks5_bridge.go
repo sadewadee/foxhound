@@ -34,8 +34,9 @@ import (
 // connections to an upstream SOCKS5 proxy with authentication.
 type socks5Bridge struct {
 	listener     net.Listener
-	upstreamAddr string          // "host:port"
-	auth         *xnetproxy.Auth // upstream credentials
+	upstreamAddr string           // "host:port"
+	auth         *xnetproxy.Auth  // upstream credentials
+	dialer       xnetproxy.Dialer // cached upstream dialer (created once)
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup // tracks in-flight relay goroutines AND serve goroutine
 	localAddr    string         // "127.0.0.1:<port>"
@@ -75,11 +76,19 @@ func newSocks5Bridge(upstreamAddr, username, password string) (*socks5Bridge, er
 		return nil, fmt.Errorf("socks5 bridge: listen: %w", err)
 	}
 
+	auth := &xnetproxy.Auth{User: username, Password: password}
+	dialer, dialerErr := xnetproxy.SOCKS5("tcp", upstreamAddr, auth, xnetproxy.Direct)
+	if dialerErr != nil {
+		ln.Close()
+		return nil, fmt.Errorf("socks5 bridge: create dialer: %w", dialerErr)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	b := &socks5Bridge{
 		listener:     ln,
 		upstreamAddr: upstreamAddr,
-		auth:         &xnetproxy.Auth{User: username, Password: password},
+		auth:         auth,
+		dialer:       dialer,
 		cancel:       cancel,
 		localAddr:    ln.Addr().String(),
 	}
@@ -208,14 +217,8 @@ func (b *socks5Bridge) handleConn(conn net.Conn) {
 	port := binary.BigEndian.Uint16(portBytes[:])
 	target := fmt.Sprintf("%s:%d", targetAddr, port)
 
-	// --- Step 3: Dial upstream via authenticated SOCKS5 ---
-	dialer, err := xnetproxy.SOCKS5("tcp", b.upstreamAddr, b.auth, xnetproxy.Direct)
-	if err != nil {
-		slog.Debug("socks5 bridge: upstream dialer error", "err", err)
-		b.socksReply(conn, 0x01) // general failure
-		return
-	}
-	upstream, err := dialer.Dial("tcp", target)
+	// --- Step 3: Dial upstream via authenticated SOCKS5 (cached dialer) ---
+	upstream, err := b.dialer.Dial("tcp", target)
 	if err != nil {
 		slog.Debug("socks5 bridge: upstream dial failed", "target", target, "err", err)
 		b.socksReply(conn, 0x05) // connection refused

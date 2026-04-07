@@ -21,8 +21,9 @@
 //     and are injected via playwright BrowserTypeLaunchOptions.Env.
 //   - Images, media, and fonts are intercepted and aborted when blockImages=true
 //     to reduce bandwidth for content-only scraping.
-//   - Navigation uses WaitUntilStateNetworkidle so dynamic JS-rendered pages are
-//     fully resolved before content is extracted.
+//   - Navigation uses WaitUntilStateDomcontentloaded by default for fast page
+//     loads. When a solver extension is active, WaitUntilStateLoad is used
+//     to ensure content scripts are injected.
 
 package fetch
 
@@ -34,20 +35,20 @@ import (
 	"math/rand/v2"
 	"net/http"
 	neturl "net/url"
-	"regexp"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/playwright-community/playwright-go"
 	foxhound "github.com/sadewadee/foxhound"
 	"github.com/sadewadee/foxhound/behavior"
 	"github.com/sadewadee/foxhound/identity"
-	"github.com/playwright-community/playwright-go"
 )
 
 // defaultBrowserTimeout is the per-navigation ceiling when no explicit timeout
@@ -172,36 +173,38 @@ func WithPersistSession(persist bool) CamoufoxOption {
 // calls so cookies, localStorage, and session state are preserved between
 // requests — useful for sites that require login state.
 type CamoufoxFetcher struct {
-	pw              *playwright.Playwright
-	browser         playwright.Browser
-	identity        *identity.Profile
-	blockImages     bool
-	headless        string
-	timeout         time.Duration
-	proxyURL        string       // SOCKS5 or HTTP proxy URL
-	extensionPath   string       // path to Firefox extension dir (e.g. NopeCHA)
-	maxRequests     int          // restart after this many fetches (0 = disabled)
-	requestCount    atomic.Int64 // total fetches served by the current browser instance
-	mu              sync.Mutex   // serialises browser restart
-	persistSession  bool
-	sessionCtx      playwright.BrowserContext // reused when persistSession=true
-	sessionMu       sync.Mutex               // guards sessionCtx lifecycle
-	hasExtension    bool                      // true when solver extension is loaded
-	initScript      string                    // JS injected into every page via AddInitScript
-	userDataDir     string                    // persistent profile dir; uses LaunchPersistentContext
-	persistCtx      playwright.BrowserContext // context from LaunchPersistentContext
-	cdpURL          string                    // connect to existing browser via CDP
-	useRealChrome   bool                      // use pw.Chromium with channel=chrome
-	capturePatterns []*regexp.Regexp          // URL patterns for XHR/fetch response capture
-	poolSize        int                        // max pooled pages (0 = disabled)
-	pageReuseLimit  int                        // max reuses per pooled page (0 = unlimited)
-	pool            *PagePool                  // page pool (non-nil when poolSize > 0 and !persistSession)
-	cookies          []BrowserCookie            // cookies to inject into browser context before navigation
-	behaviorProfile  *behavior.BehaviorProfile  // optional profile for scroll/keyboard configs
-	tempDirs         []string                   // temp directories to clean up on Close/restart
-	storageStatePath string                     // path to load/save storage state JSON
-	socksBridge      *socks5Bridge              // local SOCKS5 bridge for authenticated proxies (nil when not needed)
-	skipExtension    bool                       // skip auto-loading NopeCHA addon (API solver active)
+	pw               *playwright.Playwright
+	browser          playwright.Browser
+	identity         *identity.Profile
+	blockImages      bool
+	headless         string
+	timeout          time.Duration
+	proxyURL         string       // SOCKS5 or HTTP proxy URL
+	extensionPath    string       // path to Firefox extension dir (e.g. NopeCHA)
+	maxRequests      int          // restart after this many fetches (0 = disabled)
+	requestCount     atomic.Int64 // total fetches served by the current browser instance
+	mu               sync.Mutex   // serialises browser restart
+	persistSession   bool
+	sessionCtx       playwright.BrowserContext // reused when persistSession=true
+	sessionMu        sync.Mutex                // guards sessionCtx lifecycle
+	hasExtension     bool                      // true when solver extension is loaded
+	initScript       string                    // JS injected into every page via AddInitScript
+	userDataDir      string                    // persistent profile dir; uses LaunchPersistentContext
+	persistCtx       playwright.BrowserContext // context from LaunchPersistentContext
+	cdpURL           string                    // connect to existing browser via CDP
+	useRealChrome    bool                      // use pw.Chromium with channel=chrome
+	capturePatterns  []*regexp.Regexp          // URL patterns for XHR/fetch response capture
+	poolSize         int                       // max pooled pages (0 = disabled)
+	pageReuseLimit   int                       // max reuses per pooled page (0 = unlimited)
+	pool             *PagePool                 // page pool (non-nil when poolSize > 0 and !persistSession)
+	cookies          []BrowserCookie           // cookies to inject into browser context before navigation
+	behaviorProfile  *behavior.BehaviorProfile // optional profile for scroll/keyboard configs
+	tempDirs         []string                  // temp directories to clean up on Close/restart
+	storageStatePath string                    // path to load/save storage state JSON
+	socksBridge      *socks5Bridge             // local SOCKS5 bridge for authenticated proxies (nil when not needed)
+	skipExtension    bool                      // skip auto-loading NopeCHA addon (API solver active)
+	displayMgr       *DisplayManager           // Xvfb manager (non-nil in "virtual" mode on Linux)
+	hasCamoufox      bool                      // true when Camoufox binary is in use (not plain Firefox)
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -319,9 +322,28 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 		opt(f)
 	}
 
+	// When headless mode is "virtual", start an Xvfb virtual display server
+	// so the browser has an X11 display to render into. On non-Linux platforms
+	// or when DISPLAY is already set, this is a no-op (NewDisplayManager returns nil).
+	if f.headless == "virtual" && needsXvfb() {
+		dm, dmErr := NewDisplayManager()
+		if dmErr != nil {
+			slog.Warn("fetch/camoufox: Xvfb failed, falling back to native headless",
+				"err", dmErr)
+			f.headless = "true"
+		} else if dm != nil {
+			f.displayMgr = dm
+			slog.Info("fetch/camoufox: using Xvfb virtual display", "display", dm.Display())
+		}
+	}
+
 	// Start the playwright runtime.
 	pw, err := playwright.Run()
 	if err != nil {
+		// If we started Xvfb, clean it up on failure.
+		if f.displayMgr != nil {
+			f.displayMgr.Close()
+		}
 		return nil, fmt.Errorf("fetch/camoufox: starting playwright runtime: %w", err)
 	}
 
@@ -362,6 +384,7 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 	// WebRTC IP protection, audio context spoofing, BrowserForge fingerprints.
 	if execPath != "" {
 		launchOpts.ExecutablePath = playwright.String(execPath)
+		f.hasCamoufox = true
 		slog.Info("fetch/camoufox: using Camoufox binary", "path", execPath)
 	} else {
 		slog.Warn("fetch/camoufox: using plain Firefox — anti-fingerprint features disabled")
@@ -395,12 +418,18 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 		}
 	}
 
-	// When an extension path is set AND Camoufox binary is available, inject
-	// the addon via CAMOU_CONFIG env var. Camoufox natively loads unpacked
-	// addons listed in CAMOU_CONFIG_* environment variables — no persistent
-	// context or profile hacking needed.
+	// Build CAMOU_CONFIG env vars: fingerprint config + addon config merged
+	// into a single JSON blob split across CAMOU_CONFIG_1, CAMOU_CONFIG_2, ...
+	//
+	// Camoufox reads these at C++ level to spoof screen, navigator, WebGL,
+	// fonts, canvas, geolocation, timezone, and locale — all invisible to JS.
+	if launchOpts.Env == nil {
+		launchOpts.Env = map[string]string{}
+	}
+
+	// Resolve addon path (if any) for merging into CAMOU_CONFIG.
+	var addonExtra map[string]any
 	if f.extensionPath != "" && f.extensionPath != "none" && execPath != "" {
-		// Resolve to absolute path.
 		absExt, _ := filepath.Abs(f.extensionPath)
 		// If .xpi, it must be extracted first — Camoufox expects directories.
 		if strings.HasSuffix(absExt, ".xpi") {
@@ -416,21 +445,32 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 				}
 			}
 		}
-
-		// Build CAMOU_CONFIG JSON with addons array.
-		camoConfig := map[string]any{
+		addonExtra = map[string]any{
 			"addons": []string{absExt},
 		}
-		configJSON, _ := json.Marshal(camoConfig)
-		if launchOpts.Env == nil {
-			launchOpts.Env = map[string]string{}
-		}
-		launchOpts.Env["CAMOU_CONFIG_1"] = string(configJSON)
 		f.hasExtension = true
-
-		slog.Info("fetch/camoufox: addon injected via CAMOU_CONFIG",
+		slog.Info("fetch/camoufox: addon will be injected via CAMOU_CONFIG",
 			"path", absExt)
+	}
 
+	// Merge fingerprint config + addon config into CAMOU_CONFIG_N env vars.
+	if f.identity != nil && execPath != "" {
+		if addonExtra != nil {
+			// Merge: fingerprint + addons in one JSON blob
+			for k, v := range f.identity.MergeCamoufoxConfig(addonExtra) {
+				launchOpts.Env[k] = v
+			}
+		} else {
+			// Fingerprint only
+			for k, v := range f.identity.BuildCamoufoxEnv() {
+				launchOpts.Env[k] = v
+			}
+		}
+		slog.Info("fetch/camoufox: fingerprint config injected via CAMOU_CONFIG")
+	} else if addonExtra != nil {
+		// No identity but addon needed — addon-only config
+		configJSON, _ := json.Marshal(addonExtra)
+		launchOpts.Env["CAMOU_CONFIG_1"] = string(configJSON)
 	}
 
 	// --- Browser acquisition: CDP connect > persistent context > normal launch ---
@@ -1353,8 +1393,8 @@ func (f *CamoufoxFetcher) handleCookieConsent(page playwright.Page) {
 		"button:has-text('I agree')",
 		"button:has-text('Accept all')",
 		"button:has-text('Accept All')",
-		"button:has-text('Terima')",  // Indonesian
-		"button:has-text('Setuju')",  // Indonesian
+		"button:has-text('Terima')", // Indonesian
+		"button:has-text('Setuju')", // Indonesian
 		"#onetrust-accept-btn-handler",
 		".cookie-accept",
 		"#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll",
@@ -2044,6 +2084,16 @@ func hasWaitStep(job *foxhound.Job) bool {
 	return false
 }
 
+// isPlaywrightTimeout returns true when the error is a playwright navigation
+// timeout (the error message contains "Timeout" and "exceeded").
+func isPlaywrightTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Timeout") && strings.Contains(msg, "exceeded")
+}
+
 // navigate performs the actual playwright navigation. It is called from a
 // goroutine so that context cancellation can abort it cleanly.
 func (f *CamoufoxFetcher) navigate(ctx context.Context, job *foxhound.Job) (*foxhound.Response, error) {
@@ -2189,7 +2239,12 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 		})
 	}
 
-	timeoutMs := float64(f.timeout.Milliseconds())
+	// Per-job timeout override takes precedence over the fetcher default.
+	navTimeout := f.timeout
+	if job.NavigationTimeout > 0 {
+		navTimeout = job.NavigationTimeout
+	}
+	timeoutMs := float64(navTimeout.Milliseconds())
 
 	slog.Debug("fetch/camoufox: navigating",
 		"url", job.URL,
@@ -2197,12 +2252,12 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 		"timeout_ms", timeoutMs,
 	)
 
-	waitUntil := playwright.WaitUntilStateNetworkidle
-	if hasWaitStep(job) {
-		waitUntil = playwright.WaitUntilStateDomcontentloaded
-	}
+	// Default to domcontentloaded — sufficient for most content scraping and
+	// significantly faster than networkidle (saves 2-10s on pages with many
+	// third-party resources like Google SERP). Use load only when the
+	// extension needs content scripts injected.
+	waitUntil := playwright.WaitUntilStateDomcontentloaded
 	// Extension needs at least "load" to ensure content scripts are injected.
-	// This takes priority over the faster domcontentloaded.
 	if f.hasExtension {
 		waitUntil = playwright.WaitUntilStateLoad
 	}
@@ -2213,6 +2268,30 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 		Timeout:   playwright.Float(timeoutMs),
 	})
 	duration := time.Since(start)
+
+	// On navigation timeout, retry once with 2x timeout and the faster
+	// domcontentloaded event. Many pages (especially Google SERP later
+	// pages) are content-ready well before networkidle/load.
+	if err != nil && isPlaywrightTimeout(err) {
+		retryTimeout := navTimeout * 2
+		// Cap at 120s to avoid absurdly long waits.
+		if retryTimeout > 120*time.Second {
+			retryTimeout = 120 * time.Second
+		}
+		retryTimeoutMs := float64(retryTimeout.Milliseconds())
+		slog.Warn("fetch/camoufox: navigation timeout, retrying with extended timeout",
+			"url", job.URL,
+			"original_timeout", navTimeout,
+			"retry_timeout", retryTimeout,
+			"wait_until", "domcontentloaded",
+		)
+		start = time.Now()
+		navResp, err = page.Goto(job.URL, playwright.PageGotoOptions{
+			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+			Timeout:   playwright.Float(retryTimeoutMs),
+		})
+		duration = time.Since(start)
+	}
 
 	if err != nil {
 		return nil, fmt.Errorf("fetch/camoufox: navigating to %s: %w", job.URL, err)
@@ -2366,38 +2445,56 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 }
 
 // buildContextOptions constructs playwright.BrowserNewContextOptions from the
-// identity profile, applying all relevant attributes: UA, viewport, locale,
-// timezone, geolocation, pixel ratio, and colour scheme.
+// identity profile.
 //
-// When no identity is set, a sensible Firefox-on-Windows default is returned so
-// the browser still presents a plausible fingerprint.
+// When the Camoufox binary is active (hasCamoufox=true), UserAgent, Locale,
+// and TimezoneId are NOT set here because Camoufox handles them at C++ level
+// via CAMOU_CONFIG. Setting them via Playwright would create a detectable
+// mismatch between the JS-injected values and the C++ values.
+//
+// Viewport is always set (it controls window size, separate from screen size).
+// Geolocation permissions may still be needed for navigator.geolocation API.
+//
+// When no identity is set and we're on plain Firefox, sensible defaults are
+// applied so the browser still presents a plausible fingerprint.
 func (f *CamoufoxFetcher) buildContextOptions() playwright.BrowserNewContextOptions {
 	opts := playwright.BrowserNewContextOptions{
 		ColorScheme: playwright.ColorSchemeLight,
 	}
 
 	if f.identity == nil {
-		opts.UserAgent = playwright.String(
-			"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0",
-		)
+		// No identity — apply defaults. When using Camoufox, skip UA/locale/tz
+		// since Camoufox has its own defaults from BrowserForge.
+		if !f.hasCamoufox {
+			opts.UserAgent = playwright.String(
+				"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0",
+			)
+			opts.Locale = playwright.String("en-US")
+			opts.TimezoneId = playwright.String("America/New_York")
+		}
 		opts.Viewport = &playwright.Size{Width: 1920, Height: 1080}
-		opts.Locale = playwright.String("en-US")
-		opts.TimezoneId = playwright.String("America/New_York")
 		return opts
 	}
 
 	p := f.identity
 
-	opts.UserAgent = playwright.String(p.UA)
+	// Viewport controls the browser window inner size — always set this.
 	opts.Viewport = &playwright.Size{
 		Width:  p.ScreenW,
 		Height: p.ScreenH,
 	}
-	opts.Locale = playwright.String(p.Locale)
-	opts.TimezoneId = playwright.String(p.Timezone)
 
 	if p.PixelRatio != 0 {
 		opts.DeviceScaleFactor = playwright.Float(p.PixelRatio)
+	}
+
+	// When Camoufox is active, it handles UA, locale, and timezone at C++
+	// level via CAMOU_CONFIG. Do NOT override them via Playwright context
+	// because that creates a detectable mismatch.
+	if !f.hasCamoufox {
+		opts.UserAgent = playwright.String(p.UA)
+		opts.Locale = playwright.String(p.Locale)
+		opts.TimezoneId = playwright.String(p.Timezone)
 	}
 
 	// Only attach geolocation when real coordinates are present; a zero-zero
@@ -2525,14 +2622,27 @@ func (f *CamoufoxFetcher) restart() error {
 		launchOpts.Proxy = parsePlaywrightProxy(f.proxyURL)
 	}
 
-	// Restore extension (CAMOU_CONFIG) if originally loaded.
+	// Restore CAMOU_CONFIG (fingerprint + extension) on restart.
+	if launchOpts.Env == nil {
+		launchOpts.Env = map[string]string{}
+	}
+	var restartAddonExtra map[string]any
 	if f.hasExtension && f.extensionPath != "" && execPath != "" {
 		absExt, _ := filepath.Abs(f.extensionPath)
-		camoConfig := map[string]any{"addons": []string{absExt}}
-		configJSON, _ := json.Marshal(camoConfig)
-		if launchOpts.Env == nil {
-			launchOpts.Env = map[string]string{}
+		restartAddonExtra = map[string]any{"addons": []string{absExt}}
+	}
+	if f.identity != nil && execPath != "" {
+		if restartAddonExtra != nil {
+			for k, v := range f.identity.MergeCamoufoxConfig(restartAddonExtra) {
+				launchOpts.Env[k] = v
+			}
+		} else {
+			for k, v := range f.identity.BuildCamoufoxEnv() {
+				launchOpts.Env[k] = v
+			}
 		}
+	} else if restartAddonExtra != nil {
+		configJSON, _ := json.Marshal(restartAddonExtra)
 		launchOpts.Env["CAMOU_CONFIG_1"] = string(configJSON)
 	}
 
@@ -2706,6 +2816,17 @@ func (f *CamoufoxFetcher) Close() error {
 			}
 		}
 		f.socksBridge = nil
+	}
+
+	// Shut down Xvfb display manager (last, after all browser resources are freed).
+	if f.displayMgr != nil {
+		if err := f.displayMgr.Close(); err != nil {
+			slog.Warn("fetch/camoufox: error closing display manager", "err", err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("fetch/camoufox: closing display manager: %w", err)
+			}
+		}
+		f.displayMgr = nil
 	}
 
 	return firstErr

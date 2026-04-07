@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -137,7 +138,7 @@ func (p *PrometheusExporter) Stop() error {
 // RecordRequest records a completed HTTP request with its domain, status code,
 // and duration.
 func (p *PrometheusExporter) RecordRequest(domain string, status int, duration time.Duration) {
-	statusStr := fmt.Sprintf("%d", status)
+	statusStr := strconv.Itoa(status)
 	p.requestsTotal.WithLabelValues(domain, statusStr).Inc()
 	p.requestDuration.WithLabelValues(domain).Observe(duration.Seconds())
 }
