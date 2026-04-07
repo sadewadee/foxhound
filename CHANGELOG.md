@@ -2,6 +2,94 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.14] — 2026-04-07
+
+### Fixed — Security (24 fixes)
+- **CSS selector injection** (`engine/trail.go`): user-supplied selector interpolated into JS without escaping — arbitrary JS execution in browser context
+- **Proxy GetForGeo double-panic** (`proxy/pool.go`): fragile mutex unlock/relock dance — crash on fallback path panic
+- **Unbounded io.ReadAll** (`fetch/stealth_default.go`): wrapped with `io.LimitReader(body, 10MB)` to prevent OOM
+- **Proxy credentials logged** in full URL strings across pool.go and health.go
+- **Webhook writer SSRF**: accepted arbitrary URLs without validation
+- **Cookie file world-readable**: written with `0o644` instead of `0o600`
+- **Dedup seen-set unbounded growth**: memory leak on long crawls
+- **Fetcher resource leak**: `Hunt.Run` never called `Close()` on middleware-wrapped fetcher
+
+### Fixed — Logic Errors (19 fixes)
+- **Circuit breaker permanently tripped** (`middleware/circuitbreaker.go`): sliding window not reset on half-open→closed transition
+- **FetchAuto (value 0) unusable** (`engine/hunt.go`): zero value treated as "unset" and overridden to FetchBrowser — added `PoolFetchModeSet` flag
+- **Jitter inverts Min/Max** (`behavior/profiles.go`): independent jittering could make Min > Max — now swaps if inverted
+- **Blocked responses counted as successful** (`engine/stats.go`): blocked/CAPTCHA responses inflated SuccessCount
+- **Walker double-counting** (`engine/walker.go`): `RecordRequest` called twice for CAPTCHA responses
+- **Login-wall false positives** (`middleware/blocked.go`): matched ANY page containing "login" text
+- **Soft-block false positives** (`captcha/detect.go`): "blocked" keyword on legitimate small pages
+- **Queue dedup key wrong** (`queue/reliable.go`): used `job.URL` instead of `job.ID` — silently dropped jobs with same URL
+- **Hunt drain/settle race** (`engine/hunt.go`): `activeWalkers.Add(1)` moved before `processJob`
+- **Nil resp panic** (`middleware/retry.go`): accessed `resp.StatusCode` before nil check
+- **Thundering herd** (`middleware/robotstxt.go`): added singleflight per domain
+- **GaussianClamped unbounded** (`behavior/distributions.go`): fallback clamped to `[-bound, +bound]`
+- **Table thead colspan ignored** (`parse/table.go`): header extraction now respects `colspan`
+- **Domain delay lock window** (`middleware/domaindelay.go`): reserve time slot before releasing lock
+- **Context-unaware sleep** (`fetch/stealth_tls.go`): `time.Sleep` → `select` with `ctx.Done()`
+
+### Fixed — Performance (37 fixes)
+- **Body lowercase 2x per request** (`captcha/detect.go`, `middleware/blocked.go`): scan first 10KB only — saves ~300KB garbage/request
+- **Timer leak 6000+/min** (`engine/hunt.go`): `time.After()` in polling loop → reusable `time.NewTicker`
+- **Stats write-lock contention** (`engine/stats.go`): `sync.RWMutex` → `sync.Map` + `atomic.Int64` for lock-free reads/writes
+- **Linear scans in hot paths**: `isMetadataHost` → `map[string]struct{}`; `findEntry` → `indexByURL` map; `GetForGeo` normalize at insertion
+- **Find("*") DOM scan** (`parse/finder.go`): `FindByAttr`/`FindByAttrContains` → CSS attribute selectors `[attr='val']`
+- **Multiple HTML re-parses** (`parse/metadata.go`): added `FromDoc()` variants sharing single `goquery.Document`
+- **fmt.Sprintf in hot paths**: replaced with `strconv.Itoa`/string concat across identity, monitor, pipeline
+- **Regex compiled per-call** → package-level `var`
+- **Autothrottle alloc** (`middleware/autothrottle.go`): pre-allocated scratch buffer instead of `make([]float64)` per request
+- **Queue length without mutex** (`queue/memory.go`): atomic length counter
+- **Domain scorer lock** (`fetch/domain_score.go`): `sync.Mutex` → `sync.RWMutex` for concurrent reads
+- **SOCKS5 dialer recreated per conn** (`fetch/socks5_bridge.go`): cached on struct
+- **Dedup canonicalURL fast path** (`middleware/dedup.go`): skip sort+rebuild when no query string
+
+### Fixed — Xvfb Display Server (7 fixes)
+- **`"virtual"` headless mode was a no-op**: Go now manages Xvfb lifecycle via new `fetch/display.go`
+- **Dynamic display allocation** `:99`-`:199` with stale lock cleanup
+- **Health monitoring**: background goroutine checks every 5s, auto-restart with exponential backoff
+- **Docker Xvfb fire-and-forget**: removed from entrypoint, Go manages directly
+- **`/dev/shm` validation**: warns if shared memory < 128MB
+- **`shm_size: "256m"`** added to docker-compose.yml
+
+### Fixed — Browser Navigation Timeout (3 fixes)
+- **Config timeout not wired** (`cmd/foxhound/run.go`): `WithBrowserTimeout()` now passed to CamoufoxFetcher
+- **Wait event too slow**: `networkidle` → `domcontentloaded` (2-10s faster on ad-heavy pages)
+- **No retry on timeout**: added retry with 2x timeout escalation (max 120s)
+
+### Fixed — Fingerprint (6 fixes)
+- **Illegal HTTP/2 header**: removed `Connection: keep-alive`
+- **Accept header**: added `image/png,image/svg+xml` matching Firefox
+- **Accept-Encoding**: added `zstd` (Firefox 138+)
+- **TE header**: added `TE: trailers`
+- **Accept-Language q-factor**: fixed to Firefox pattern (`q=0.5`)
+- **Windows NT version**: `"11.0"` → `"10.0"` (Win11 uses NT 10.0 in UA)
+
+### Fixed — Camoufox Integration (6 critical fixes)
+- **CAMOU_CONFIG format wrong**: individual env vars → proper JSON blob with dot-path keys
+- **Config never passed to browser**: `profile.CamoufoxEnv` was generated but never injected into `launchOpts.Env`
+- **Playwright context conflicts**: removed UA/Locale/TimezoneId overrides when Camoufox active (C++ level handles these)
+- **Removed manual WebGL/fonts/canvas**: let BrowserForge auto-populate with realistic statistical distributions
+- **Firefox version mismatched**: aligned all profiles to installed Camoufox binary (148.0 → 135.0)
+- **Cookie jar missing** (`fetch/stealth_default.go`): added `cookiejar` for session persistence across requests
+
+### Added
+- `fetch/display.go` — Xvfb lifecycle manager with crash recovery
+- `fetch/display_stub.go` — no-op stub for non-playwright builds
+- `identity/data/tls/firefox_135.0.json` — TLS profile for Firefox 135
+- `tests/integration/scrape_test.go` — 11 integration tests against real sites (Bing, DDG, Kompas, Google Maps, httpbin)
+- `Job.NavigationTimeout` field for per-job timeout override
+
+### Changed
+- 54 files changed, 3084 insertions, 622 deletions
+- All 1200+ unit tests pass
+- Integration tested: Bing (10 results), DuckDuckGo (9 results), Kompas (416 URLs), Google Maps (20-34 businesses), httpbin (proxy/identity verified)
+
+### Dependencies
+- `go-jose/v3` upgraded v3.0.4 → v3.0.5 (fixes JWE decryption panic CVE)
+
 ## [v0.0.12] — 2026-04-04
 
 ### Added — SOCKS5 Auth Proxy Bridge
