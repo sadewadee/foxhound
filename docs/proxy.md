@@ -233,10 +233,10 @@ camoufox, _ := fetch.NewCamoufox(
 )
 ```
 
-**SOCKS5 with authentication**: Firefox/Playwright does not natively support SOCKS5 proxies with credentials. As of v0.0.12, foxhound includes a **transparent local SOCKS5 bridge** that handles this automatically — when you configure `socks5://user:pass@host:port`, foxhound spawns a local unauthenticated relay and passes credentials to the upstream proxy. No extra config needed.
+**SOCKS5 with authentication**: Firefox/Playwright does not natively support SOCKS5 proxies with credentials. As of v0.0.14, foxhound includes a **transparent local SOCKS5 bridge** that handles this automatically — when you configure `socks5://user:pass@host:port`, foxhound spawns a local unauthenticated relay and passes credentials to the upstream proxy. No extra config needed.
 
 ```go
-// SOCKS5 with auth — works automatically via bridge (v0.0.12+)
+// SOCKS5 with auth — works automatically via bridge (v0.0.14+)
 camoufox, _ := fetch.NewCamoufox(
     fetch.WithBrowserProxy("socks5://user:pass@proxy.example.com:1080"),
 )
