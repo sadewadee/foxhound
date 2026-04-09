@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"time"
 
@@ -109,17 +110,51 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 	}
 
 	var (
-		resp     *foxhound.Response
-		fetchErr error
+		resp          *foxhound.Response
+		fetchErr      error
+		start         time.Time
+		devKey        string
+		devHit        bool
+		activeFetcher = w.fetcher
 	)
 
 	w.logger.Debug("processing job",
 		"url", job.URL, "domain", job.Domain, "depth", job.Depth,
 		"fetch_mode", job.FetchMode, "priority", job.Priority)
 
-	start := time.Now()
+	// Development mode: serve from disk if available, otherwise fetch and cache.
+	if w.hunt.devModeCache != nil {
+		devKey = devModeCacheKey(job.URL)
+		if data, hit := w.hunt.devModeCache.Get(ctx, devKey); hit {
+			var cached foxhound.Response
+			if uerr := json.Unmarshal(data, &cached); uerr == nil {
+				cached.Job = job
+				resp = &cached
+				devHit = true
+				w.logger.Debug("dev-mode: cache hit", "url", job.URL, "key", devKey)
+				w.hunt.stats.RecordRequest(job.Domain, 0, nil, false)
+				w.hunt.stats.RecordBytes(int64(len(cached.Body)))
+			} else {
+				w.logger.Warn("dev-mode: cache entry corrupt, refetching", "url", job.URL, "err", uerr)
+			}
+		}
+	}
+
+	if devHit {
+		goto afterFetch
+	}
+
+	// Per-job session routing: when job.SessionID names a registered session,
+	// route through that session's fetcher; otherwise use the walker's default.
+	if job.SessionID != "" {
+		if f := w.hunt.sessionFetcherFor(job); f != nil {
+			activeFetcher = f
+		}
+	}
+
+	start = time.Now()
 	for attempt := 0; ; attempt++ {
-		resp, fetchErr = w.fetcher.Fetch(ctx, job)
+		resp, fetchErr = activeFetcher.Fetch(ctx, job)
 		if ctx.Err() != nil {
 			return // context cancelled during fetch
 		}
@@ -156,7 +191,22 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 		return
 	}
 
-	fetchDuration := time.Since(start)
+	// Development mode: store the freshly fetched response so the next run
+	// for this URL replays from disk. Errors are logged but never abort the
+	// fetch — the cache is purely an optimisation.
+	if w.hunt.devModeCache != nil && resp != nil {
+		if data, merr := json.Marshal(resp); merr == nil {
+			if serr := w.hunt.devModeCache.Set(ctx, devKey, data, 0); serr != nil {
+				w.logger.Warn("dev-mode: cache write failed", "url", job.URL, "err", serr)
+			}
+		}
+	}
+
+afterFetch:
+	var fetchDuration time.Duration
+	if !start.IsZero() {
+		fetchDuration = time.Since(start)
+	}
 
 	w.logger.Debug("fetch complete",
 		"url", job.URL, "status", resp.StatusCode, "bytes", len(resp.Body),
@@ -178,6 +228,17 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 			w.hunt.stats.RecordBlock(job.Domain)
 			return
 		}
+	}
+
+	// Attach Hunt-scoped adaptive extractor (if any) so the user
+	// processor can call resp.Adaptive / CSSAdaptive without manual wiring.
+	if ae := w.hunt.adaptiveExtractor; ae != nil {
+		resp.SetAdaptiveExtractor(ae)
+		// Apply any deferred Trail-level adaptive registrations attached
+		// to the originating job. Done here so the registration uses the
+		// Hunt's shared extractor and learns its signature from the
+		// freshly fetched body.
+		w.applyTrailAdaptive(resp, job)
 	}
 
 	result, procErr := w.processor.Process(ctx, resp)
@@ -235,6 +296,31 @@ func (w *Walker) processJob(ctx context.Context, job *foxhound.Job) {
 		"process_duration", processDuration.Truncate(time.Millisecond),
 		"items", len(result.Items),
 	)
+}
+
+// trailAdaptiveMetaKey is the Job.Meta key used to carry deferred adaptive
+// selector registrations from a Trail to the walker.
+const trailAdaptiveMetaKey = "_foxhound_trail_adaptive"
+
+// applyTrailAdaptive reads any Trail-level adaptive selector registrations
+// from job.Meta and applies them against the Hunt's shared extractor using
+// resp.CSSAdaptive (which both registers and learns the signature). The
+// meta entries are produced by Trail.Adaptive at ToJobs time.
+func (w *Walker) applyTrailAdaptive(resp *foxhound.Response, job *foxhound.Job) {
+	if job == nil || job.Meta == nil {
+		return
+	}
+	raw, ok := job.Meta[trailAdaptiveMetaKey]
+	if !ok {
+		return
+	}
+	regs, ok := raw.([][2]string)
+	if !ok {
+		return
+	}
+	for _, r := range regs {
+		_ = resp.CSSAdaptive(r[1], r[0])
+	}
 }
 
 // runPipelines threads item through each pipeline stage in order. Returns nil

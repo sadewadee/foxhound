@@ -173,38 +173,40 @@ func WithPersistSession(persist bool) CamoufoxOption {
 // calls so cookies, localStorage, and session state are preserved between
 // requests — useful for sites that require login state.
 type CamoufoxFetcher struct {
-	pw               *playwright.Playwright
-	browser          playwright.Browser
-	identity         *identity.Profile
-	blockImages      bool
-	headless         string
-	timeout          time.Duration
-	proxyURL         string       // SOCKS5 or HTTP proxy URL
-	extensionPath    string       // path to Firefox extension dir (e.g. NopeCHA)
-	maxRequests      int          // restart after this many fetches (0 = disabled)
-	requestCount     atomic.Int64 // total fetches served by the current browser instance
-	mu               sync.Mutex   // serialises browser restart
-	persistSession   bool
-	sessionCtx       playwright.BrowserContext // reused when persistSession=true
-	sessionMu        sync.Mutex                // guards sessionCtx lifecycle
-	hasExtension     bool                      // true when solver extension is loaded
-	initScript       string                    // JS injected into every page via AddInitScript
-	userDataDir      string                    // persistent profile dir; uses LaunchPersistentContext
-	persistCtx       playwright.BrowserContext // context from LaunchPersistentContext
-	cdpURL           string                    // connect to existing browser via CDP
-	useRealChrome    bool                      // use pw.Chromium with channel=chrome
-	capturePatterns  []*regexp.Regexp          // URL patterns for XHR/fetch response capture
-	poolSize         int                       // max pooled pages (0 = disabled)
-	pageReuseLimit   int                       // max reuses per pooled page (0 = unlimited)
-	pool             *PagePool                 // page pool (non-nil when poolSize > 0 and !persistSession)
-	cookies          []BrowserCookie           // cookies to inject into browser context before navigation
-	behaviorProfile  *behavior.BehaviorProfile // optional profile for scroll/keyboard configs
-	tempDirs         []string                  // temp directories to clean up on Close/restart
-	storageStatePath string                    // path to load/save storage state JSON
-	socksBridge      *socks5Bridge             // local SOCKS5 bridge for authenticated proxies (nil when not needed)
-	skipExtension    bool                      // skip auto-loading NopeCHA addon (API solver active)
-	displayMgr       *DisplayManager           // Xvfb manager (non-nil in "virtual" mode on Linux)
-	hasCamoufox      bool                      // true when Camoufox binary is in use (not plain Firefox)
+	pw                     *playwright.Playwright
+	browser                playwright.Browser
+	identity               *identity.Profile
+	blockImages            bool
+	headless               string
+	timeout                time.Duration
+	proxyURL               string       // SOCKS5 or HTTP proxy URL
+	extensionPath          string       // path to Firefox extension dir (e.g. NopeCHA)
+	maxRequests            int          // restart after this many fetches (0 = disabled)
+	requestCount           atomic.Int64 // total fetches served by the current browser instance
+	mu                     sync.Mutex   // serialises browser restart
+	persistSession         bool
+	sessionCtx             playwright.BrowserContext // reused when persistSession=true
+	sessionMu              sync.Mutex                // guards sessionCtx lifecycle
+	hasExtension           bool                      // true when solver extension is loaded
+	initScript             string                    // JS injected into every page via AddInitScript
+	userDataDir            string                    // persistent profile dir; uses LaunchPersistentContext
+	persistCtx             playwright.BrowserContext // context from LaunchPersistentContext
+	cdpURL                 string                    // connect to existing browser via CDP
+	useRealChrome          bool                      // use pw.Chromium with channel=chrome
+	capturePatterns        []*regexp.Regexp          // URL patterns for XHR/fetch response capture
+	poolSize               int                       // max pooled pages (0 = disabled)
+	pageReuseLimit         int                       // max reuses per pooled page (0 = unlimited)
+	pool                   *PagePool                 // page pool (non-nil when poolSize > 0 and !persistSession)
+	cookies                []BrowserCookie           // cookies to inject into browser context before navigation
+	behaviorProfile        *behavior.BehaviorProfile // optional profile for scroll/keyboard configs
+	tempDirs               []string                  // temp directories to clean up on Close/restart
+	storageStatePath       string                    // path to load/save storage state JSON
+	socksBridge            *socks5Bridge             // local SOCKS5 bridge for authenticated proxies (nil when not needed)
+	skipExtension          bool                      // skip auto-loading NopeCHA addon (API solver active)
+	displayMgr             *DisplayManager           // Xvfb manager (non-nil in "virtual" mode on Linux)
+	hasCamoufox            bool                      // true when Camoufox binary is in use (not plain Firefox)
+	cloudflareSolveTimeout time.Duration             // when >0, verify Cloudflare solve via cookie+DOM polling
+	interceptConfig        *InterceptConfig          // route-level resource/domain blocking config
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -303,6 +305,30 @@ func WithPageReuseLimit(n int) CamoufoxOption {
 func WithStorageState(path string) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.storageStatePath = path
+	}
+}
+
+// WithSolveCloudflare enables verified Cloudflare challenge resolution. After
+// the existing handler runs (extension addon or manual click), the fetcher
+// polls for up to timeout for three success signals: the cf_clearance cookie
+// is present, Turnstile DOM markers are gone, and the cf-turnstile-response
+// token is set. When all three pass within the budget the resulting Response
+// has CloudflareSolved=true. On timeout the fetch is NOT failed; the response
+// is still returned with CloudflareSolved=false so callers can decide whether
+// to retry, escalate, or accept a partial page. Pass 0 to disable.
+func WithSolveCloudflare(timeout time.Duration) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.cloudflareSolveTimeout = timeout
+	}
+}
+
+// WithInterceptConfig wires a route-level blocking configuration into the
+// browser. Resources matching BlockedResourceTypes are aborted before they
+// reach the network, and requests to BlockedDomains (or their subdomains) are
+// also aborted. Use NewInterceptConfig to construct the value.
+func WithInterceptConfig(ic *InterceptConfig) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.interceptConfig = ic
 	}
 }
 
@@ -2083,6 +2109,79 @@ func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page, cfType string) 
 	return false
 }
 
+// verifyCloudflareSolve polls up to timeout for three success signals after a
+// Cloudflare challenge handler has run:
+//
+//  1. The cf_clearance cookie is present in the browser context for the page's host.
+//  2. The Turnstile DOM markers (cf-turnstile element / challenges.cloudflare.com
+//     iframe) are gone OR the cf-turnstile-response token has length > 10.
+//  3. isCaptchaSolved("turnstile") returns true.
+//
+// All three must pass within the budget for the function to return true.
+// On timeout it logs a warning and returns false (the caller decides what
+// to do — typically attach the result to Response.CloudflareSolved and
+// return the page anyway).
+func (f *CamoufoxFetcher) verifyCloudflareSolve(page playwright.Page, bctx playwright.BrowserContext, timeout time.Duration) bool {
+	if timeout <= 0 {
+		return false
+	}
+	deadline := time.Now().Add(timeout)
+	pollInterval := 500 * time.Millisecond
+
+	pageHost := ""
+	if u, err := neturl.Parse(page.URL()); err == nil {
+		pageHost = u.Hostname()
+	}
+
+	for time.Now().Before(deadline) {
+		// Signal 1: cf_clearance cookie present.
+		hasClearance := false
+		if cookies, err := bctx.Cookies(); err == nil {
+			for _, c := range cookies {
+				if c.Name != "cf_clearance" || c.Value == "" {
+					continue
+				}
+				if pageHost == "" || c.Domain == pageHost ||
+					strings.HasSuffix(pageHost, strings.TrimPrefix(c.Domain, ".")) ||
+					strings.HasSuffix(strings.TrimPrefix(c.Domain, "."), pageHost) {
+					hasClearance = true
+					break
+				}
+			}
+		}
+
+		// Signal 2: Turnstile DOM markers gone OR token set.
+		domClean := false
+		if val, err := page.Evaluate(`() => {
+			const html = document.documentElement.innerHTML.toLowerCase();
+			const markersGone = !html.includes('cf-turnstile') && !html.includes('challenges.cloudflare.com/turnstile');
+			if (markersGone) return true;
+			const inputs = document.querySelectorAll('input[name="cf-turnstile-response"]');
+			for (const inp of inputs) { if (inp.value && inp.value.length > 10) return true; }
+			return false;
+		}`); err == nil {
+			if b, ok := val.(bool); ok && b {
+				domClean = true
+			}
+		}
+
+		// Signal 3: token verification.
+		tokenSolved := f.isCaptchaSolved(page, "turnstile")
+
+		if hasClearance && domClean && tokenSolved {
+			slog.Info("fetch/camoufox: Cloudflare solve verified",
+				"clearance", hasClearance, "dom_clean", domClean, "token", tokenSolved)
+			return true
+		}
+
+		time.Sleep(pollInterval)
+	}
+
+	slog.Warn("fetch/camoufox: Cloudflare solve verification timed out",
+		"timeout", timeout)
+	return false
+}
+
 // submitAfterCaptcha looks for and clicks a submit button after CAPTCHA is solved.
 func (f *CamoufoxFetcher) submitAfterCaptcha(page playwright.Page) {
 	submitSelectors := []string{
@@ -2262,12 +2361,43 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 		}
 	}
 
+	// Apply route-level intercept config: resource type and domain blocking.
+	// This is in addition to the legacy blockImages glob handler above so both
+	// configurations can coexist.
+	if f.interceptConfig != nil && f.interceptConfig.IsActive() {
+		ic := f.interceptConfig
+		if routeErr := page.Route("**/*", func(route playwright.Route) {
+			req := route.Request()
+			if ic.ShouldBlock(req.ResourceType(), req.URL()) {
+				if abortErr := route.Abort(); abortErr != nil {
+					slog.Debug("fetch/camoufox: intercept abort error", "err", abortErr)
+				}
+				return
+			}
+			if contErr := route.Continue(); contErr != nil {
+				slog.Debug("fetch/camoufox: intercept continue error", "err", contErr)
+			}
+		}); routeErr != nil {
+			slog.Warn("fetch/camoufox: could not install intercept route handler", "err", routeErr)
+		}
+	}
+
 	// Set up XHR/fetch response capture if patterns are configured.
+	// Patterns may come from the fetcher (global, via WithCaptureXHR) and/or
+	// from the job's meta (per-trail, via Trail.CaptureXHR). The two sets are
+	// merged for this fetch.
 	var capturedXHR []map[string]any
-	if len(f.capturePatterns) > 0 {
+	activePatterns := f.capturePatterns
+	if jobPatterns := capturePatternsFromJob(job); len(jobPatterns) > 0 {
+		merged := make([]*regexp.Regexp, 0, len(f.capturePatterns)+len(jobPatterns))
+		merged = append(merged, f.capturePatterns...)
+		merged = append(merged, jobPatterns...)
+		activePatterns = merged
+	}
+	if len(activePatterns) > 0 {
 		page.On("response", func(response playwright.Response) {
 			url := response.URL()
-			for _, p := range f.capturePatterns {
+			for _, p := range activePatterns {
 				if p.MatchString(url) {
 					body, _ := response.Body()
 					headers, _ := response.AllHeaders()
@@ -2344,11 +2474,14 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 
 	// Handle Cloudflare challenges (JS check, Turnstile, Under Attack Mode).
 	// Some sites (e.g. Bing) present sequential challenges — retry up to 3 times.
+	cfChallengeSeen := false
+	cloudflareSolved := false
 	for cfAttempt := 0; cfAttempt < 3; cfAttempt++ {
 		cfType := f.detectCloudflare(page)
 		if cfType == "" {
 			break
 		}
+		cfChallengeSeen = true
 		// When extension is present, let it handle Turnstile —
 		// manual clicking in handleCloudflare conflicts with the extension's solver.
 		if cfType == "turnstile" && f.hasExtension {
@@ -2392,6 +2525,15 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 	} else {
 		f.handleRecaptcha(page)
 		f.handleHCaptcha(page)
+	}
+
+	// Verified Cloudflare solve mode: when WithSolveCloudflare(timeout) was set
+	// AND a Cloudflare challenge was actually seen, poll for cookie + DOM +
+	// token signals before continuing. The result is attached to the Response
+	// so callers can branch on it. Verification timeout is non-fatal — the
+	// page is still returned with CloudflareSolved=false on timeout.
+	if f.cloudflareSolveTimeout > 0 && cfChallengeSeen {
+		cloudflareSolved = f.verifyCloudflareSolve(page, bctx, f.cloudflareSolveTimeout)
 	}
 
 	// Execute Trail-attached steps. Click and Wait are "hard" steps — their
@@ -2478,16 +2620,17 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 	}
 
 	return &foxhound.Response{
-		StatusCode:  statusCode,
-		Headers:     make(map[string][]string),
-		Body:        []byte(content),
-		URL:         finalURL,
-		FetchMode:   foxhound.FetchBrowser,
-		Duration:    duration,
-		Job:         job,
-		StepResults: stepResults,
-		CapturedXHR: capturedXHR,
-		Cookies:     respCookies,
+		StatusCode:       statusCode,
+		Headers:          make(map[string][]string),
+		Body:             []byte(content),
+		URL:              finalURL,
+		FetchMode:        foxhound.FetchBrowser,
+		Duration:         duration,
+		Job:              job,
+		StepResults:      stepResults,
+		CapturedXHR:      capturedXHR,
+		Cookies:          respCookies,
+		CloudflareSolved: cloudflareSolved,
 	}, nil
 }
 

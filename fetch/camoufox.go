@@ -141,27 +141,29 @@ func WithPersistSession(persist bool) CamoufoxOption {
 // Stub build (!playwright tag): Fetch always returns errPlaywrightNotConfigured.
 // Real build  ( playwright tag): see camoufox_playwright.go.
 type CamoufoxFetcher struct {
-	identity         *identity.Profile
-	blockImages      bool
-	headless         string
-	timeout          time.Duration
-	proxyURL         string                    // SOCKS5 or HTTP proxy URL
-	extensionPath    string                    // path to Firefox extension dir (e.g. NopeCHA)
-	maxRequests      int                       // restart browser after this many requests (0 = disabled)
-	persistSession   bool                      // reuse BrowserContext across requests when true
-	initScript       string                    // JS injected into every new page via AddInitScript
-	userDataDir      string                    // persistent profile dir; triggers LaunchPersistentContext
-	cdpURL           string                    // connect to an existing browser via CDP instead of launching
-	useRealChrome    bool                      // use pw.Chromium with channel=chrome instead of Firefox
-	capturePatterns  []*regexp.Regexp          // URL patterns for XHR/fetch response capture
-	poolSize         int                       // max pooled pages (0 = disabled)
-	pageReuseLimit   int                       // max reuses per pooled page (0 = unlimited)
-	behaviorProfile  *behavior.BehaviorProfile // optional profile for scroll/keyboard configs
-	cookies          []BrowserCookie           // cookies to inject into browser context before navigation
-	tempDirs         []string                  // temp directories to clean up on Close/restart
-	storageStatePath string                    // path to load/save storage state JSON
-	skipExtension    bool                      // skip auto-loading NopeCHA addon (API solver active)
-	displayMgr       *DisplayManager           // Xvfb manager (always nil in stub build)
+	identity               *identity.Profile
+	blockImages            bool
+	headless               string
+	timeout                time.Duration
+	proxyURL               string                    // SOCKS5 or HTTP proxy URL
+	extensionPath          string                    // path to Firefox extension dir (e.g. NopeCHA)
+	maxRequests            int                       // restart browser after this many requests (0 = disabled)
+	persistSession         bool                      // reuse BrowserContext across requests when true
+	initScript             string                    // JS injected into every new page via AddInitScript
+	userDataDir            string                    // persistent profile dir; triggers LaunchPersistentContext
+	cdpURL                 string                    // connect to an existing browser via CDP instead of launching
+	useRealChrome          bool                      // use pw.Chromium with channel=chrome instead of Firefox
+	capturePatterns        []*regexp.Regexp          // URL patterns for XHR/fetch response capture
+	poolSize               int                       // max pooled pages (0 = disabled)
+	pageReuseLimit         int                       // max reuses per pooled page (0 = unlimited)
+	behaviorProfile        *behavior.BehaviorProfile // optional profile for scroll/keyboard configs
+	cookies                []BrowserCookie           // cookies to inject into browser context before navigation
+	tempDirs               []string                  // temp directories to clean up on Close/restart
+	storageStatePath       string                    // path to load/save storage state JSON
+	skipExtension          bool                      // skip auto-loading NopeCHA addon (API solver active)
+	displayMgr             *DisplayManager           // Xvfb manager (always nil in stub build)
+	cloudflareSolveTimeout time.Duration             // when >0, verify Cloudflare solve via cookie+DOM polling
+	interceptConfig        *InterceptConfig          // route-level resource/domain blocking config
 }
 
 // WithBrowserProxy sets the proxy URL for all browser requests.
@@ -271,6 +273,35 @@ func WithSkipExtension() CamoufoxOption {
 func WithBehaviorProfile(p *behavior.BehaviorProfile) CamoufoxOption {
 	return func(f *CamoufoxFetcher) {
 		f.behaviorProfile = p
+	}
+}
+
+// WithSolveCloudflare enables verified Cloudflare challenge resolution. After
+// the existing handler runs (extension addon or manual click), the fetcher
+// polls for up to timeout for three success signals: the cf_clearance cookie
+// is present, Turnstile DOM markers are gone, and the cf-turnstile-response
+// token is set. When all three pass within the budget the resulting Response
+// has CloudflareSolved=true. On timeout the fetch is NOT failed; the response
+// is still returned with CloudflareSolved=false so callers can decide whether
+// to retry, escalate, or accept a partial page.
+//
+// Pass 0 to disable verified-solve mode (default behaviour).
+//
+// In the stub build this stores the value but has no effect.
+func WithSolveCloudflare(timeout time.Duration) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.cloudflareSolveTimeout = timeout
+	}
+}
+
+// WithInterceptConfig wires a route-level blocking configuration into the
+// browser. Resources matching BlockedResourceTypes are aborted before they
+// reach the network, and requests to BlockedDomains (or their subdomains) are
+// also aborted. Use NewInterceptConfig to construct the value, then pass it
+// here. In the stub build this stores the value but has no effect.
+func WithInterceptConfig(ic *InterceptConfig) CamoufoxOption {
+	return func(f *CamoufoxFetcher) {
+		f.interceptConfig = ic
 	}
 }
 

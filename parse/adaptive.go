@@ -22,7 +22,12 @@ type AdaptiveSelector struct {
 type AdaptiveExtractor struct {
 	selectors map[string]*AdaptiveSelector
 	savePath  string
-	mu        sync.RWMutex
+	// sqliteStore is an optional SQLite-backed signature store. When set,
+	// Save persists each registered selector signature to the store using
+	// an empty domain key (the JSON file remains the primary persistence
+	// when both are configured). Set via WithSQLiteStorage.
+	sqliteStore *SQLiteAdaptiveStore
+	mu          sync.RWMutex
 }
 
 // NewAdaptiveExtractor creates an extractor.  When savePath is non-empty the
@@ -152,6 +157,18 @@ func (ae *AdaptiveExtractor) Save() error {
 	ae.mu.RLock()
 	defer ae.mu.RUnlock()
 
+	// Persist to SQLite store if configured. Uses empty domain key since
+	// the high-level extractor is process-scoped, not domain-scoped.
+	if ae.sqliteStore != nil {
+		for name, sel := range ae.selectors {
+			if sel.Signature == nil {
+				continue
+			}
+			if err := ae.sqliteStore.Save("", name, sel.Signature); err != nil {
+				return err
+			}
+		}
+	}
 	if ae.savePath == "" {
 		return nil
 	}

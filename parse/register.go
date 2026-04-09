@@ -15,6 +15,44 @@ func init() {
 		selectCount,
 		xpathToCSS,
 	)
+	foxhound.RegisterAdaptiveHooks(adaptiveExtractText, adaptiveRegister)
+}
+
+// adaptiveExtractText is the parse-side implementation of
+// Response.Adaptive(name): parse the body, then call the extractor.
+func adaptiveExtractText(extractor any, body []byte, name string) string {
+	ae, ok := extractor.(*AdaptiveExtractor)
+	if !ok || ae == nil {
+		return ""
+	}
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+	if err != nil {
+		return ""
+	}
+	d := &Document{doc: doc, adaptive: ae}
+	return ae.ExtractText(d, name)
+}
+
+// adaptiveRegister is the parse-side implementation of
+// Response.CSSAdaptive(selector, name): register the selector against the
+// extractor and immediately learn its signature from the current body. The
+// "all" flag selects between Extract and ExtractAll for signature capture.
+func adaptiveRegister(extractor any, body []byte, name, selector string, all bool) {
+	ae, ok := extractor.(*AdaptiveExtractor)
+	if !ok || ae == nil {
+		return
+	}
+	ae.Register(name, selector)
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	d := &Document{doc: doc, adaptive: ae}
+	if all {
+		_ = ae.ExtractAll(d, name)
+	} else {
+		_ = ae.Extract(d, name)
+	}
 }
 
 // selectTexts extracts trimmed text from all elements matching a CSS selector.

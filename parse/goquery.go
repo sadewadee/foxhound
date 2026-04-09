@@ -12,8 +12,22 @@ import (
 
 // Document wraps goquery.Document for convenient CSS-selector-based extraction.
 type Document struct {
-	doc  *goquery.Document
-	resp *foxhound.Response
+	doc      *goquery.Document
+	resp     *foxhound.Response
+	adaptive *AdaptiveExtractor
+}
+
+// Adaptive returns the AdaptiveExtractor associated with this document, if
+// any. Returns nil when no extractor was attached via SetAdaptive.
+func (d *Document) Adaptive() *AdaptiveExtractor {
+	return d.adaptive
+}
+
+// SetAdaptive attaches an AdaptiveExtractor to this document so callers can
+// retrieve it later via Adaptive() — useful for wiring a Hunt-scoped
+// extractor through to processors that build their own Document.
+func (d *Document) SetAdaptive(ae *AdaptiveExtractor) {
+	d.adaptive = ae
 }
 
 // NewDocument creates a Document from a foxhound Response.

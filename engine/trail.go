@@ -79,10 +79,47 @@ type Step struct {
 // a Hunt.
 type Trail struct {
 	// Name is a human-readable label for this navigation path.
-	Name  string
+	Name string
 	// Steps is the ordered sequence of actions.
 	Steps      []Step
 	skipWarmup bool
+	// adaptive holds deferred adaptive selector registrations: each pair
+	// is (name, css selector). Applied by the walker against the Hunt's
+	// shared AdaptiveExtractor when the resulting job is fetched.
+	adaptive [][2]string
+	// captureXHR holds URL regexp patterns to capture XHR/fetch responses
+	// for. Applied to every job produced by ToJobs via Job.Meta and consumed
+	// by the camoufox fetcher to populate Response.CapturedXHR.
+	captureXHR []string
+}
+
+// CaptureXHR registers a URL regexp pattern. While any job produced by this
+// Trail is fetched, the browser fetcher captures every XHR or fetch response
+// whose URL matches the pattern, storing the request URL, status, headers,
+// and body in Response.CapturedXHR. Use this to discover the JSON API behind
+// a JavaScript-rendered page without parsing the DOM.
+//
+// Multiple calls accumulate; all patterns are matched (logical OR).
+// Patterns must be valid Go regexps; invalid patterns are silently dropped
+// at fetch time.
+func (t *Trail) CaptureXHR(urlPattern string) *Trail {
+	t.captureXHR = append(t.captureXHR, urlPattern)
+	return t
+}
+
+// Adaptive registers an adaptive selector that survives DOM rewrites by
+// falling back to similarity matching when the primary CSS selector fails
+// to match on a future run. The element signature is learned automatically
+// on the first successful extraction and persisted via the Hunt's adaptive
+// store (configured by Hunt.WithAdaptive).
+//
+// Adaptive only records the registration intent on the Trail; the actual
+// Register and signature learning happens when the produced Job is fetched
+// by a walker, so the Hunt must have been configured with WithAdaptive
+// before Run is called.
+func (t *Trail) Adaptive(name, selector string) *Trail {
+	t.adaptive = append(t.adaptive, [2]string{name, selector})
+	return t
 }
 
 // defaultWarmupWait is the duration the warm-up visit waits for "body" to
@@ -395,8 +432,39 @@ func (t *Trail) ToJobs() []*foxhound.Job {
 		// Browser-only steps force FetchBrowser.
 		current.FetchMode = foxhound.FetchBrowser
 	}
+	// Attach Trail-level adaptive registrations to every produced job's
+	// Meta so the walker can apply them post-fetch.
+	if len(t.adaptive) > 0 {
+		regs := make([][2]string, len(t.adaptive))
+		copy(regs, t.adaptive)
+		for _, j := range jobs {
+			if j.Meta == nil {
+				j.Meta = make(map[string]any, 1)
+			}
+			j.Meta[trailAdaptiveMetaKey] = regs
+		}
+	}
+	// Attach Trail-level XHR capture patterns to every produced job's Meta so
+	// the camoufox fetcher can install per-fetch capture without a fetcher-level
+	// option. Browser-mode is forced because XHR capture only works there.
+	if len(t.captureXHR) > 0 {
+		patterns := make([]string, len(t.captureXHR))
+		copy(patterns, t.captureXHR)
+		for _, j := range jobs {
+			if j.Meta == nil {
+				j.Meta = make(map[string]any, 1)
+			}
+			j.Meta[captureXHRMetaKey] = patterns
+			j.FetchMode = foxhound.FetchBrowser
+		}
+	}
 	return jobs
 }
+
+// captureXHRMetaKey mirrors fetch.CaptureXHRMetaKey. Duplicated as an
+// unexported constant here to avoid an engine→fetch import dependency. The
+// two values must stay in sync.
+const captureXHRMetaKey = "_foxhound_capture_xhr"
 
 // mapStepAction converts an engine.StepAction to the package-level JobStep*
 // constant defined in foxhound.go. Only browser-executable actions (Click,

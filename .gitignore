@@ -1,5 +1,8 @@
 # Binaries (root-level compiled outputs only)
 /foxhound
+/adaptive
+/gmaps
+/google_serp
 /browser_test
 /full_test
 /proxy_test

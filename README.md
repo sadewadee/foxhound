@@ -6,7 +6,7 @@
   <strong>Go Scraping Framework with Native Camoufox Anti-Detection</strong>
 </p>
 
-# Foxhound v0.0.15
+# Foxhound v0.0.17
 
 High-performance Go scraping framework with native Camoufox anti-detection, dual-mode fetching, and 13-layer middleware.
 
@@ -23,6 +23,12 @@ High-performance Go scraping framework with native Camoufox anti-detection, dual
 - **Adaptive parsing**: CSS pseudo-selectors (`::text`, `::attr`), similarity matching, auto-selector generation + sitemap/RSS/Atom parsing
 - **Streaming API**: `Hunt.Stream(ctx)` for real-time item processing via Go channels
 - **Checkpoint/resume**: auto-save hunt state every N items
+- **Stateful Session**: `foxhound.NewSession(...)` wraps fetcher + cookie jar + identity + proxy for single-call ad-hoc scraping, with cookies persisted across calls
+- **Multi-session campaigns**: `Hunt.AddSession(name, cfg)` + `Job.SessionID` route individual jobs through distinct fetchers / identities / proxies inside one Hunt
+- **Development mode**: `Hunt.WithDevelopmentMode(dir)` caches responses on disk after the first run and replays them on subsequent runs for zero-network iteration
+- **Verified Cloudflare solve**: `fetch.WithSolveCloudflare(timeout)` polls cookie + DOM + token signals before declaring success and exposes `Response.CloudflareSolved`
+- **Domain & resource blocking**: `Hunt.WithBlockedDomains(...)` / `Hunt.WithDisableResources(...)` abort ad, tracker, image, and font requests at the browser layer
+- **Trail XHR capture**: `Trail.CaptureXHR(pattern)` attaches URL regexps to every produced job so matching XHR/fetch response bodies land in `Response.Captures`
 - **18 packages, 1200+ tests**
 
 ## Key Capabilities
@@ -160,6 +166,48 @@ for _, link := range links {
     fmt.Println(link.Direction, link.URL, "score:", link.Score)
 }
 ```
+
+## Anti-fragility / Adaptive Selectors
+
+Most scrapers break the moment a target site renames a CSS class. Foxhound's adaptive selectors learn an element signature (tag, classes, text prefix, parent, depth, position) on the first successful match, then fall back to similarity matching when the primary CSS selector stops working — so a class rename, a wrapper-div change, or a sibling reordering does not break extraction.
+
+Enable adaptive mode on a Hunt with `WithAdaptive(savePath)` (pass an empty string for in-memory only, or a JSON path to persist learned signatures across runs), then use the adaptive helpers on `Response`:
+
+```go
+hunt := engine.NewHunt(engine.HuntConfig{
+    Name:      "shop",
+    Fetcher:   fetcher,
+    Queue:     q,
+    Processor: foxhound.ProcessorFunc(func(ctx context.Context, resp *foxhound.Response) (*foxhound.Result, error) {
+        // Inline: register and extract in one call. The signature is
+        // learned automatically and persisted by the Hunt.
+        title := resp.CSSAdaptive("h1.product-title", "title").Text()
+        price := resp.CSSAdaptive(".price", "price").Text()
+
+        // On future runs, even if .product-title gets renamed to
+        // .item-name, similarity matching will recover the element.
+        // Use Adaptive(name) for selectors registered earlier (e.g.
+        // via Trail.Adaptive or a previous CSSAdaptive call).
+        _ = resp.Adaptive("title")
+
+        item := foxhound.NewItem()
+        item.Set("title", title)
+        item.Set("price", price)
+        return &foxhound.Result{Items: []*foxhound.Item{item}}, nil
+    }),
+}).WithAdaptive("./adaptive_signatures.json")
+```
+
+You can also declare adaptive selectors at the Trail level:
+
+```go
+trail := engine.NewTrail("books").
+    Navigate("https://books.toscrape.com/").
+    Adaptive("book_title", ".product_pod h3 a").
+    Adaptive("book_price", ".product_pod .price_color")
+```
+
+See [`examples/adaptive/`](examples/adaptive/main.go) for a complete runnable example demonstrating an adaptive selector surviving a CSS class rename.
 
 ## Real Scraping Results
 

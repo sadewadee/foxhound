@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Foxhound is a Go scraping framework with native Camoufox (Firefox fork) anti-detection. It uses dual-mode fetching: a TLS-impersonating HTTP client for static pages and Camoufox via playwright-go for JS-heavy/protected pages, with automatic escalation when blocks are detected.
 
-**Status**: v0.0.15. 18 packages, 1200+ tests. NopeCHA CAPTCHA extension auto-downloads on first launch. Only issue #27 (SERP docs), #29 (leech/seed), #34 (proxy intelligence) remain open.
+**Status**: v0.0.17. 18 packages, 1200+ tests. NopeCHA CAPTCHA extension auto-downloads on first launch. Adaptive selectors are exposed via `Hunt.WithAdaptive`, `Trail.Adaptive`, `Response.Adaptive`, `Response.CSSAdaptive`, and `Response.CSSAdaptiveAll`. v0.0.17 adds the stateful `foxhound.Session` type (fetcher + cookie jar + identity + proxy), multi-session routing via `Hunt.AddSession` + `Job.SessionID`, `Hunt.WithDevelopmentMode(dir)` for on-disk response replay, `Trail.CaptureXHR(pattern)` fluent XHR capture, `Hunt.WithBlockedDomains` / `Hunt.WithDisableResources` for browser-layer request filtering, and verified Cloudflare solve via `fetch.WithSolveCloudflare(timeout)` exposed through `Response.CloudflareSolved`. Only issue #27 (SERP docs), #29 (leech/seed), #34 (proxy intelligence) remain open.
 
 **Browser**: Camoufox only. No Chromium, Nightly, or other browsers.
 
@@ -135,7 +135,11 @@ foxhound/
                     circuitbreaker.go (3-state FSM circuit breaker)
   parse/          — goquery (CSS), json (dot-path), xpath (subset→CSS), regex, structured (schema),
                     content (markdown/text), metadata (JSON-LD/OG/NextData/Nuxt), contact (email/phone),
-                    sitemap, feed (RSS/Atom), finder, adaptive_sqlite,
+                    sitemap, feed (RSS/Atom), finder,
+                    adaptive (signature-based selectors that survive DOM rewrites — exposed via
+                    Hunt.WithAdaptive, Trail.Adaptive, Response.Adaptive/CSSAdaptive/CSSAdaptiveAll;
+                    NewAdaptiveExtractorWithOptions + WithJSONStorage/WithSQLiteStorage factory),
+                    adaptive_sqlite,
                     table (HTML table→grid with colspan/rowspan), preload (JS window vars, framework detection),
                     directory (listing extraction: JSON-LD/Microdata/DOM), paginator (detection + assembly),
                     autodetect (content type heuristic, readability-style article extraction)

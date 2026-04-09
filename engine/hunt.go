@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,6 +12,9 @@ import (
 	"time"
 
 	foxhound "github.com/sadewadee/foxhound"
+	"github.com/sadewadee/foxhound/cache"
+	"github.com/sadewadee/foxhound/fetch"
+	"github.com/sadewadee/foxhound/parse"
 )
 
 // HuntConfig holds all dependencies and settings for a single scraping
@@ -131,9 +136,25 @@ type Hunt struct {
 	logger        *slog.Logger
 	activeWalkers atomic.Int32
 	sem           chan struct{} // global concurrency limiter
+	// adaptiveExtractor is set by WithAdaptive and threaded into every
+	// Response handed to the user processor so that Response.Adaptive(...)
+	// and Response.CSSAdaptive(...) work without manual wiring.
+	adaptiveExtractor *parse.AdaptiveExtractor
 	// itemCh is non-nil only when Stream or StreamWithStats has been called.
 	// Walkers send each processed item here; Run closes it when done.
 	itemCh chan *foxhound.Item
+	// blockedDomains and disabledResources are populated by WithBlockedDomains
+	// and WithDisableResources. They are pushed to the fetcher's intercept
+	// config at Run time when the fetcher is a *fetch.CamoufoxFetcher.
+	blockedDomains    []string
+	disabledResources []string
+	// devModeCache is set by WithDevelopmentMode. When non-nil, Walker checks
+	// it before every fetch and serves cached responses on hit; on miss it
+	// fetches normally and stores the response.
+	devModeCache *cache.FileCache
+	// sessions holds named session bundles registered via AddSession. Walker
+	// looks them up by Job.SessionID at fetch time.
+	sessions map[string]*foxhound.Session
 }
 
 // NewHunt creates a Hunt from cfg. It does not start any goroutines; call
@@ -169,6 +190,11 @@ func (h *Hunt) Run(ctx context.Context) error {
 	if err := h.validateConfig(); err != nil {
 		return fmt.Errorf("invalid hunt config: %w", err)
 	}
+
+	// Push hunt-level intercept config (blocked domains, disabled resources)
+	// into the fetcher before middleware wrapping so the route handler installs
+	// during context creation.
+	h.applyHuntInterceptToFetcher()
 
 	runCtx, cancel := context.WithCancel(ctx)
 	h.mu.Lock()
@@ -368,6 +394,198 @@ func (h *Hunt) State() HuntState {
 // Stats returns the live statistics for this Hunt.
 func (h *Hunt) Stats() *Stats {
 	return h.stats
+}
+
+// WithAdaptive enables adaptive selector mode for the Hunt. The savePath
+// argument is the file where learned element signatures are persisted as
+// JSON across runs; pass an empty string for in-memory only (signatures
+// are lost between runs).
+//
+// Once enabled, the walker attaches a shared *parse.AdaptiveExtractor to
+// every Response, so user code can call resp.Adaptive("name"),
+// resp.CSSAdaptive(selector, name), or resp.CSSAdaptiveAll(selector, name)
+// without manually constructing an extractor.
+//
+// WithAdaptive returns the Hunt for fluent chaining and is safe to call
+// before Run.
+func (h *Hunt) WithAdaptive(savePath string) *Hunt {
+	h.mu.Lock()
+	h.adaptiveExtractor = parse.NewAdaptiveExtractor(savePath)
+	h.mu.Unlock()
+	return h
+}
+
+// AdaptiveExtractor returns the Hunt-scoped adaptive extractor configured
+// via WithAdaptive, or nil when adaptive mode has not been enabled.
+func (h *Hunt) AdaptiveExtractor() *parse.AdaptiveExtractor {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.adaptiveExtractor
+}
+
+// WithBlockedDomains registers fully-qualified domain names whose requests
+// must be aborted by the browser fetcher. Subdomains are also matched, so
+// "example.com" blocks "tracker.example.com". Only effective when the Hunt's
+// Fetcher is a *fetch.CamoufoxFetcher created and managed by the application;
+// otherwise the call is silently ignored at Run time with a warning log.
+func (h *Hunt) WithBlockedDomains(domains ...string) *Hunt {
+	h.mu.Lock()
+	h.blockedDomains = append(h.blockedDomains, domains...)
+	h.mu.Unlock()
+	return h
+}
+
+// WithDisableResources registers browser resource types to abort. Valid
+// values: "image", "font", "media", "stylesheet", "object", "imageset",
+// "texttrack", "websocket", "csp_report", "beacon". Unknown values are
+// dropped at apply time. Only effective when the Hunt's Fetcher is a
+// *fetch.CamoufoxFetcher; otherwise the call is silently ignored at Run
+// time with a warning log.
+func (h *Hunt) WithDisableResources(types ...string) *Hunt {
+	h.mu.Lock()
+	h.disabledResources = append(h.disabledResources, types...)
+	h.mu.Unlock()
+	return h
+}
+
+// WithDevelopmentMode enables on-disk response replay. The first time a job
+// for a given URL is fetched the real fetcher is invoked and the response is
+// serialised to dir/<sha256(url)>.json. Subsequent fetches for the same URL
+// hit the cache and skip the network entirely, which is the standard fast
+// inner-loop pattern when iterating on a parser.
+//
+// Pass an empty dir to disable. Errors creating the cache directory are
+// returned at Run time, not here.
+func (h *Hunt) WithDevelopmentMode(cacheDir string) *Hunt {
+	if cacheDir == "" {
+		return h
+	}
+	fc, err := cache.NewFile(cacheDir, 0)
+	if err != nil {
+		slog.Warn("hunt: WithDevelopmentMode failed to open cache dir, replay disabled",
+			"dir", cacheDir, "err", err)
+		return h
+	}
+	h.mu.Lock()
+	h.devModeCache = fc
+	h.mu.Unlock()
+	return h
+}
+
+// applyHuntInterceptToFetcher pushes any WithBlockedDomains / WithDisableResources
+// configuration into the underlying CamoufoxFetcher's intercept config. Called
+// once at Run time before walkers start. When the fetcher is not a Camoufox
+// fetcher the call is a no-op (with a warning when blocking was requested).
+func (h *Hunt) applyHuntInterceptToFetcher() {
+	if len(h.blockedDomains) == 0 && len(h.disabledResources) == 0 {
+		return
+	}
+	cf, ok := h.config.Fetcher.(*fetch.CamoufoxFetcher)
+	if !ok {
+		slog.Warn("hunt: WithBlockedDomains/WithDisableResources requires a CamoufoxFetcher; ignored",
+			"blocked_domains", len(h.blockedDomains),
+			"disabled_resources", len(h.disabledResources))
+		return
+	}
+
+	resourceMap := make(map[fetch.ResourceType]bool)
+	for _, t := range h.disabledResources {
+		resourceMap[fetch.ResourceType(t)] = true
+	}
+	domainMap := make(map[string]bool)
+	for _, d := range h.blockedDomains {
+		domainMap[d] = true
+	}
+	ic := fetch.NewInterceptConfig(resourceMap, domainMap)
+	fetch.WithInterceptConfig(ic)(cf)
+	slog.Info("hunt: applied intercept config",
+		"blocked_domains", len(h.blockedDomains),
+		"disabled_resources", len(h.disabledResources))
+}
+
+// devModeCacheKey returns the URL-derived key used by WithDevelopmentMode to
+// look up cached responses. Walker also uses this constant.
+func devModeCacheKey(url string) string {
+	h := sha256.Sum256([]byte(url))
+	return hex.EncodeToString(h[:])
+}
+
+// SessionConfig describes a named session bundle that a Hunt can route jobs
+// to via Job.SessionID. Each session has its own fetcher, identity, and
+// proxy URL — useful when one campaign needs to mix fast-static fetches for
+// index pages with slow stealth fetches for detail pages, with separate
+// cookie jars per role.
+type SessionConfig struct {
+	// Name is the unique identifier for this session within a Hunt.
+	// Must match Job.SessionID for routing to work.
+	Name string
+	// Fetcher is the underlying fetcher for the session. Required.
+	Fetcher foxhound.Fetcher
+	// Identity is the optional identity profile attached to the session.
+	// Stored as `any` to avoid an import cycle with the identity package.
+	Identity any
+	// Proxy is the optional proxy URL recorded with the session for
+	// inspection. Wire it through the fetcher's own option at construction.
+	Proxy string
+}
+
+// AddSession registers a named session bundle. When a Job's SessionID equals
+// name, the walker uses cfg.Fetcher instead of the hunt's default fetcher.
+// Subsequent calls with the same name overwrite the previous registration.
+//
+// AddSession is safe to call before Run; calling it after Run starts is also
+// supported but the in-flight job currently being processed by a walker will
+// not pick up the new registration until its next Pop.
+func (h *Hunt) AddSession(name string, cfg SessionConfig) *Hunt {
+	if name == "" || cfg.Fetcher == nil {
+		return h
+	}
+	cfg.Name = name
+	sess := foxhound.NewSession(
+		foxhound.WithSessionFetcher(cfg.Fetcher),
+		foxhound.WithSessionIdentity(cfg.Identity),
+		foxhound.WithSessionProxy(cfg.Proxy),
+	)
+	sess.SetName(name)
+
+	h.mu.Lock()
+	if h.sessions == nil {
+		h.sessions = make(map[string]*foxhound.Session)
+	}
+	h.sessions[name] = sess
+	h.mu.Unlock()
+	return h
+}
+
+// Session returns the named session previously registered via AddSession,
+// or nil when no session with that name exists.
+func (h *Hunt) Session(name string) *foxhound.Session {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.sessions == nil {
+		return nil
+	}
+	return h.sessions[name]
+}
+
+// sessionFetcherFor returns the fetcher to use for the given job: when the
+// job names a registered session via Job.SessionID, that session's fetcher
+// is returned; otherwise the hunt's default middleware-wrapped fetcher is
+// returned.
+func (h *Hunt) sessionFetcherFor(job *foxhound.Job) foxhound.Fetcher {
+	if job == nil || job.SessionID == "" {
+		return h.fetcher
+	}
+	h.mu.RLock()
+	sess := h.sessions[job.SessionID]
+	h.mu.RUnlock()
+	if sess == nil {
+		return h.fetcher
+	}
+	if f := sess.Fetcher(); f != nil {
+		return f
+	}
+	return h.fetcher
 }
 
 // SetLogger replaces the Hunt's logger. Walkers created after this call will

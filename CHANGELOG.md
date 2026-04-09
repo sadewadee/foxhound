@@ -2,6 +2,46 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.17] — 2026-04-06
+
+### Added — Session, Dev-Mode, Interception, Verified Solve
+
+- **`foxhound.Session`** (`session.go`): new stateful, single-call client that owns a fetcher, an `http.CookieJar`, an optional identity profile, and an optional proxy URL, and reuses them across calls so cookies and identity persist for the lifetime of the session. Options: `WithSessionFetcher`, `WithSessionIdentity`, `WithSessionProxy`, `WithSessionCookieJar`. Methods: `Get`, `Fetch`, `CookiesFor`, `Identity`, `ProxyURL`, `Name`/`SetName`, `Fetcher`/`SetFetcher`, `Close`. Safe for concurrent use.
+- **Multi-session routing** (`engine/hunt.go`, `engine/walker.go`, `foxhound.go`): `Hunt.AddSession(name, SessionConfig)` registers a named session; `Hunt.Session(name)` looks one up. `Job.SessionID` now routes individual jobs through the named session's fetcher instead of the Hunt's default fetcher — letting one Hunt drive multiple identities/proxies/cookie jars in a single campaign (e.g. index pages with one identity, detail pages with another).
+- **`Hunt.WithDevelopmentMode(dir)`** (`engine/hunt.go`, `engine/walker.go`): first run hits the site and caches every `*foxhound.Response` to a SHA256-keyed file cache under `dir`; subsequent runs replay from disk without hitting the network. Massive iteration-speed boost when developing processors and pipelines. Cache writes are advisory — errors are logged but never abort the fetch.
+- **`Trail.CaptureXHR(urlPattern)`** (`engine/trail.go`, `fetch/capture.go`): new builder method that registers a URL regexp pattern at Trail scope. At `ToJobs` time the patterns are attached to every produced job's `Meta` under `_foxhound_capture_xhr` and `FetchMode` is forced to `FetchBrowser`. The Camoufox fetcher compiles the per-job patterns and merges them with any fetcher-global `WithCaptureXHR` patterns so XHR/fetch response bodies matching either source are captured and delivered via `Response.Captures`.
+- **`Hunt.WithBlockedDomains(...)` and `Hunt.WithDisableResources(...)`** (`engine/hunt.go`): Hunt-level builders that push intercept config to a `*fetch.CamoufoxFetcher` at Run time. Blocks requests by fully-qualified domain (e.g. `"ads.example.com"`) or by browser resource type (`"image"`, `"media"`, `"font"`, `"stylesheet"`). No-op with a warning when the underlying fetcher is not Camoufox.
+- **`fetch.WithSolveCloudflare(timeout)` + `Response.CloudflareSolved`** (`fetch/camoufox_playwright.go`, `foxhound.go`): opt-in verified Cloudflare solve. After the normal CF challenge loop the fetcher polls three independent signals — the `cf_clearance` cookie, Turnstile DOM cleanliness, and `isCaptchaSolved("turnstile")` token presence — and only reports success when all three agree. The result is exposed to user code via `Response.CloudflareSolved`.
+- **`fetch.WithInterceptConfig(ic)`** (`fetch/camoufox.go`, `fetch/camoufox_playwright.go`): functional option carrying the `InterceptConfig` struct used by `WithBlockedDomains` / `WithDisableResources`. When active, a playwright route handler aborts matching requests before they leave the browser.
+- **`session_test.go`, `engine/p1_features_test.go`, `engine/trail_capturexhr_test.go`**: new tests for session cookie persistence, session routing through Hunt, dev-mode cache replay (second run makes zero fetcher calls), Trail XHR capture meta attachment + browser-mode forcing, and blocked-domains no-op safety on non-Camoufox fetchers.
+
+### Internal
+- `Job.SessionID string` (`foxhound.go`): new field for per-job session routing.
+- `Response.CloudflareSolved bool` (`foxhound.go`): new field exposing verified solve state.
+- `Walker.processJob` (`engine/walker.go`): restructured to check dev-mode cache before fetch (with `goto afterFetch` label on hit), route to per-job session fetcher when `job.SessionID` is set, and write the response to the dev-mode cache on success.
+- `capturePatternsFromJob(job)` helper (`fetch/capture.go`) compiles `[]string` patterns attached via Trail meta into `*regexp.Regexp` for the navigate-time merge with fetcher-global capture patterns.
+
+### Why
+These are the long-standing "ergonomic gap" features identified in the capability audit: developers already had fetchers, processors, and pipelines, but nothing sat at the middle-ground between a one-shot static fetch and a full Hunt campaign. `Session` fills that gap, `AddSession` unlocks multi-identity campaigns without rewriting the walker, dev-mode drops iteration time from network-bound to disk-bound, `CaptureXHR` brings XHR interception to the fluent Trail API, `WithBlockedDomains`/`WithDisableResources` cut page-load cost on ad- and tracker-heavy sites, and verified Cloudflare solve closes the race where a challenge "disappears" visually but the clearance cookie hasn't materialised yet.
+
+## [v0.0.16] — 2026-04-07
+
+### Added — Anti-fragility / Adaptive Selectors (high-level API)
+- **`Hunt.WithAdaptive(savePath)`** (`engine/hunt.go`): enable adaptive selector mode for a Hunt. Walker attaches the shared `*parse.AdaptiveExtractor` to every Response so user processors can call `resp.Adaptive(name)` / `resp.CSSAdaptive(selector, name)` without manual wiring. Pass empty string for in-memory only; pass a path to persist learned signatures as JSON across runs.
+- **`Trail.Adaptive(name, selector)`** (`engine/trail.go`): builder method that records adaptive selector registration intent on the Trail. The walker applies the registration against the Hunt's shared extractor when the resulting Job is fetched, learning the element signature from the live page body.
+- **`Response.Adaptive(name)`** (`foxhound.go`): retrieves the text of a registered adaptive selector. Falls back to similarity matching against the saved signature when the primary CSS selector finds nothing on the current page.
+- **`Response.CSSAdaptive(selector, name)` / `CSSAdaptiveAll(selector, name)`** (`foxhound.go`): inline-register-and-extract shortcut. Registers the selector against the Hunt-scoped extractor, learns the signature from the current body, and returns a `*Selection` that supports `.Text()`, `.Texts()`, `.Attr()`, `.Attrs()`.
+- **`Document.Adaptive() / SetAdaptive(ae)`** (`parse/goquery.go`): accessors for attaching an extractor to a Document for processors that build their own Document.
+- **`parse.NewAdaptiveExtractorWithOptions(opts...)`** with `WithJSONStorage(path)` and `WithSQLiteStorage(path)` options (`parse/adaptive_factory.go`): single functional-options factory unifying the JSON-file and SQLite-backed persistence variants. The legacy `parse.NewAdaptiveExtractor(savePath)` constructor is retained for backward compatibility and is equivalent to `WithJSONStorage(savePath)`.
+- **`examples/adaptive/main.go`**: runnable demonstration of an adaptive selector surviving a CSS class rename.
+
+### Internal
+- `Response` gained an unexported `adaptiveExtractor any` field with `SetAdaptiveExtractor` / `AdaptiveExtractor` accessors. Untyped to avoid an import cycle with `parse`.
+- `foxhound.RegisterAdaptiveHooks` mirrors `RegisterHTMLSelectors`: the `parse` package registers its `*AdaptiveExtractor` implementation at `init()` so `Response.Adaptive` and `Response.CSSAdaptive` resolve without importing `parse` from the root package.
+
+### Why
+The audit at `docs/audit/2026-04-07-capability-audit.md` identified that the full adaptive selector machinery (`parse/adaptive.go`, `parse/adaptive_sqlite.go`, `parse/similarity.go`) was implemented and tested but completely invisible from `Trail`, `Response`, and `Hunt` — every consumer would have had to construct an extractor by hand. v0.0.16 is pure plumbing on top of the existing algorithms, exposing the framework's biggest hidden strength as a first-class API.
+
 ## [v0.0.15] — 2026-04-07
 
 ### Fixed — Captcha Solving

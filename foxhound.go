@@ -1,14 +1,3 @@
-// Package foxhound is a Go scraping framework with native Camoufox anti-detection.
-//
-// Foxhound provides dual-mode fetching: a TLS-impersonating HTTP client for static
-// pages and Camoufox (Firefox fork) via playwright-go for JS-heavy/protected pages,
-// with automatic escalation when blocks are detected.
-//
-// Key concepts:
-//   - Hunt: a scraping campaign (top-level orchestrator)
-//   - Trail: navigation path with ordered steps
-//   - Walker: virtual user with its own session, identity, and behavior profile
-//   - Job: unit of work (URL + metadata) consumed from queue
 package foxhound
 
 import (
@@ -586,6 +575,12 @@ type Job struct {
 	// Callback is an optional handler name that the spider routes to a
 	// specific Parse method. When empty, the default processor is used.
 	Callback string `json:"callback,omitempty"`
+	// SessionID names a session previously registered with Hunt.AddSession.
+	// When set, the walker routes this job through the named session's
+	// fetcher (with its own cookie jar, identity, and proxy) instead of the
+	// hunt's default fetcher. Empty (default) preserves backward-compatible
+	// behaviour: the hunt's default fetcher is used.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // IsSuccess returns true when the HTTP status code indicates success (2xx).
@@ -619,6 +614,89 @@ type Response struct {
 	// Cookies contains cookies set by the response (Set-Cookie headers for
 	// static fetches, browser context cookies for browser fetches).
 	Cookies []*http.Cookie `json:"cookies,omitempty"`
+	// CloudflareSolved is true when a Cloudflare Turnstile / JS challenge was
+	// detected and verified as solved before the response was returned. The
+	// verification checks for the cf_clearance cookie, absence of Turnstile
+	// DOM markers, and a non-empty cf-turnstile-response token. Only set when
+	// the browser fetcher was launched with WithSolveCloudflare.
+	CloudflareSolved bool `json:"cloudflare_solved,omitempty"`
+	// adaptiveExtractor is the Hunt-scoped adaptive selector extractor, set
+	// by the walker before the processor receives this response. It is
+	// untyped (any) here to avoid an import cycle with parse; helpers in
+	// foxhound.go and the parse package perform the type assertion.
+	adaptiveExtractor any
+}
+
+// SetAdaptiveExtractor attaches a *parse.AdaptiveExtractor to this response.
+// Walker calls this before invoking the user processor when
+// Hunt.WithAdaptive(...) is configured. The argument is typed as any to
+// avoid an import cycle; pass a *parse.AdaptiveExtractor.
+func (r *Response) SetAdaptiveExtractor(ae any) {
+	r.adaptiveExtractor = ae
+}
+
+// AdaptiveExtractor returns the attached extractor as an opaque value.
+// Callers in the parse package can type-assert it to *parse.AdaptiveExtractor.
+// Returns nil when no extractor is configured for this response.
+func (r *Response) AdaptiveExtractor() any {
+	return r.adaptiveExtractor
+}
+
+// Adaptive returns the text of a registered adaptive selector by name.
+// Falls back to similarity matching if the primary CSS selector finds
+// nothing on the current page. Returns an empty string when no extractor
+// is attached or no element is matched.
+//
+// Requires Hunt.WithAdaptive(...) to have been called.
+func (r *Response) Adaptive(name string) string {
+	if r.adaptiveExtractor == nil || adaptiveExtractTextFunc == nil {
+		return ""
+	}
+	return adaptiveExtractTextFunc(r.adaptiveExtractor, r.Body, name)
+}
+
+// CSSAdaptive runs a CSS selector against this response, registering it as
+// an adaptive selector under the given name. On future runs, if the
+// selector no longer matches, similarity matching falls back to the saved
+// signature.
+//
+// Requires Hunt.WithAdaptive(...) to have been called. Returns a Selection
+// supporting .Text(), .Attr(), .Texts(), and .Attrs(); when no extractor is
+// configured, returns a Selection backed by a plain CSS query (degraded
+// behaviour).
+func (r *Response) CSSAdaptive(selector, name string) *Selection {
+	if r.adaptiveExtractor != nil && adaptiveRegisterFunc != nil {
+		adaptiveRegisterFunc(r.adaptiveExtractor, r.Body, name, selector, false)
+	}
+	return r.CSS(selector)
+}
+
+// CSSAdaptiveAll is like CSSAdaptive but registers the selector for
+// multi-element extraction. Returns a Selection that, when queried via
+// .Texts() / .Attrs(), yields all matches.
+func (r *Response) CSSAdaptiveAll(selector, name string) *Selection {
+	if r.adaptiveExtractor != nil && adaptiveRegisterFunc != nil {
+		adaptiveRegisterFunc(r.adaptiveExtractor, r.Body, name, selector, true)
+	}
+	return r.CSS(selector)
+}
+
+// Package-level hooks set by parse.init(): keeps foxhound.go free of
+// import-cycle dependencies on the parse package while still letting
+// Response.Adaptive / CSSAdaptive call into the parse implementation.
+var (
+	adaptiveExtractTextFunc func(extractor any, body []byte, name string) string
+	adaptiveRegisterFunc    func(extractor any, body []byte, name, selector string, all bool)
+)
+
+// RegisterAdaptiveHooks is called by the parse package to wire its
+// AdaptiveExtractor implementation into Response.Adaptive / CSSAdaptive.
+func RegisterAdaptiveHooks(
+	extractText func(extractor any, body []byte, name string) string,
+	register func(extractor any, body []byte, name, selector string, all bool),
+) {
+	adaptiveExtractTextFunc = extractText
+	adaptiveRegisterFunc = register
 }
 
 // Item represents a scraped data item passing through the pipeline.
