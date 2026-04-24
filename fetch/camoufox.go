@@ -339,7 +339,9 @@ func (f *CamoufoxFetcher) Close() error {
 func (f *CamoufoxFetcher) detectCloudflare(_ interface{}) string { return "" }
 
 // handleCloudflare is a no-op stub. Real implementation is in camoufox_playwright.go.
-func (f *CamoufoxFetcher) handleCloudflare(_ interface{}, _ string) bool { return false }
+func (f *CamoufoxFetcher) handleCloudflare(_ context.Context, _ interface{}, _ string) bool {
+	return false
+}
 
 // ExportStorageState is a stub; always returns an error in the non-playwright build.
 func (f *CamoufoxFetcher) ExportStorageState() (*StorageState, error) {

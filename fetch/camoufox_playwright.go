@@ -1451,7 +1451,10 @@ func (f *CamoufoxFetcher) handleCookieConsent(page playwright.Page) {
 // move the mouse naturally toward it, and click. If Google's behavioral score
 // (based on prior mouse movements + timing) is good enough, the checkbox
 // resolves immediately without an image challenge.
-func (f *CamoufoxFetcher) handleRecaptcha(page playwright.Page) {
+func (f *CamoufoxFetcher) handleRecaptcha(ctx context.Context, page playwright.Page) {
+	if ctx.Err() != nil {
+		return
+	}
 	// Check if page contains reCAPTCHA indicators
 	hasRecaptcha := false
 	indicators := []string{
@@ -1475,7 +1478,9 @@ func (f *CamoufoxFetcher) handleRecaptcha(page playwright.Page) {
 	slog.Info("fetch/camoufox: reCAPTCHA detected, attempting to solve...")
 
 	// Small random delay before interacting — a real user pauses to read
-	time.Sleep(time.Duration(1500+rand.IntN(2000)) * time.Millisecond)
+	if !sleepCtx(ctx, time.Duration(1500+rand.IntN(2000))*time.Millisecond) {
+		return
+	}
 
 	// Strategy 1: Find the reCAPTCHA iframe and click the checkbox inside it
 	iframeSelectors := []string{
@@ -1533,11 +1538,15 @@ func (f *CamoufoxFetcher) handleRecaptcha(page playwright.Page) {
 					mx := currentX + (targetX-currentX)*t + float64(rand.IntN(3)-1)
 					my := currentY + (targetY-currentY)*t + float64(rand.IntN(3)-1)
 					page.Mouse().Move(mx, my)
-					time.Sleep(time.Duration(20+rand.IntN(40)) * time.Millisecond)
+					if !sleepCtx(ctx, time.Duration(20+rand.IntN(40))*time.Millisecond) {
+						return
+					}
 				}
 
 				// Small pause before click (human reaction time)
-				time.Sleep(time.Duration(200+rand.IntN(300)) * time.Millisecond)
+				if !sleepCtx(ctx, time.Duration(200+rand.IntN(300))*time.Millisecond) {
+					return
+				}
 			}
 
 			// Click the checkbox
@@ -1549,7 +1558,9 @@ func (f *CamoufoxFetcher) handleRecaptcha(page playwright.Page) {
 			slog.Info("fetch/camoufox: reCAPTCHA checkbox clicked, waiting for verification...")
 
 			// Wait for Google to verify — this takes 2-5 seconds
-			time.Sleep(time.Duration(3000+rand.IntN(3000)) * time.Millisecond)
+			if !sleepCtx(ctx, time.Duration(3000+rand.IntN(3000))*time.Millisecond) {
+				return
+			}
 
 			// Check if solved (checkbox gets aria-checked="true")
 			checked, _ := cb.GetAttribute("aria-checked")
@@ -1557,10 +1568,12 @@ func (f *CamoufoxFetcher) handleRecaptcha(page playwright.Page) {
 				slog.Info("fetch/camoufox: reCAPTCHA SOLVED via checkbox click!")
 
 				// If there's a submit button after solving, click it
-				f.submitAfterCaptcha(page)
+				f.submitAfterCaptcha(ctx, page)
 
 				// Wait for page to load after form submission
-				time.Sleep(time.Duration(2000+rand.IntN(2000)) * time.Millisecond)
+				if !sleepCtx(ctx, time.Duration(2000+rand.IntN(2000))*time.Millisecond) {
+					return
+				}
 				page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
 					State: playwright.LoadStateNetworkidle,
 				})
@@ -1589,7 +1602,7 @@ func (f *CamoufoxFetcher) handleRecaptcha(page playwright.Page) {
 		}
 		slog.Info("fetch/camoufox: clicking inline reCAPTCHA checkbox")
 		el.Click()
-		time.Sleep(time.Duration(3000+rand.IntN(3000)) * time.Millisecond)
+		sleepCtx(ctx, time.Duration(3000+rand.IntN(3000))*time.Millisecond)
 		return
 	}
 
@@ -1599,7 +1612,10 @@ func (f *CamoufoxFetcher) handleRecaptcha(page playwright.Page) {
 // handleHCaptcha detects and attempts to solve hCaptcha checkbox challenges.
 // hCaptcha renders inside an iframe similar to reCAPTCHA — we locate the
 // iframe, find the checkbox, move the mouse naturally, and click.
-func (f *CamoufoxFetcher) handleHCaptcha(page playwright.Page) {
+func (f *CamoufoxFetcher) handleHCaptcha(ctx context.Context, page playwright.Page) {
+	if ctx.Err() != nil {
+		return
+	}
 	// Check if page contains hCaptcha indicators.
 	hasHCaptcha := false
 	indicators := []string{
@@ -1620,7 +1636,9 @@ func (f *CamoufoxFetcher) handleHCaptcha(page playwright.Page) {
 	}
 
 	slog.Info("fetch/camoufox: hCaptcha detected, attempting to solve...")
-	time.Sleep(time.Duration(1500+rand.IntN(2000)) * time.Millisecond)
+	if !sleepCtx(ctx, time.Duration(1500+rand.IntN(2000))*time.Millisecond) {
+		return
+	}
 
 	// hCaptcha checkbox lives inside an iframe.
 	iframeSelectors := []string{
@@ -1671,9 +1689,13 @@ func (f *CamoufoxFetcher) handleHCaptcha(page playwright.Page) {
 					mx := currentX + (targetX-currentX)*t + float64(rand.IntN(3)-1)
 					my := currentY + (targetY-currentY)*t + float64(rand.IntN(3)-1)
 					page.Mouse().Move(mx, my)
-					time.Sleep(time.Duration(20+rand.IntN(40)) * time.Millisecond)
+					if !sleepCtx(ctx, time.Duration(20+rand.IntN(40))*time.Millisecond) {
+						return
+					}
 				}
-				time.Sleep(time.Duration(200+rand.IntN(300)) * time.Millisecond)
+				if !sleepCtx(ctx, time.Duration(200+rand.IntN(300))*time.Millisecond) {
+					return
+				}
 			}
 
 			if err := cb.Click(); err != nil {
@@ -1682,14 +1704,18 @@ func (f *CamoufoxFetcher) handleHCaptcha(page playwright.Page) {
 			}
 
 			slog.Info("fetch/camoufox: hCaptcha checkbox clicked, waiting for verification...")
-			time.Sleep(time.Duration(3000+rand.IntN(3000)) * time.Millisecond)
+			if !sleepCtx(ctx, time.Duration(3000+rand.IntN(3000))*time.Millisecond) {
+				return
+			}
 
 			// Check if solved.
 			checked, _ := cb.GetAttribute("aria-checked")
 			if checked == "true" {
 				slog.Info("fetch/camoufox: hCaptcha SOLVED via checkbox click!")
-				f.submitAfterCaptcha(page)
-				time.Sleep(time.Duration(2000+rand.IntN(2000)) * time.Millisecond)
+				f.submitAfterCaptcha(ctx, page)
+				if !sleepCtx(ctx, time.Duration(2000+rand.IntN(2000))*time.Millisecond) {
+					return
+				}
 				page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
 					State: playwright.LoadStateNetworkidle,
 				})
@@ -1713,7 +1739,10 @@ func (f *CamoufoxFetcher) handleHCaptcha(page playwright.Page) {
 //   - hcaptcha:   45s (image challenges take ~20-30s)
 //   - recaptcha:  90s (Enterprise/v3 can take 30-60s)
 //   - geetest:    45s (slider+image, ~20-30s)
-func (f *CamoufoxFetcher) waitForExtensionSolve(page playwright.Page) {
+func (f *CamoufoxFetcher) waitForExtensionSolve(ctx context.Context, page playwright.Page) {
+	if ctx.Err() != nil {
+		return
+	}
 	// Early exit if the extension was explicitly disabled — nothing can solve.
 	if !f.hasExtension || f.extensionPath == "none" {
 		slog.Debug("fetch/camoufox: captcha extension disabled, skipping solve wait")
@@ -1742,21 +1771,33 @@ func (f *CamoufoxFetcher) waitForExtensionSolve(page playwright.Page) {
 
 	// Give extension time to init and start solving now that we know there's work.
 	initWait := 3 * time.Second
-	time.Sleep(initWait)
+	if !sleepCtx(ctx, initWait) {
+		slog.Debug("fetch/camoufox: captcha solve wait cancelled during init",
+			"type", captchaType)
+		return
+	}
 
 	// Poll for solve completion — check-then-sleep to avoid trailing delay.
 	deadline := time.Now().Add(budget)
 	pollInterval := 1 * time.Second
 	for time.Now().Before(deadline) {
+		if ctx.Err() != nil {
+			slog.Debug("fetch/camoufox: captcha solve wait cancelled", "type", captchaType)
+			return
+		}
 		if f.isCaptchaSolved(page, captchaType) {
 			elapsed := int(time.Since(deadline.Add(-budget)).Seconds())
 			slog.Info("fetch/camoufox: extension solved captcha!",
 				"type", captchaType, "elapsed_seconds", elapsed)
-			f.submitAfterCaptcha(page)
-			time.Sleep(1 * time.Second)
+			f.submitAfterCaptcha(ctx, page)
+			sleepCtx(ctx, 1*time.Second)
 			return
 		}
-		time.Sleep(pollInterval)
+		if !sleepCtx(ctx, pollInterval) {
+			slog.Debug("fetch/camoufox: captcha solve wait cancelled during poll",
+				"type", captchaType)
+			return
+		}
 	}
 	slog.Warn("fetch/camoufox: extension did not solve captcha in time",
 		"type", captchaType, "budget", budget)
@@ -1908,8 +1949,11 @@ func (f *CamoufoxFetcher) detectCloudflare(page playwright.Page) string {
 //   - turnstile: locate the Turnstile iframe and click the checkbox; if not
 //     found, wait 5 s for managed auto-resolution.
 //   - under_attack: wait up to 15 s for the extended JS challenge to complete.
-func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page, cfType string) bool {
+func (f *CamoufoxFetcher) handleCloudflare(ctx context.Context, page playwright.Page, cfType string) bool {
 	if cfType == "" {
+		return false
+	}
+	if ctx.Err() != nil {
 		return false
 	}
 
@@ -1917,7 +1961,10 @@ func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page, cfType string) 
 	case "js_challenge":
 		slog.Info("fetch/camoufox: waiting for Cloudflare JS challenge to resolve...")
 		for i := 0; i < 12; i++ {
-			time.Sleep(1 * time.Second)
+			if !sleepCtx(ctx, 1*time.Second) {
+				slog.Debug("fetch/camoufox: JS challenge wait cancelled")
+				return false
+			}
 			// Lightweight check: JS challenge pages have specific markers in DOM.
 			gone, _ := page.Evaluate(`() => {
 				const body = document.body ? document.body.innerText.toLowerCase() : '';
@@ -2019,7 +2066,9 @@ func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page, cfType string) 
 		clicked := false
 		if widget != nil {
 			// Wait for widget to fully render.
-			time.Sleep(time.Duration(1500+rand.IntN(1500)) * time.Millisecond)
+			if !sleepCtx(ctx, time.Duration(1500+rand.IntN(1500))*time.Millisecond) {
+				return false
+			}
 
 			box, err := widget.BoundingBox()
 			if err == nil && box != nil {
@@ -2040,10 +2089,14 @@ func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page, cfType string) 
 					mx := startX + (targetX-startX)*t + float64(rand.IntN(3)-1)
 					my := startY + (targetY-startY)*t + float64(rand.IntN(3)-1)
 					_ = page.Mouse().Move(mx, my)
-					time.Sleep(time.Duration(15+rand.IntN(30)) * time.Millisecond)
+					if !sleepCtx(ctx, time.Duration(15+rand.IntN(30))*time.Millisecond) {
+						return false
+					}
 				}
 
-				time.Sleep(time.Duration(200+rand.IntN(400)) * time.Millisecond)
+				if !sleepCtx(ctx, time.Duration(200+rand.IntN(400))*time.Millisecond) {
+					return false
+				}
 				_ = page.Mouse().Click(targetX, targetY)
 				clicked = true
 				slog.Info("fetch/camoufox: clicked Turnstile", "x", targetX, "y", targetY)
@@ -2059,7 +2112,10 @@ func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page, cfType string) 
 			waitSecs = 10
 		}
 		for i := 0; i < waitSecs; i++ {
-			time.Sleep(1 * time.Second)
+			if !sleepCtx(ctx, 1*time.Second) {
+				slog.Debug("fetch/camoufox: Turnstile poll cancelled")
+				return false
+			}
 			// Lightweight: check if Turnstile markup is gone (page redirected) OR token is set.
 			gone, _ := page.Evaluate(`() => {
 				const html = document.documentElement.innerHTML.toLowerCase();
@@ -2090,7 +2146,10 @@ func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page, cfType string) 
 	case "under_attack":
 		slog.Info("fetch/camoufox: Cloudflare Under Attack mode, waiting...")
 		for i := 0; i < 15; i++ {
-			time.Sleep(1 * time.Second)
+			if !sleepCtx(ctx, 1*time.Second) {
+				slog.Debug("fetch/camoufox: Under Attack poll cancelled")
+				return false
+			}
 			gone, _ := page.Evaluate(`() => {
 				const html = document.documentElement.innerHTML.toLowerCase();
 				return !html.includes('cf-chl-bypass');
@@ -2121,8 +2180,11 @@ func (f *CamoufoxFetcher) handleCloudflare(page playwright.Page, cfType string) 
 // On timeout it logs a warning and returns false (the caller decides what
 // to do — typically attach the result to Response.CloudflareSolved and
 // return the page anyway).
-func (f *CamoufoxFetcher) verifyCloudflareSolve(page playwright.Page, bctx playwright.BrowserContext, timeout time.Duration) bool {
+func (f *CamoufoxFetcher) verifyCloudflareSolve(ctx context.Context, page playwright.Page, bctx playwright.BrowserContext, timeout time.Duration) bool {
 	if timeout <= 0 {
+		return false
+	}
+	if ctx.Err() != nil {
 		return false
 	}
 	deadline := time.Now().Add(timeout)
@@ -2134,6 +2196,10 @@ func (f *CamoufoxFetcher) verifyCloudflareSolve(page playwright.Page, bctx playw
 	}
 
 	for time.Now().Before(deadline) {
+		if ctx.Err() != nil {
+			slog.Debug("fetch/camoufox: Cloudflare verify cancelled")
+			return false
+		}
 		// Signal 1: cf_clearance cookie present.
 		hasClearance := false
 		if cookies, err := bctx.Cookies(); err == nil {
@@ -2174,7 +2240,10 @@ func (f *CamoufoxFetcher) verifyCloudflareSolve(page playwright.Page, bctx playw
 			return true
 		}
 
-		time.Sleep(pollInterval)
+		if !sleepCtx(ctx, pollInterval) {
+			slog.Debug("fetch/camoufox: Cloudflare verify cancelled during poll")
+			return false
+		}
 	}
 
 	slog.Warn("fetch/camoufox: Cloudflare solve verification timed out",
@@ -2183,7 +2252,10 @@ func (f *CamoufoxFetcher) verifyCloudflareSolve(page playwright.Page, bctx playw
 }
 
 // submitAfterCaptcha looks for and clicks a submit button after CAPTCHA is solved.
-func (f *CamoufoxFetcher) submitAfterCaptcha(page playwright.Page) {
+func (f *CamoufoxFetcher) submitAfterCaptcha(ctx context.Context, page playwright.Page) {
+	if ctx.Err() != nil {
+		return
+	}
 	submitSelectors := []string{
 		"#captcha-form input[type='submit']",
 		"#captcha-form button[type='submit']",
@@ -2205,7 +2277,9 @@ func (f *CamoufoxFetcher) submitAfterCaptcha(page playwright.Page) {
 		if !visible {
 			continue
 		}
-		time.Sleep(time.Duration(500+rand.IntN(500)) * time.Millisecond)
+		if !sleepCtx(ctx, time.Duration(500+rand.IntN(500))*time.Millisecond) {
+			return
+		}
 		if err := el.Click(); err != nil {
 			slog.Debug("fetch/camoufox: submitAfterCaptcha click failed", "selector", sel, "err", err)
 			continue
@@ -2251,7 +2325,7 @@ func (f *CamoufoxFetcher) navigate(ctx context.Context, job *foxhound.Job) (*fox
 		}
 		page := pooledAny.(playwright.Page)
 		bctx := page.Context()
-		resp, err := f.navigateWithPage(job, bctx, page)
+		resp, err := f.navigateWithPage(ctx, job, bctx, page)
 		// Always release back to pool; the pool's reset func will clean state.
 		f.pool.Release(page)
 		return resp, err
@@ -2287,13 +2361,15 @@ func (f *CamoufoxFetcher) navigate(ctx context.Context, job *foxhound.Job) (*fox
 		}
 	}()
 
-	return f.navigateWithPage(job, bctx, page)
+	return f.navigateWithPage(ctx, job, bctx, page)
 }
 
 // navigateWithPage performs navigation using the given page and context.
 // It is called by navigate for both the pooled and non-pooled paths.
 // The caller is responsible for closing or releasing the page after return.
-func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.BrowserContext, page playwright.Page) (*foxhound.Response, error) {
+// ctx threads through the captcha / Cloudflare solve helpers so that a cancelled
+// hunt does not have to wait out the full solve budget.
+func (f *CamoufoxFetcher) navigateWithPage(ctx context.Context, job *foxhound.Job, bctx playwright.BrowserContext, page playwright.Page) (*foxhound.Response, error) {
 	// Inject Accept-Language from the identity profile as an extra header so
 	// the browser reports the correct locale to the server.
 	if f.identity != nil && len(f.identity.Languages) > 0 {
@@ -2491,12 +2567,14 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 		}
 		slog.Info("fetch/camoufox: Cloudflare challenge detected",
 			"type", cfType, "attempt", cfAttempt+1, "url", job.URL)
-		if !f.handleCloudflare(page, cfType) {
+		if !f.handleCloudflare(ctx, page, cfType) {
 			slog.Warn("fetch/camoufox: Cloudflare handling did not resolve challenge",
 				"attempt", cfAttempt+1)
 			break
 		}
-		time.Sleep(2 * time.Second)
+		if !sleepCtx(ctx, 2*time.Second) {
+			return nil, fmt.Errorf("fetch/camoufox: context cancelled after Cloudflare solve for %s: %w", job.URL, ctx.Err())
+		}
 	}
 
 	// Human behaviour simulation — only when the page is real content,
@@ -2511,7 +2589,7 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 	}
 
 	if f.hasExtension {
-		f.waitForExtensionSolve(page)
+		f.waitForExtensionSolve(ctx, page)
 		// Fallback: only run manual handling if a captcha is present AND unsolved.
 		// detectCaptchaType returning non-empty just means captcha markup exists —
 		// after a successful solve the markup is still there, only the token is set.
@@ -2519,12 +2597,12 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 		if ct := f.detectCaptchaType(page); ct != "" && !f.isCaptchaSolved(page, ct) {
 			slog.Warn("fetch/camoufox: extension did not solve, falling back to manual",
 				"type", ct)
-			f.handleRecaptcha(page)
-			f.handleHCaptcha(page)
+			f.handleRecaptcha(ctx, page)
+			f.handleHCaptcha(ctx, page)
 		}
 	} else {
-		f.handleRecaptcha(page)
-		f.handleHCaptcha(page)
+		f.handleRecaptcha(ctx, page)
+		f.handleHCaptcha(ctx, page)
 	}
 
 	// Verified Cloudflare solve mode: when WithSolveCloudflare(timeout) was set
@@ -2533,7 +2611,7 @@ func (f *CamoufoxFetcher) navigateWithPage(job *foxhound.Job, bctx playwright.Br
 	// so callers can branch on it. Verification timeout is non-fatal — the
 	// page is still returned with CloudflareSolved=false on timeout.
 	if f.cloudflareSolveTimeout > 0 && cfChallengeSeen {
-		cloudflareSolved = f.verifyCloudflareSolve(page, bctx, f.cloudflareSolveTimeout)
+		cloudflareSolved = f.verifyCloudflareSolve(ctx, page, bctx, f.cloudflareSolveTimeout)
 	}
 
 	// Execute Trail-attached steps. Click and Wait are "hard" steps — their
