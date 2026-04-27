@@ -2,17 +2,26 @@
 
 // Package fetch provides the dual-mode fetching layer for Foxhound.
 //
-// Three fetchers are provided:
-//   - StealthFetcher: TLS-impersonating HTTP client (Phase 1 foundation).
-//   - CamoufoxFetcher: stub for the future playwright-go/Camoufox browser backend.
-//   - SmartFetcher: auto-router that starts static and escalates to browser on blocks.
+// stealth_default.go is a FALLBACK with NO TLS fingerprint impersonation.
+// Production code should build with -tags tls to use stealth_tls.go.
+// Without -tags tls, the TLS ClientHello is Go's crypto/tls default —
+// trivially detected by every modern anti-bot system. Headers will look like
+// Firefox but the TLS layer will not. This is almost always the wrong choice
+// for scraping production targets that have any bot defence.
 //
-// This file is the fallback implementation using Go's standard net/http transport.
-// It provides correct header ordering from the identity profile but does NOT perform
-// real JA3/JA4 TLS fingerprint impersonation.
+// To verify which build you have:
 //
-// For real TLS impersonation, build with: go build -tags tls ./...
-// That selects fetch/stealth_tls.go which uses github.com/Noooste/azuretls-client.
+//	fetcher := fetch.NewStealth(...)
+//	if !fetcher.IsImpersonating() { log.Fatal("built without -tags tls") }
+//
+// Or check the binary:
+//
+//	go tool nm /path/to/binary | grep -q azuretls && echo OK || echo MISSING
+//
+// Build the impersonating variant with:
+//
+//	go build -tags tls ./...
+//	go test  -tags tls ./fetch/...
 package fetch
 
 import (
@@ -78,18 +87,59 @@ func WithProxy(proxyURL string) StealthOption {
 	}
 }
 
-// StealthFetcher is a TLS-impersonating HTTP client. In Phase 1 it uses
-// Go's standard net/http with correct header ordering from the identity profile.
-// In a later phase the underlying client will be replaced with surf/azuretls for
-// real JA3/JA4 TLS fingerprint impersonation.
+// WithJA3 is a no-op in the default (non-tls) build — the underlying
+// net/http transport cannot customise the TLS ClientHello. Build with
+// -tags tls for the real implementation.
+func WithJA3(_ string) StealthOption {
+	return func(f *StealthFetcher) { f.ja3Requested = true }
+}
+
+// WithJA3Pool is a no-op in the default build. Build with -tags tls.
+func WithJA3Pool(pool []string) StealthOption {
+	return func(f *StealthFetcher) {
+		if len(pool) > 0 {
+			f.ja3Requested = true
+		}
+	}
+}
+
+// WithHTTP2Fingerprint is a no-op in the default build. Build with -tags tls.
+func WithHTTP2Fingerprint(_ string) StealthOption {
+	return func(f *StealthFetcher) { f.http2Requested = true }
+}
+
+// WithHTTP3Fingerprint is a no-op in the default build. Build with -tags tls.
+func WithHTTP3Fingerprint(_ string) StealthOption {
+	return func(f *StealthFetcher) { f.http3Requested = true }
+}
+
+// StealthFetcher is the non-impersonating fallback used when the binary is
+// built without -tags tls. The TLS ClientHello is Go's crypto/tls default
+// (well-known JA3) — header ordering from the identity profile still applies
+// but the TLS layer will not match a real browser.
 type StealthFetcher struct {
 	client   *http.Client
 	identity *identity.Profile
 	proxy    string
+
+	// ja3Requested / http2Requested / http3Requested record whether the caller
+	// asked for fingerprint customisation that this build cannot honour. The
+	// startup log surfaces this so operators can spot a missing -tags tls.
+	ja3Requested   bool
+	http2Requested bool
+	http3Requested bool
 }
+
+// IsImpersonating reports whether this fetcher performs real JA3/JA4 TLS
+// fingerprint impersonation. In the default (non-tls) build it always returns
+// false; build with -tags tls to enable real impersonation.
+func (f *StealthFetcher) IsImpersonating() bool { return false }
 
 // NewStealth creates a StealthFetcher. Call with any number of StealthOption
 // functional options to configure identity, timeout, and proxy.
+//
+// IMPORTANT: this build does NOT perform TLS impersonation. See the package
+// doc and IsImpersonating().
 func NewStealth(opts ...StealthOption) *StealthFetcher {
 	jar, _ := cookiejar.New(nil)
 	f := &StealthFetcher{
@@ -102,6 +152,21 @@ func NewStealth(opts ...StealthOption) *StealthFetcher {
 	for _, opt := range opts {
 		opt(f)
 	}
+
+	level := slog.LevelWarn
+	msg := "fetch/stealth: initialized WITHOUT TLS impersonation (built without -tags tls; ClientHello is Go default and trivially fingerprintable)"
+	if f.ja3Requested || f.http2Requested || f.http3Requested {
+		level = slog.LevelError
+		msg = "fetch/stealth: TLS fingerprint customisation requested but ignored — binary built without -tags tls"
+	}
+	slog.Log(context.Background(), level, msg,
+		"tls_impersonation", false,
+		"build_tag", "default",
+		"ja3_requested", f.ja3Requested,
+		"http2_requested", f.http2Requested,
+		"http3_requested", f.http3Requested,
+	)
+
 	return f
 }
 

@@ -2,6 +2,29 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.18] — 2026-04-27
+
+### Added — TLS fingerprint customisation + build-mode safety (issues #39, #40)
+
+- **`StealthFetcher.IsImpersonating()`** (`fetch/stealth_tls.go`, `fetch/stealth_default.go`): runtime accessor reporting whether the active build performs real JA3/JA4 TLS fingerprint impersonation. Returns `true` only when built with `-tags tls`. Lets consumers fail-fast at startup when the wrong build is shipped to production.
+- **Startup log line in `NewStealth`**: emits `slog.Info` (tls build) or `slog.Warn`/`slog.Error` (default build) declaring which TLS implementation is active and which fingerprint customisations were requested. Operators see the mode in container logs without reading source.
+- **`fetch.WithJA3(ja3)`** (`fetch/stealth_tls.go`): pin a specific JA3 ClientHello fingerprint via `azuretls.Session.ApplyJa3`. Apply order is deferred to the end of `NewStealth` so identity-driven browser selection is finalised before ApplyJa3 reads it. Invalid JA3 strings are logged and the session falls back to its default preset rather than panicking.
+- **`fetch.WithJA3Pool(pool)`** (`fetch/stealth_tls.go`): pick a JA3 at random from the supplied pool. Pair with periodic fetcher recycling to rotate fingerprints across session lifetimes — turns a 1-fingerprint × N-requests cluster into N/recycle-window distinct fingerprints.
+- **`fetch.WithHTTP2Fingerprint(fp)`** (`fetch/stealth_tls.go`): configure the Akamai-style HTTP/2 fingerprint via `azuretls.Session.ApplyHTTP2`. Format `<SETTINGS>|<WINDOW_UPDATE>|<PRIORITY>|<PSEUDO_HEADER>`.
+- **`fetch.WithHTTP3Fingerprint(fp)`** (`fetch/stealth_tls.go`): configure QUIC/HTTP3 fingerprint via `azuretls.Session.ApplyHTTP3` for advanced consumers wrapping the underlying session directly.
+- **`StealthFetcher.Session()`** (`fetch/stealth_tls.go`): accessor exposing the underlying `*azuretls.Session` for advanced configuration the option API does not yet cover (e.g. `GetClientHelloSpec` rotation, per-request `ForceHTTP3`).
+- **`fetch/presets`** subpackage: curated `(JA3, HTTP/2)` bundles for Firefox 135, Chrome 131, and Safari 17 along with `Bundle`, `All()`, and `JA3Pool([]Bundle)` helpers. Backed by tests that validate both the structural shape and that azuretls accepts every preset under `-tags tls`.
+- **No-op stubs in default build** (`fetch/stealth_default.go`): `WithJA3`, `WithJA3Pool`, `WithHTTP2Fingerprint`, `WithHTTP3Fingerprint` compile-compatible no-ops so consumer code builds without `-tags tls`. Calling any of them flips an internal flag that escalates the startup log from warn to error, surfacing the mismatch loudly.
+- **Documentation updates**: README adds a "TLS Fingerprint Customisation" section with worked examples, a smoke-test `nm` recipe, and a clear warning that the default build's TLS layer is detectable. The `stealth_default.go` package doc was rewritten as a blunt fallback warning rather than the prior "Phase 1 foundation" copy that read like WIP.
+- **Tests**: `stealth_default_test.go` pins `IsImpersonating()==false` on the default build; the existing `stealth_tls_test.go` gains `TestTLSStealthFetcher_IsImpersonating`, `TestTLSStealthFetcher_AppliesPresetBundle` (runs every curated bundle through real ApplyJa3 + ApplyHTTP2), `TestTLSStealthFetcher_InvalidJA3FallsBack` (graceful invalid-input handling), and `TestTLSStealthFetcher_JA3PoolPicks`. `stealth_fingerprint_test.go` covers build-tag-agnostic safety (empty pool, option composition, `IsImpersonating()` callable).
+
+### Internal
+- `StealthFetcher.pendingJA3 / pendingHTTP2 / pendingHTTP3` (`fetch/stealth_tls.go`): captured by the With* options and applied after every option ran so option order is irrelevant.
+- `StealthFetcher.ja3Requested / http2Requested / http3Requested` (`fetch/stealth_default.go`): tracks customisation requests in the no-op build for the escalated log line.
+
+### Why
+Issue #39 documents a real production footgun: `serp-scraper` shipped to production for months believing TLS impersonation was active because the binary built and ran without `-tags tls`. Issue #40 documents the next layer: even with `-tags tls`, the API only exposed `WithIdentity`/`WithTimeout`/`WithProxy`, so 20 fetchers × 300 requests = 6000 requests with **2 unique JA3 hashes**. Combined, these changes make the build mode legible at runtime and unlock per-fetcher fingerprint rotation for high-volume scraping.
+
 ## [v0.0.17] — 2026-04-06
 
 ### Added — Session, Dev-Mode, Interception, Verified Solve

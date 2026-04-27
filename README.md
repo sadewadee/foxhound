@@ -6,7 +6,7 @@
   <strong>Go Scraping Framework with Native Camoufox Anti-Detection</strong>
 </p>
 
-# Foxhound v0.0.17
+# Foxhound v0.0.18
 
 High-performance Go scraping framework with native Camoufox anti-detection, dual-mode fetching, and 13-layer middleware.
 
@@ -29,7 +29,9 @@ High-performance Go scraping framework with native Camoufox anti-detection, dual
 - **Verified Cloudflare solve**: `fetch.WithSolveCloudflare(timeout)` polls cookie + DOM + token signals before declaring success and exposes `Response.CloudflareSolved`
 - **Domain & resource blocking**: `Hunt.WithBlockedDomains(...)` / `Hunt.WithDisableResources(...)` abort ad, tracker, image, and font requests at the browser layer
 - **Trail XHR capture**: `Trail.CaptureXHR(pattern)` attaches URL regexps to every produced job so matching XHR/fetch response bodies land in `Response.Captures`
-- **18 packages, 1200+ tests**
+- **TLS fingerprint customisation** (build tag `tls`): `fetch.WithJA3`, `fetch.WithJA3Pool`, `fetch.WithHTTP2Fingerprint`, `fetch.WithHTTP3Fingerprint` plus the `fetch/presets` subpackage with curated Firefox/Chrome/Safari pairs
+- **Build-mode safety**: `StealthFetcher.IsImpersonating()` + startup log so consumers fail-fast when built without `-tags tls`
+- **19 packages, 1200+ tests**
 
 ## Key Capabilities
 
@@ -208,6 +210,62 @@ trail := engine.NewTrail("books").
 ```
 
 See [`examples/adaptive/`](examples/adaptive/main.go) for a complete runnable example demonstrating an adaptive selector surviving a CSS class rename.
+
+## TLS Fingerprint Customisation
+
+`fetch.NewStealth` ships in two flavours selected by build tag:
+
+- **default build** (no tag): Go `crypto/tls` ClientHello — well-known JA3, trivially detected. Use for tests, CI, or non-bot-protected targets only.
+- **`-tags tls` build**: full JA3 / Akamai HTTP/2 / HTTP/3 impersonation via [azuretls-client](https://github.com/Noooste/azuretls-client). Use for production scraping.
+
+The same `fetch.NewStealth` API exists in both, but the underlying TLS layer is completely different. Confirm at startup:
+
+```go
+f := fetch.NewStealth(fetch.WithIdentity(profile))
+if !f.IsImpersonating() {
+    log.Fatal("built without -tags tls; refusing to start in production")
+}
+```
+
+Or check the binary directly:
+
+```bash
+go tool nm /path/to/binary | grep -q azuretls && echo "✅ TLS impersonation active" || echo "❌ Built without -tags tls"
+```
+
+### Pin a specific JA3 + HTTP/2 fingerprint
+
+By default azuretls picks one bundled preset per browser family — every request from every session in your fleet will share that single JA3. For high-volume targets where requests-per-fingerprint matters, override with options:
+
+```go
+import (
+    "github.com/sadewadee/foxhound/fetch"
+    "github.com/sadewadee/foxhound/fetch/presets"
+)
+
+bundle := presets.FirefoxLatest()
+f := fetch.NewStealth(
+    fetch.WithIdentity(profile),
+    fetch.WithJA3(bundle.JA3),
+    fetch.WithHTTP2Fingerprint(bundle.HTTP2),
+)
+```
+
+Capture your own fingerprint from [tls.peet.ws](https://tls.peet.ws) for bleeding-edge accuracy — the curated presets in `fetch/presets` lag real browsers by definition.
+
+### Rotate JA3 across recycle windows
+
+Pair `WithJA3Pool` with periodic fetcher recycling (e.g. every 500 requests) so each generation of fetchers wears a different JA3:
+
+```go
+pool := presets.JA3Pool(presets.All()) // Firefox + Chrome + Safari
+f := fetch.NewStealth(
+    fetch.WithIdentity(profile),
+    fetch.WithJA3Pool(pool),
+)
+```
+
+Without `-tags tls` these options compile but log an error at startup — the underlying `net/http` transport cannot customise the TLS ClientHello.
 
 ## Real Scraping Results
 

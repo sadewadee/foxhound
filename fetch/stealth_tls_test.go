@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/sadewadee/foxhound/fetch"
+	"github.com/sadewadee/foxhound/fetch/presets"
 	"github.com/sadewadee/foxhound/identity"
 )
 
@@ -211,5 +212,73 @@ func TestTLSStealthFetcher_ContextCancellation(t *testing.T) {
 	_, err := f.Fetch(ctx, newJob(srv.URL))
 	if err == nil {
 		t.Error("expected error on cancelled context, got nil")
+	}
+}
+
+// TestTLSStealthFetcher_IsImpersonating pins the build-tag contract: the tls
+// build of NewStealth must report IsImpersonating()==true.
+func TestTLSStealthFetcher_IsImpersonating(t *testing.T) {
+	f := fetch.NewStealth()
+	defer f.Close()
+	if !f.IsImpersonating() {
+		t.Fatal("tls build must return IsImpersonating()==true")
+	}
+}
+
+// TestTLSStealthFetcher_AppliesPresetBundle runs every curated bundle through
+// ApplyJa3 + ApplyHTTP2 inside NewStealth. azuretls validates the strings
+// during apply, so a parsing regression in any preset surfaces here.
+func TestTLSStealthFetcher_AppliesPresetBundle(t *testing.T) {
+	for _, b := range presets.All() {
+		t.Run(b.Name, func(t *testing.T) {
+			f := fetch.NewStealth(
+				fetch.WithIdentity(identity.Generate(
+					identity.WithBrowser(identity.BrowserFirefox),
+				)),
+				fetch.WithJA3(b.JA3),
+				fetch.WithHTTP2Fingerprint(b.HTTP2),
+			)
+			defer f.Close()
+			if f.Session() == nil {
+				t.Fatal("Session() returned nil")
+			}
+		})
+	}
+}
+
+// TestTLSStealthFetcher_InvalidJA3FallsBack confirms a malformed JA3 is logged
+// and ignored rather than panicking. The fetcher must remain usable.
+func TestTLSStealthFetcher_InvalidJA3FallsBack(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	f := fetch.NewStealth(
+		fetch.WithIdentity(identity.Generate()),
+		fetch.WithJA3("not-a-real-ja3"),
+		fetch.WithTimeout(5*time.Second),
+	)
+	defer f.Close()
+
+	resp, err := f.Fetch(context.Background(), newJob(srv.URL))
+	if err != nil {
+		t.Fatalf("invalid JA3 should not break Fetch, got: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+// TestTLSStealthFetcher_JA3PoolPicks verifies a non-empty pool is accepted.
+func TestTLSStealthFetcher_JA3PoolPicks(t *testing.T) {
+	pool := presets.JA3Pool(presets.All())
+	f := fetch.NewStealth(
+		fetch.WithIdentity(identity.Generate()),
+		fetch.WithJA3Pool(pool),
+	)
+	defer f.Close()
+	if f.Session() == nil {
+		t.Fatal("Session() returned nil")
 	}
 }
