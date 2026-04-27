@@ -77,6 +77,8 @@ foxhound-architecture.md
 foxhound-ecosystem.md
 
 /plans/
+docs/plans/
+docs/audit/
 
 # Third-party extensions (downloaded at runtime)
 captcha/nopecha/

@@ -29,6 +29,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strings"
@@ -107,6 +108,59 @@ func WithProxy(proxyURL string) StealthOption {
 	}
 }
 
+// WithJA3 pins a specific JA3 ClientHello fingerprint on the azuretls session.
+// The browser argument supplied to azuretls.Session.ApplyJa3 is whichever
+// browser family is active at apply time (Firefox by default, or whatever
+// WithIdentity selected). Apply order is deferred to the end of NewStealth so
+// WithIdentity always has a chance to set the browser family first regardless
+// of the order options are passed.
+//
+// Capture a real fingerprint from https://tls.peet.ws to use here. An invalid
+// JA3 string is logged and ignored — the session falls back to its default
+// preset for the chosen browser.
+func WithJA3(ja3 string) StealthOption {
+	return func(f *StealthFetcher) {
+		f.pendingJA3 = ja3
+	}
+}
+
+// WithJA3Pool selects a JA3 fingerprint at random from the pool. Pair this
+// with periodic fetcher recycling (e.g. every N requests) to rotate JA3 across
+// session lifetimes. Empty pools are ignored.
+func WithJA3Pool(pool []string) StealthOption {
+	return func(f *StealthFetcher) {
+		if len(pool) == 0 {
+			return
+		}
+		f.pendingJA3 = pool[rand.IntN(len(pool))]
+	}
+}
+
+// WithHTTP2Fingerprint sets the Akamai-style HTTP/2 fingerprint on the session
+// via azuretls.Session.ApplyHTTP2. Format:
+//
+//	<SETTINGS>|<WINDOW_UPDATE>|<PRIORITY>|<PSEUDO_HEADER>
+//
+// e.g. Chrome: "1:65536;2:0;3:1000;4:6291456;6:262144|15663105|0|m,s,a,p".
+// An invalid string is logged and ignored.
+func WithHTTP2Fingerprint(fp string) StealthOption {
+	return func(f *StealthFetcher) {
+		f.pendingHTTP2 = fp
+	}
+}
+
+// WithHTTP3Fingerprint sets the QUIC/HTTP3 fingerprint on the session via
+// azuretls.Session.ApplyHTTP3. HTTP/3 is opt-in per request via the
+// ForceHTTP3 flag on azuretls.Request — Foxhound does not currently expose
+// that flag through the public Fetch API, so this option is reserved for
+// advanced consumers that wrap StealthFetcher.Session() directly. Invalid
+// fingerprints are logged and ignored.
+func WithHTTP3Fingerprint(fp string) StealthOption {
+	return func(f *StealthFetcher) {
+		f.pendingHTTP3 = fp
+	}
+}
+
 // StealthFetcher is a TLS-impersonating HTTP client backed by azuretls-client.
 // It performs full JA3/JA4 + HTTP/2 fingerprint impersonation so that the TLS
 // ClientHello matches a real browser, not Go's standard crypto/tls handshake.
@@ -119,7 +173,27 @@ type StealthFetcher struct {
 	session  *azuretls.Session
 	identity *identity.Profile
 	proxy    string
+
+	// pendingJA3, pendingHTTP2, pendingHTTP3 are captured by the With* options
+	// and applied to the session in NewStealth after every option has run, so
+	// browser selection from WithIdentity is final before ApplyJa3 sees it.
+	pendingJA3   string
+	pendingHTTP2 string
+	pendingHTTP3 string
 }
+
+// IsImpersonating reports whether this fetcher performs real JA3/JA4 TLS
+// fingerprint impersonation. In the tls build it always returns true; in the
+// default build (no -tags tls) it returns false so consumers can fail-fast at
+// startup if impersonation is required for production correctness.
+func (f *StealthFetcher) IsImpersonating() bool { return true }
+
+// Session returns the underlying azuretls session for advanced configuration
+// the public option API does not yet cover (e.g. GetClientHelloSpec rotation,
+// per-request ForceHTTP3, custom transport settings). Callers who reach for
+// this accept that they're using an unstable surface — the field set may
+// change with future azuretls releases.
+func (f *StealthFetcher) Session() *azuretls.Session { return f.session }
 
 // NewStealth creates a StealthFetcher backed by azuretls. Call with any number
 // of StealthOption functional options to configure identity, timeout, and proxy.
@@ -134,6 +208,41 @@ func NewStealth(opts ...StealthOption) *StealthFetcher {
 	for _, opt := range opts {
 		opt(f)
 	}
+
+	// Apply fingerprint customisations after all options ran so browser family
+	// selection from WithIdentity (or default Firefox) is finalised before
+	// ApplyJa3 inherits its defaults.
+	if f.pendingJA3 != "" {
+		if err := f.session.ApplyJa3(f.pendingJA3, f.session.Browser); err != nil {
+			slog.Error("fetch/stealth: invalid JA3, falling back to default preset",
+				"ja3", f.pendingJA3, "browser", f.session.Browser, "err", err)
+			f.pendingJA3 = ""
+		}
+	}
+	if f.pendingHTTP2 != "" {
+		if err := f.session.ApplyHTTP2(f.pendingHTTP2); err != nil {
+			slog.Error("fetch/stealth: invalid HTTP/2 fingerprint, falling back to default",
+				"http2", f.pendingHTTP2, "err", err)
+			f.pendingHTTP2 = ""
+		}
+	}
+	if f.pendingHTTP3 != "" {
+		if err := f.session.ApplyHTTP3(f.pendingHTTP3); err != nil {
+			slog.Error("fetch/stealth: invalid HTTP/3 fingerprint, falling back to default",
+				"http3", f.pendingHTTP3, "err", err)
+			f.pendingHTTP3 = ""
+		}
+	}
+
+	slog.Info("fetch/stealth: initialized",
+		"tls_impersonation", true,
+		"build_tag", "tls",
+		"browser", f.session.Browser,
+		"ja3_custom", f.pendingJA3 != "",
+		"http2_custom", f.pendingHTTP2 != "",
+		"http3_custom", f.pendingHTTP3 != "",
+	)
+
 	return f
 }
 
