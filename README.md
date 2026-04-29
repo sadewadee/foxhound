@@ -6,7 +6,7 @@
   <strong>Go Scraping Framework with Native Camoufox Anti-Detection</strong>
 </p>
 
-# Foxhound v0.0.18
+# Foxhound v0.0.19
 
 High-performance Go scraping framework with native Camoufox anti-detection, dual-mode fetching, and 13-layer middleware.
 
@@ -29,7 +29,7 @@ High-performance Go scraping framework with native Camoufox anti-detection, dual
 - **Verified Cloudflare solve**: `fetch.WithSolveCloudflare(timeout)` polls cookie + DOM + token signals before declaring success and exposes `Response.CloudflareSolved`
 - **Domain & resource blocking**: `Hunt.WithBlockedDomains(...)` / `Hunt.WithDisableResources(...)` abort ad, tracker, image, and font requests at the browser layer
 - **Trail XHR capture**: `Trail.CaptureXHR(pattern)` attaches URL regexps to every produced job so matching XHR/fetch response bodies land in `Response.Captures`
-- **TLS fingerprint customisation** (build tag `tls`): `fetch.WithJA3`, `fetch.WithJA3Pool`, `fetch.WithHTTP2Fingerprint`, `fetch.WithHTTP3Fingerprint` plus the `fetch/presets` subpackage with curated Firefox/Chrome/Safari pairs
+- **TLS fingerprint customisation** (build tag `tls`): `fetch.WithIdentity` auto-applies the curated Firefox JA3 from `fetch/presets`; `fetch.WithJA3`, `fetch.WithJA3Pool`, `fetch.WithHTTP2Fingerprint`, `fetch.WithHTTP3Fingerprint` available for advanced overrides
 - **Build-mode safety**: `StealthFetcher.IsImpersonating()` + startup log so consumers fail-fast when built without `-tags tls`
 - **19 packages, 1200+ tests**
 
@@ -233,32 +233,35 @@ Or check the binary directly:
 go tool nm /path/to/binary | grep -q azuretls && echo "✅ TLS impersonation active" || echo "❌ Built without -tags tls"
 ```
 
-### Pin a specific JA3 + HTTP/2 fingerprint
+### TLS fingerprint comes from the identity
 
-By default azuretls picks one bundled preset per browser family — every request from every session in your fleet will share that single JA3. For high-volume targets where requests-per-fingerprint matters, override with options:
+`WithIdentity` is the only thing you need for fingerprint consistency. It sets the azuretls browser family to match the profile (`"firefox"` for a Firefox profile — foxhound's primary target since Camoufox is Firefox-based) and lets azuretls's built-in `GetLastFirefoxVersion` produce the ClientHello at request time:
 
 ```go
-import (
-    "github.com/sadewadee/foxhound/fetch"
-    "github.com/sadewadee/foxhound/fetch/presets"
-)
+import "github.com/sadewadee/foxhound/fetch"
 
-bundle := presets.FirefoxLatest()
+f := fetch.NewStealth(fetch.WithIdentity(profile))
+```
+
+The HTTP/2 layer is left to azuretls's browser-aware `initHTTP2(browser)` so TLS, headers, and HTTP/2 all agree on Firefox. Manual `WithHTTP2Fingerprint` is supported for power users but logs a startup warning when paired with `WithJA3` (see [issue #41](https://github.com/sadewadee/foxhound/issues/41)).
+
+Verified against `https://www.bing.com/search` and `https://duckduckgo.com/` through a datacenter proxy: both return 200 with `WithIdentity` alone.
+
+### Pin or rotate JA3 (advanced)
+
+Capture your own Firefox JA3 from [tls.peet.ws](https://tls.peet.ws) when the curated preset lags real Firefox:
+
+```go
 f := fetch.NewStealth(
     fetch.WithIdentity(profile),
-    fetch.WithJA3(bundle.JA3),
-    fetch.WithHTTP2Fingerprint(bundle.HTTP2),
+    fetch.WithJA3(myCapturedJA3),       // overrides the auto-applied preset
 )
 ```
 
-Capture your own fingerprint from [tls.peet.ws](https://tls.peet.ws) for bleeding-edge accuracy — the curated presets in `fetch/presets` lag real browsers by definition.
-
-### Rotate JA3 across recycle windows
-
-Pair `WithJA3Pool` with periodic fetcher recycling (e.g. every 500 requests) so each generation of fetchers wears a different JA3:
+For per-recycle rotation, supply a pool of multiple Firefox captures:
 
 ```go
-pool := presets.JA3Pool(presets.All()) // Firefox + Chrome + Safari
+pool := []string{ja3FromYesterday, ja3FromLastWeek, presets.FirefoxLatest().JA3}
 f := fetch.NewStealth(
     fetch.WithIdentity(profile),
     fetch.WithJA3Pool(pool),

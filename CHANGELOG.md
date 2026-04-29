@@ -2,6 +2,42 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.19] — 2026-04-30
+
+### Fixed — TLS regression when pairing JA3 + HTTP/2 fingerprints (issue #41)
+
+- **`WithIdentity` is now sufficient on its own** (`fetch/stealth_tls.go`): supplying an identity profile sets `session.Browser` to the matching azuretls family (`"firefox"` / `"chrome"` / etc.) and lets azuretls's built-in `GetLastFirefoxVersion` / `GetLastChromeVersion` produce the ClientHello at request time. Verified against `https://www.bing.com/search` and `https://duckduckgo.com/` through a datacenter proxy: both return 200 with `WithIdentity(firefoxProfile)` alone, no `WithJA3` needed. Captured JA3 strings tend to drift; the built-in spec tracks current browser releases.
+- **Root cause of issue #41**: pairing `fetch.WithJA3(bundle.JA3)` with `fetch.WithHTTP2Fingerprint(bundle.HTTP2)` was rejected by deep fingerprint validators (Akamai-protected sites, Bing) with a misleading `remote error: tls: illegal parameter`. The defect is in `azuretls.Session.ApplyHTTP2`: it calls `getDefaultHTTP2Transport()` (not browser-aware) and `applyPseudoHeaders` ends with `tr.HeaderPriority = defaultHeaderPriorities("")` (empty browser string). Once `HTTP2Transport` is non-nil, the lazy `initTransport(browser)` skips `initHTTP2(browser)` entirely, leaving HTTP/2 at generic defaults that do not match the JA3-derived browser family.
+- **Startup warning** (`fetch/stealth_tls.go`): `NewStealth` now emits `slog.Warn` when both `WithJA3` and `WithHTTP2Fingerprint` are configured on the same fetcher, pointing operators at issue #41. Manual pairing still works for power users who have validated against their target.
+- **`fetch/presets` slimmed to Firefox only** (`fetch/presets/presets.go`): removed `ChromeLatest()`, `SafariLatest()`, `All()`, and `JA3Pool()` from v0.0.18 — they violated foxhound's "Camoufox/Firefox only" stance and made it possible to ship a Firefox-headers + Chrome-TLS fingerprint mismatch. Package now exposes only `Bundle` and `FirefoxLatest()` for advanced consumers who want to override azuretls's default with a captured JA3.
+- **Tests** (`fetch/stealth_tls_test.go`): `TestWithIdentity_FirefoxSetsBrowser`, `TestWithIdentity_ExplicitJA3StillWorks`, and `TestWithIdentity_ChromeSetsBrowser` lock in the contract.
+
+### Migration
+
+```go
+// Before (v0.0.18, broken against deep validators):
+f := fetch.NewStealth(
+    fetch.WithIdentity(profile),
+    fetch.WithJA3(presets.FirefoxLatest().JA3),
+    fetch.WithHTTP2Fingerprint(presets.FirefoxLatest().HTTP2),  // breaks Bing/Akamai
+)
+
+// After: WithIdentity alone is enough.
+f := fetch.NewStealth(fetch.WithIdentity(profile))
+```
+
+Power users with a fresher captured JA3 from `https://tls.peet.ws` can still override:
+
+```go
+f := fetch.NewStealth(
+    fetch.WithIdentity(profile),
+    fetch.WithJA3(myFreshCapture),
+)
+```
+
+### Removed
+- `fetch/presets.ChromeLatest()`, `fetch/presets.SafariLatest()`, `fetch/presets.All()`, `fetch/presets.JA3Pool()`. Reason: foxhound's browser layer is Camoufox-only (Firefox); shipping multi-browser bundles invited identity-vs-TLS mismatches.
+
 ## [v0.0.18] — 2026-04-27
 
 ### Added — TLS fingerprint customisation + build-mode safety (issues #39, #40)

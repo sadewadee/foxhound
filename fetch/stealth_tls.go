@@ -63,17 +63,29 @@ func azureBrowserName(b identity.Browser) string {
 type StealthOption func(*StealthFetcher)
 
 // WithIdentity sets the identity profile used to populate request headers and
-// the azuretls TLS browser profile. The browser name, TLS fingerprint, header
-// ordering, User-Agent, and Accept-Language are all derived from this profile,
-// ensuring they remain internally consistent.
+// the azuretls TLS browser family. The browser name, header ordering,
+// User-Agent, and Accept-Language are derived from this profile.
+//
+// The TLS ClientHello itself is left to azuretls's built-in browser preset
+// (GetLastFirefoxVersion / GetLastChromeVersion / etc.), which tracks current
+// browser releases more reliably than a hand-captured JA3 string. Empirically
+// (see issue #41), some captured JA3 strings drift far enough from current
+// browsers that targets like Bing reject them with `tls: illegal parameter`,
+// while azuretls's built-in spec passes — so the safe default is to NOT
+// auto-apply a captured JA3.
+//
+// Power users with a freshly-captured JA3 from https://tls.peet.ws can still
+// override via WithJA3 / WithJA3Pool. fetch/presets ships a single curated
+// Firefox JA3 for that opt-in path.
 func WithIdentity(p *identity.Profile) StealthOption {
 	return func(f *StealthFetcher) {
 		f.identity = p
-		// Reconfigure the session browser so azuretls selects the matching
-		// TLS ClientHello spec immediately when the option is applied.
-		if p != nil {
-			f.session.Browser = azureBrowserName(p.BrowserName)
+		if p == nil {
+			return
 		}
+		// Reconfigure the session browser so azuretls selects the matching
+		// built-in TLS ClientHello spec at request time.
+		f.session.Browser = azureBrowserName(p.BrowserName)
 	}
 }
 
@@ -207,6 +219,17 @@ func NewStealth(opts ...StealthOption) *StealthFetcher {
 	f := &StealthFetcher{session: sess}
 	for _, opt := range opts {
 		opt(f)
+	}
+
+	// Warn when both pendingJA3 and pendingHTTP2 are set via the bare With*
+	// options. azuretls.Session.ApplyHTTP2 bypasses browser-aware HTTP/2
+	// defaults (defaultHeaderPriorities, defaultStreamPriorities), producing a
+	// half-Firefox/half-generic HTTP/2 fingerprint that deep validators
+	// (Akamai, Bing) reject. WithBundle is the safe path. See issue #41.
+	if f.pendingJA3 != "" && f.pendingHTTP2 != "" {
+		slog.Warn("fetch/stealth: pairing WithJA3 + WithHTTP2Fingerprint may be rejected by deep fingerprint validators (issue #41); prefer fetch.WithBundle for matched bundles",
+			"browser", f.session.Browser,
+		)
 	}
 
 	// Apply fingerprint customisations after all options ran so browser family

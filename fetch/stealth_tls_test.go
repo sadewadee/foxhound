@@ -225,24 +225,20 @@ func TestTLSStealthFetcher_IsImpersonating(t *testing.T) {
 	}
 }
 
-// TestTLSStealthFetcher_AppliesPresetBundle runs every curated bundle through
-// ApplyJa3 + ApplyHTTP2 inside NewStealth. azuretls validates the strings
-// during apply, so a parsing regression in any preset surfaces here.
-func TestTLSStealthFetcher_AppliesPresetBundle(t *testing.T) {
-	for _, b := range presets.All() {
-		t.Run(b.Name, func(t *testing.T) {
-			f := fetch.NewStealth(
-				fetch.WithIdentity(identity.Generate(
-					identity.WithBrowser(identity.BrowserFirefox),
-				)),
-				fetch.WithJA3(b.JA3),
-				fetch.WithHTTP2Fingerprint(b.HTTP2),
-			)
-			defer f.Close()
-			if f.Session() == nil {
-				t.Fatal("Session() returned nil")
-			}
-		})
+// TestTLSStealthFetcher_AppliesFirefoxPreset runs the curated Firefox JA3
+// through ApplyJa3 inside NewStealth. azuretls validates the JA3 string at
+// apply time, so a parsing regression surfaces here.
+func TestTLSStealthFetcher_AppliesFirefoxPreset(t *testing.T) {
+	b := presets.FirefoxLatest()
+	f := fetch.NewStealth(
+		fetch.WithIdentity(identity.Generate(
+			identity.WithBrowser(identity.BrowserFirefox),
+		)),
+		fetch.WithJA3(b.JA3),
+	)
+	defer f.Close()
+	if f.Session() == nil {
+		t.Fatal("Session() returned nil")
 	}
 }
 
@@ -271,8 +267,11 @@ func TestTLSStealthFetcher_InvalidJA3FallsBack(t *testing.T) {
 }
 
 // TestTLSStealthFetcher_JA3PoolPicks verifies a non-empty pool is accepted.
+// Pools are caller-supplied (e.g. multiple Firefox JA3 captures from
+// tls.peet.ws over time). foxhound itself only ships one curated JA3 because
+// the browser layer is Camoufox (Firefox) only.
 func TestTLSStealthFetcher_JA3PoolPicks(t *testing.T) {
-	pool := presets.JA3Pool(presets.All())
+	pool := []string{presets.FirefoxLatest().JA3}
 	f := fetch.NewStealth(
 		fetch.WithIdentity(identity.Generate()),
 		fetch.WithJA3Pool(pool),
@@ -280,5 +279,61 @@ func TestTLSStealthFetcher_JA3PoolPicks(t *testing.T) {
 	defer f.Close()
 	if f.Session() == nil {
 		t.Fatal("Session() returned nil")
+	}
+}
+
+// TestWithIdentity_FirefoxSetsBrowser verifies that a Firefox identity
+// configures session.Browser="firefox" so azuretls's built-in Firefox
+// ClientHelloSpec is used at request time. We deliberately do NOT auto-apply
+// any captured JA3 — the built-in spec tracks current Firefox releases more
+// reliably than hand-captured strings (see issue #41 commentary).
+func TestWithIdentity_FirefoxSetsBrowser(t *testing.T) {
+	p := identity.Generate(identity.WithBrowser(identity.BrowserFirefox))
+	f := fetch.NewStealth(fetch.WithIdentity(p))
+	defer f.Close()
+
+	if got := f.Session().Browser; got != "firefox" {
+		t.Errorf("session.Browser = %q, want %q", got, "firefox")
+	}
+	// GetClientHelloSpec must be nil — azuretls's built-in
+	// GetLastFirefoxVersion handles ClientHello at request time.
+	if f.Session().GetClientHelloSpec != nil {
+		t.Error("session.GetClientHelloSpec is non-nil; WithIdentity must not auto-apply a captured JA3")
+	}
+	// HTTP2Transport must be nil — never call ApplyHTTP2 from WithIdentity.
+	if f.Session().HTTP2Transport != nil {
+		t.Error("session.HTTP2Transport is non-nil; WithIdentity must not call ApplyHTTP2 (issue #41)")
+	}
+}
+
+// TestWithIdentity_ExplicitJA3StillWorks verifies that an explicit WithJA3
+// is still applied when paired with WithIdentity. Power users with a freshly-
+// captured JA3 from tls.peet.ws can override the azuretls built-in.
+func TestWithIdentity_ExplicitJA3StillWorks(t *testing.T) {
+	custom := presets.FirefoxLatest().JA3
+	p := identity.Generate(identity.WithBrowser(identity.BrowserFirefox))
+	f := fetch.NewStealth(
+		fetch.WithIdentity(p),
+		fetch.WithJA3(custom),
+	)
+	defer f.Close()
+	if f.Session().GetClientHelloSpec == nil {
+		t.Error("session.GetClientHelloSpec is nil; explicit WithJA3 should be applied")
+	}
+}
+
+// TestWithIdentity_ChromeSetsBrowser verifies non-Firefox identity paths
+// also configure session.Browser correctly so azuretls picks the matching
+// built-in ClientHello.
+func TestWithIdentity_ChromeSetsBrowser(t *testing.T) {
+	p := identity.Generate(identity.WithBrowser(identity.BrowserChrome))
+	f := fetch.NewStealth(fetch.WithIdentity(p))
+	defer f.Close()
+
+	if got := f.Session().Browser; got != "chrome" {
+		t.Errorf("session.Browser = %q, want %q", got, "chrome")
+	}
+	if f.Session().GetClientHelloSpec != nil {
+		t.Error("session.GetClientHelloSpec must be nil; rely on azuretls built-in spec")
 	}
 }
