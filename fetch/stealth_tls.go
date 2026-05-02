@@ -173,6 +173,21 @@ func WithHTTP3Fingerprint(fp string) StealthOption {
 	}
 }
 
+// WithStrictTLSVerify re-enables full TLS certificate chain, hostname, and pin
+// verification. By default, NewStealth sets InsecureSkipVerify=true to prevent
+// azuretls's DefaultPinManager from breaking requests against multi-edge CDN
+// targets (Bing, Google, Cloudflare) — see the trade-off comment above
+// NewStealth for the full rationale.
+//
+// Use this option when your environment routes requests through a well-known
+// proxy chain and you require certificate validation, or in test environments
+// that terminate TLS locally.
+func WithStrictTLSVerify() StealthOption {
+	return func(f *StealthFetcher) {
+		f.pendingStrictTLS = true
+	}
+}
+
 // StealthFetcher is a TLS-impersonating HTTP client backed by azuretls-client.
 // It performs full JA3/JA4 + HTTP/2 fingerprint impersonation so that the TLS
 // ClientHello matches a real browser, not Go's standard crypto/tls handshake.
@@ -192,6 +207,11 @@ type StealthFetcher struct {
 	pendingJA3   string
 	pendingHTTP2 string
 	pendingHTTP3 string
+
+	// pendingStrictTLS is set by WithStrictTLSVerify. When true, NewStealth
+	// sets InsecureSkipVerify=false after the option loop, overriding the
+	// default of true. Checked after all options run so option order is safe.
+	pendingStrictTLS bool
 }
 
 // IsImpersonating reports whether this fetcher performs real JA3/JA4 TLS
@@ -207,18 +227,56 @@ func (f *StealthFetcher) IsImpersonating() bool { return true }
 // change with future azuretls releases.
 func (f *StealthFetcher) Session() *azuretls.Session { return f.session }
 
+// Security trade-off: InsecureSkipVerify=true as default
+//
+// azuretls v1.12.12+ auto-attaches DefaultPinManager (a process-global
+// singleton) to every new Session. On the first request to any host the
+// PinManager opens a second TLS handshake (InsecureSkipVerify:true internally)
+// to capture the host's SPKI fingerprint, then caches it. A subsequent request
+// routed to a different CDN edge receives a different certificate → SPKI
+// mismatch → "pin verification failed for <host>" → connection failure.
+//
+// Multi-edge targets (Bing, Google, Cloudflare) rotate certificates across
+// edge nodes continuously. This makes the default PinManager behaviour
+// incompatible with sustained scraping against these targets.
+//
+// foxhound's threat model is target-side bot detection, not MITM attacks.
+// Scraped targets are public websites over public HTTPS. The transport path is
+// controlled (direct or known proxy). Setting InsecureSkipVerify=true disables
+// certificate chain validation, hostname verification, and SPKI pin checking —
+// removing the pin mismatch failure mode with no practical security downside
+// for this use case.
+//
+// To re-enable full TLS verification (chain + hostname + pin), pass
+// WithStrictTLSVerify(). Consumers that operate in regulated environments or
+// route through corporate PKI infrastructure should always use this option.
+
 // NewStealth creates a StealthFetcher backed by azuretls. Call with any number
 // of StealthOption functional options to configure identity, timeout, and proxy.
 // The default browser profile is Firefox with a 30-second timeout.
+// InsecureSkipVerify defaults to true — see the trade-off comment above for
+// rationale. Pass WithStrictTLSVerify() to re-enable full certificate
+// chain and hostname verification.
 func NewStealth(opts ...StealthOption) *StealthFetcher {
 	sess := azuretls.NewSession()
 	// Default: Firefox. WithIdentity will override if a Chrome profile is provided.
 	sess.Browser = azuretls.Firefox
 	sess.SetTimeout(defaultStealthTimeout)
+	// Disable pin verification by default: azuretls DefaultPinManager breaks
+	// on multi-edge CDN targets (Bing, Google, Cloudflare) where cert SPKI
+	// differs per edge. See trade-off comment above NewStealth.
+	sess.InsecureSkipVerify = true
 
 	f := &StealthFetcher{session: sess}
 	for _, opt := range opts {
 		opt(f)
+	}
+
+	// If the caller opted in to strict TLS, re-enable full certificate chain
+	// and hostname verification. This overrides the InsecureSkipVerify=true
+	// default set above. Checked after all options run so option order is safe.
+	if f.pendingStrictTLS {
+		f.session.InsecureSkipVerify = false
 	}
 
 	// Warn when both pendingJA3 and pendingHTTP2 are set via the bare With*
@@ -264,6 +322,7 @@ func NewStealth(opts ...StealthOption) *StealthFetcher {
 		"ja3_custom", f.pendingJA3 != "",
 		"http2_custom", f.pendingHTTP2 != "",
 		"http3_custom", f.pendingHTTP3 != "",
+		"tls_verify", !f.session.InsecureSkipVerify,
 	)
 
 	return f

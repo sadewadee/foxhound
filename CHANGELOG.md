@@ -2,6 +2,40 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.20] — 2026-05-02
+
+### Fixed — azuretls DefaultPinManager breaks multi-request sessions against CDN-heavy targets
+
+**Summary:** `NewStealth` now sets `InsecureSkipVerify=true` by default, disabling the azuretls `DefaultPinManager` singleton that was silently causing "pin verification failed for \<host\>" errors on the second+ request against Bing, Google, and Cloudflare.
+
+**Root cause:** azuretls v1.12.12+ auto-attaches `DefaultPinManager` (a process-global singleton) to every `Session` returned by `NewSession()`. On the first request to any host, `PinManager.AddHost` opens a second TLS handshake (`InsecureSkipVerify:true` internally) to capture the host's SPKI fingerprint and caches it. Subsequent requests to the same host are verified against the cached pin. Multi-edge CDN targets (Bing, Google, Cloudflare) continuously rotate certificates across edge nodes — the second request often lands on an edge presenting a different SPKI → `"pin verification failed for <host>"` → connection failure.
+
+**Behavior change:** `NewStealth()` now explicitly sets `sess.InsecureSkipVerify = true` immediately after `azuretls.NewSession()`. This disables certificate chain validation, hostname verification, and SPKI pin checking for all requests. The startup log now includes a `tls_verify` field (`false` = default insecure-skip active, `true` = strict mode active).
+
+**Migration:** No action required for existing consumers. If your environment requires strict TLS verification (regulated deployments, corporate PKI), opt in with the new `WithStrictTLSVerify()` option:
+
+```go
+// Default (v0.0.20+): InsecureSkipVerify=true — PinManager disabled, CDN-safe
+f := fetch.NewStealth(fetch.WithIdentity(profile))
+
+// Opt-in strict verification: re-enables chain + hostname + pin checks
+f := fetch.NewStealth(
+    fetch.WithIdentity(profile),
+    fetch.WithStrictTLSVerify(),
+)
+```
+
+**Trade-off acknowledgment:** `InsecureSkipVerify=true` disables TLS certificate chain validation, hostname verification, and SPKI pin checking — not just pin checking. This is intentional: foxhound's threat model is target-side bot detection, not MITM attacks. Scraped targets are public websites over public HTTPS and the transport path is controlled (direct or known proxy chain). Consumers operating in regulated environments or routing through corporate PKI infrastructure should always pass `WithStrictTLSVerify()`.
+
+**Why this matters:** v0.0.19 verified end-to-end against Bing and DuckDuckGo but only with single-shot requests. The `DefaultPinManager` failure is invisible on the first request — it only appears on the second request to the same host within a session. Sustained scraping, session reuse, and any code that hits the same domain twice was silently broken.
+
+**Added:**
+- `fetch.WithStrictTLSVerify()` (`fetch/stealth_tls.go`): zero-arg option that re-enables full TLS certificate chain, hostname, and pin verification after the default.
+- `tls_verify` field in the `fetch/stealth: initialized` startup log line: `false` = insecure-skip default, `true` = strict mode active via `WithStrictTLSVerify()`.
+- Code-comment block above `NewStealth` documenting the trade-off (all three disabled verification layers named explicitly).
+
+**Tests** (`fetch/stealth_tls_test.go`): `TestNewStealth_DefaultInsecureSkipVerify`, `TestNewStealth_WithStrictTLSVerify_DisablesInsecureSkipVerify`, `TestNewStealth_WithStrictTLSVerify_CoexistsWithIdentity` — all introspection-only (no network required).
+
 ## [v0.0.19] — 2026-04-30
 
 ### Fixed — TLS regression when pairing JA3 + HTTP/2 fingerprints (issue #41)

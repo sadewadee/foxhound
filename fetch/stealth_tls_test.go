@@ -337,3 +337,47 @@ func TestWithIdentity_ChromeSetsBrowser(t *testing.T) {
 		t.Error("session.GetClientHelloSpec must be nil; rely on azuretls built-in spec")
 	}
 }
+
+// TestNewStealth_DefaultInsecureSkipVerify verifies that NewStealth with no
+// options sets InsecureSkipVerify=true by default. This disables azuretls's
+// DefaultPinManager which would otherwise break against multi-edge CDN targets
+// (Bing, Google, Cloudflare) by caching SPKI pins from the first edge and then
+// failing on the second edge which presents a different certificate. No network
+// required — introspects the session field directly.
+func TestNewStealth_DefaultInsecureSkipVerify(t *testing.T) {
+	f := fetch.NewStealth()
+	defer f.Close()
+	if !f.Session().InsecureSkipVerify {
+		t.Error("default: InsecureSkipVerify must be true to prevent PinManager multi-edge failures (v0.0.20)")
+	}
+}
+
+// TestNewStealth_WithStrictTLSVerify_DisablesInsecureSkipVerify verifies that
+// WithStrictTLSVerify() re-enables full certificate chain, hostname, and pin
+// verification by flipping InsecureSkipVerify back to false. No network.
+func TestNewStealth_WithStrictTLSVerify_DisablesInsecureSkipVerify(t *testing.T) {
+	f := fetch.NewStealth(fetch.WithStrictTLSVerify())
+	defer f.Close()
+	if f.Session().InsecureSkipVerify {
+		t.Error("WithStrictTLSVerify: InsecureSkipVerify must be false (strict mode on)")
+	}
+}
+
+// TestNewStealth_WithStrictTLSVerify_CoexistsWithIdentity verifies that
+// WithStrictTLSVerify and WithIdentity can be combined without interference:
+// strict mode is active and the browser family is correctly set from the
+// identity profile. Order of options must not matter.
+func TestNewStealth_WithStrictTLSVerify_CoexistsWithIdentity(t *testing.T) {
+	p := identity.Generate(identity.WithBrowser(identity.BrowserFirefox))
+	f := fetch.NewStealth(
+		fetch.WithIdentity(p),
+		fetch.WithStrictTLSVerify(),
+	)
+	defer f.Close()
+	if f.Session().InsecureSkipVerify {
+		t.Error("WithStrictTLSVerify + WithIdentity: InsecureSkipVerify must be false")
+	}
+	if got := f.Session().Browser; got != "firefox" {
+		t.Errorf("session.Browser = %q, want %q after WithIdentity(firefox)", got, "firefox")
+	}
+}

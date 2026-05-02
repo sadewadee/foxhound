@@ -6,7 +6,7 @@
   <strong>Go Scraping Framework with Native Camoufox Anti-Detection</strong>
 </p>
 
-# Foxhound v0.0.19
+# Foxhound v0.0.20
 
 High-performance Go scraping framework with native Camoufox anti-detection, dual-mode fetching, and 13-layer middleware.
 
@@ -246,6 +246,23 @@ f := fetch.NewStealth(fetch.WithIdentity(profile))
 The HTTP/2 layer is left to azuretls's browser-aware `initHTTP2(browser)` so TLS, headers, and HTTP/2 all agree on Firefox. Manual `WithHTTP2Fingerprint` is supported for power users but logs a startup warning when paired with `WithJA3` (see [issue #41](https://github.com/sadewadee/foxhound/issues/41)).
 
 Verified against `https://www.bing.com/search` and `https://duckduckgo.com/` through a datacenter proxy: both return 200 with `WithIdentity` alone.
+
+### TLS certificate verification (v0.0.20)
+
+`NewStealth` now sets `InsecureSkipVerify=true` by default. This disables azuretls's built-in `DefaultPinManager`, which performs an extra TLS handshake per new host to capture SPKI fingerprints and then fails on subsequent requests if a different CDN edge serves a different certificate. Multi-edge targets (Bing, Google, Cloudflare) rotate certificates continuously, making the default PinManager behaviour incompatible with sustained scraping.
+
+foxhound's threat model is bot detection avoidance, not MITM prevention. The default is safe for scraping public sites over a controlled proxy path.
+
+To re-enable full certificate chain, hostname, and pin verification:
+
+```go
+f := fetch.NewStealth(
+    fetch.WithIdentity(profile),
+    fetch.WithStrictTLSVerify(),   // re-enables chain + hostname + pin checks
+)
+```
+
+The startup log includes `tls_verify=true` when strict mode is active, `tls_verify=false` (default).
 
 ### Pin or rotate JA3 (advanced)
 
