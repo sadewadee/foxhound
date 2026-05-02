@@ -183,7 +183,8 @@ type CamoufoxFetcher struct {
 	extensionPath          string       // path to Firefox extension dir (e.g. NopeCHA)
 	maxRequests            int          // restart after this many fetches (0 = disabled)
 	requestCount           atomic.Int64 // total fetches served by the current browser instance
-	mu                     sync.Mutex   // serialises browser restart
+	mu                     sync.Mutex   // serialises browser restart and Close()
+	closing                atomic.Bool  // set by Close() to prevent restart() after shutdown begins
 	persistSession         bool
 	sessionCtx             playwright.BrowserContext // reused when persistSession=true
 	sessionMu              sync.Mutex                // guards sessionCtx lifecycle
@@ -660,7 +661,18 @@ func NewCamoufox(opts ...CamoufoxOption) (*CamoufoxFetcher, error) {
 		f.pool = NewPagePool(
 			f.poolSize,
 			func() (any, error) {
-				bctx, err := f.browser.NewContext(f.buildContextOptions())
+				// IMPORTANT: snapshot f.browser under f.mu at invocation time.
+				// The create closure is called lazily by pool.Acquire outside any
+				// lock; Close() or restart() may nil f.browser between Acquire
+				// calls, so capturing a live snapshot here prevents nil-pointer
+				// dereference (v0.0.22 fix for B3 — see .dev-squad/v0.0.22-rca.md).
+				f.mu.Lock()
+				b := f.browser
+				f.mu.Unlock()
+				if b == nil {
+					return nil, fmt.Errorf("fetch/camoufox: browser unavailable for page pool")
+				}
+				bctx, err := b.NewContext(f.buildContextOptions())
 				if err != nil {
 					return nil, fmt.Errorf("pagepool: new context: %w", err)
 				}
@@ -976,14 +988,27 @@ func (f *CamoufoxFetcher) Fetch(ctx context.Context, job *foxhound.Job) (*foxhou
 // Returns (ctx, shouldClose, err).
 func (f *CamoufoxFetcher) getOrCreateContext() (playwright.BrowserContext, bool, error) {
 
+	// IMPORTANT: snapshot f.persistCtx and f.browser under f.mu before use.
+	// Close() and restart() both mutate these fields while holding f.mu, so
+	// reading them once under the lock and using local copies eliminates the
+	// TOCTOU race that would crash with a nil-pointer dereference (v0.0.22 fix
+	// for B2 — see .dev-squad/v0.0.22-rca.md).
+	f.mu.Lock()
+	persistCtx := f.persistCtx
+	browser := f.browser
+	f.mu.Unlock()
+
 	// When a persistent context was obtained from LaunchPersistentContext,
 	// use it directly — it already embeds the profile directory state.
-	if f.persistCtx != nil {
-		return f.persistCtx, false, nil // caller must NOT close
+	if persistCtx != nil {
+		return persistCtx, false, nil // caller must NOT close
 	}
 
 	if !f.persistSession {
-		bctx, err := f.browser.NewContext(f.buildContextOptions())
+		if browser == nil {
+			return nil, false, fmt.Errorf("fetch/camoufox: browser is not running")
+		}
+		bctx, err := browser.NewContext(f.buildContextOptions())
 		return bctx, true, err // caller should close
 	}
 
@@ -991,7 +1016,10 @@ func (f *CamoufoxFetcher) getOrCreateContext() (playwright.BrowserContext, bool,
 	defer f.sessionMu.Unlock()
 
 	if f.sessionCtx == nil {
-		bctx, err := f.browser.NewContext(f.buildContextOptions())
+		if browser == nil {
+			return nil, false, fmt.Errorf("fetch/camoufox: browser is not running")
+		}
+		bctx, err := browser.NewContext(f.buildContextOptions())
 		if err != nil {
 			return nil, false, err
 		}
@@ -2844,6 +2872,13 @@ func (f *CamoufoxFetcher) restart() error {
 		return nil
 	}
 
+	// If Close() has been called, the fetcher is shutting down. Restarting the
+	// browser would be pointless and would race with the teardown sequence
+	// (v0.0.22 fix for B5 — see .dev-squad/v0.0.22-rca.md).
+	if f.closing.Load() {
+		return nil
+	}
+
 	slog.Info("fetch/camoufox: restarting browser instance",
 		"request_count", f.requestCount.Load(),
 		"max_requests", f.maxRequests,
@@ -2939,7 +2974,17 @@ func (f *CamoufoxFetcher) restart() error {
 		f.pool = NewPagePool(
 			f.poolSize,
 			func() (any, error) {
-				bctx, err := f.browser.NewContext(f.buildContextOptions())
+				// IMPORTANT: snapshot f.browser under f.mu at invocation time.
+				// The create closure is called lazily outside f.mu; a concurrent
+				// Close() or second restart() may nil f.browser before this runs
+				// (v0.0.22 fix for B3 — see .dev-squad/v0.0.22-rca.md).
+				f.mu.Lock()
+				b := f.browser
+				f.mu.Unlock()
+				if b == nil {
+					return nil, fmt.Errorf("fetch/camoufox: browser unavailable for page pool")
+				}
+				bctx, err := b.NewContext(f.buildContextOptions())
 				if err != nil {
 					return nil, fmt.Errorf("pool create: %w", err)
 				}
@@ -3009,13 +3054,29 @@ func (f *CamoufoxFetcher) mouseConfig() behavior.MouseConfig {
 // LaunchPersistentContext context (if any), browser, then the playwright
 // process. Errors from each step are logged but do not prevent the subsequent
 // steps from running.
+//
+// Close() acquires f.mu for the entire browser teardown sequence so it cannot
+// race with restart() (v0.0.22 fix for B1/B4/B5 — see .dev-squad/v0.0.22-rca.md).
+// Lock order: f.mu → f.sessionMu (must not be inverted).
 func (f *CamoufoxFetcher) Close() error {
 	var firstErr error
 
-	// Save storage state before closing browser resources.
+	// Signal that shutdown is in progress. restart() checks this flag under
+	// f.mu and returns immediately if set, preventing a concurrent restart
+	// from racing with teardown.
+	f.closing.Store(true)
+
+	// Save storage state before acquiring f.mu — SaveStorageState only reads
+	// browser state and does not mutate the fields guarded by f.mu.
 	if err := f.SaveStorageState(); err != nil {
 		slog.Warn("fetch/camoufox: error saving storage state", "err", err)
 	}
+
+	// Hold f.mu for the entire browser/pool teardown so that restart() cannot
+	// concurrently nil or replace f.pool, f.browser, or f.persistCtx while we
+	// are closing them.
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	// Close the page pool first so all pooled contexts are released before
 	// the browser is torn down.
@@ -3031,6 +3092,7 @@ func (f *CamoufoxFetcher) Close() error {
 
 	// Close the persistent session context so its resources are freed
 	// before the browser itself is torn down.
+	// Lock order: f.mu (already held) → f.sessionMu.
 	f.sessionMu.Lock()
 	if f.sessionCtx != nil {
 		if closeErr := f.sessionCtx.Close(); closeErr != nil {
@@ -3084,7 +3146,8 @@ func (f *CamoufoxFetcher) Close() error {
 		f.pw = nil
 	}
 
-	// Clean up temporary directories after all browser resources are freed.
+	// Clean up temporary directories while f.mu is held, mirroring restart()'s
+	// call pattern to prevent a race between concurrent Close() and restart().
 	f.cleanTempDirs()
 
 	// Shut down the SOCKS5 auth bridge if it was started.

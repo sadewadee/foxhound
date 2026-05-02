@@ -2,6 +2,54 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.22] — 2026-05-03
+
+### Fixed — concurrency hardening for `CamoufoxFetcher` browser/context lifecycle
+
+Continuation of the v0.0.21 audit. The same TOCTOU race pattern that crashed
+`PagePool.Release` exists for every other mutable field on `CamoufoxFetcher`
+(`f.browser`, `f.persistCtx`, `f.tempDirs`) and between `Close()` and
+`restart()`. v0.0.22 closes all five remaining bug categories (B1–B5) found in
+that audit. See `.dev-squad/v0.0.22-rca.md` for the full lifecycle diagram.
+
+**B1 — `Close()` did not lock `f.mu`.** `Close()` nil-ed `f.pool`, `f.persistCtx`,
+and `f.browser` without acquiring `f.mu`, so it raced with `restart()` (which
+holds `f.mu`) and any in-flight goroutine reading those fields. Fix: `Close()`
+now acquires `f.mu` for the entire teardown sequence.
+
+**B2 — `getOrCreateContext()` read `f.persistCtx` and `f.browser` without
+`f.mu`.** Same TOCTOU as v0.0.21. Fix: snapshot both fields under `f.mu` before
+use, with a nil-guard returning a clean error instead of dereferencing.
+
+**B3 — `PagePool` create closure captured `f.browser` without lock.** The pool's
+create function is invoked lazily from `Acquire()` outside any lock, so a
+concurrent `Close()` or `restart()` could nil `f.browser` between create calls.
+Fix: snapshot `f.browser` under `f.mu` inside the create closure with a
+nil-guard returning an error.
+
+**B4 — `cleanTempDirs()` mutated `f.tempDirs` without lock.** Called from
+`Close()` (no lock) and `restart()` (under `f.mu`), creating a write-write race.
+Fix: `Close()` now holds `f.mu` while calling `cleanTempDirs()`, mirroring
+`restart()`.
+
+**B5 — `Close()` and `restart()` could run concurrently.** With both now under
+`f.mu`, they serialise. A `closing atomic.Bool` flag is set as the first action
+of `Close()`; `restart()` checks the flag under `f.mu` and returns immediately
+if shutdown is in progress, preventing a pointless restart during teardown.
+
+**Tests added:** 8 race tests in `fetch/camoufox_race_test.go`
+(`TestCamoufox_DoubleClose`, `TestCamoufox_RestartDuringClose`,
+`TestCamoufox_ClosingFlagPreventsRestart`,
+`TestCamoufox_GetOrCreateContext_NilBrowser` (×2),
+`TestCamoufox_GetOrCreateContext_RaceWithClosing`,
+`TestCamoufox_PoolCreate_NilBrowserReturnsError`,
+`TestCamoufox_Close_Concurrent`). All pass under `go test -race -tags playwright`
+across 3 consecutive full-suite runs.
+
+**Migration:** Drop-in — no API or config changes. `Close()` is now a strictly
+serialised operation; calling it twice or from multiple goroutines is safe and
+silent (second call observes the closing flag and returns nil).
+
 ## [v0.0.21] — 2026-05-02
 
 ### Fixed — PagePool nil-pointer SIGSEGV in captcha-heavy browser pool workloads
