@@ -2,6 +2,42 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.21] — 2026-05-02
+
+### Fixed — PagePool nil-pointer SIGSEGV in captcha-heavy browser pool workloads
+
+**Root cause (present since v0.0.13):** A TOCTOU (time-of-check-time-of-use) race between
+`navigate()` and `restart()` in `CamoufoxFetcher`. The `restart()` method acquires `f.mu`,
+calls `f.pool.Close()`, then nil-s `f.pool` (line 2857). Concurrently, a goroutine spawned
+by `Fetch` at line 954 passes through `navigate()`, checks `if f.pool != nil` (line 2321),
+and then calls `f.pool.Release(page)` (line 2330) — but `f.pool` has been nil-ed between
+the check and the call. The result is `Release(0x0, ...)` → `p.mu.Lock()` on a nil
+receiver → SIGSEGV. Under captcha-heavy load, CAPTCHA pages cause reset failures, which
+accelerate page pool slot exhaustion, which drives faster browser restart cycles, widening
+the race window and causing 184–359 docker restart-unless-stopped restarts over 4 days in
+production.
+
+**Fix — two layers:**
+
+- `fetch/camoufox_playwright.go`: `navigate()` now snapshots `f.pool` under `f.mu` before
+  use. The local snapshot is either nil (pool disabled) or a valid pointer to a pool that
+  may be open or closed. If `restart()` closed and nil-ed `f.pool` between `Acquire` and
+  `Release`, the snapshot still points to the (now-closed) pool — `Release` on a closed
+  pool is safe because the pool's own `closed` guard destroys the page and returns
+  immediately.
+
+- `fetch/pagepool.go`: every `*PagePool` method now has a nil-receiver guard as a
+  second-line defence. If any future code path reads `f.pool` without a lock and calls a
+  method on the result, it gets a clean error or no-op instead of a SIGSEGV.
+
+**Methods with nil-receiver guards added:** `Acquire`, `Release`, `Close`, `Stats`,
+`Busy`, `Free`, `Total`, `WarmUp`, `AcquireWithTimeout`.
+
+**Tests added:** 9 nil-receiver tests in `fetch/pagepool_test.go` — one per method listed
+above. All pass under `go test -race`.
+
+**Migration:** Drop-in — no API changes. No configuration changes required.
+
 ## [v0.0.20] — 2026-05-02
 
 ### Fixed — azuretls DefaultPinManager breaks multi-request sessions against CDN-heavy targets

@@ -83,6 +83,9 @@ func NewPagePool(maxSize int, create func() (any, error), destroy func(any) erro
 // pool hasn't reached maxSize, a new page is created. If maxSize is reached,
 // Acquire blocks until a page is returned or ctx is cancelled.
 func (p *PagePool) Acquire(ctx context.Context) (any, error) {
+	if p == nil {
+		return nil, errors.New("pagepool: nil pool")
+	}
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
@@ -158,7 +161,14 @@ func (p *PagePool) Acquire(ctx context.Context) (any, error) {
 // Release returns a page to the pool. If a reset function is configured,
 // the page is reset before being made available. If reset fails, the page
 // is destroyed and a new slot opens.
+//
+// Release is a no-op when called on a nil receiver, so callers may safely
+// hold a snapshotted pool pointer that was nil-ed concurrently (e.g. during
+// browser restart).
 func (p *PagePool) Release(page any) {
+	if p == nil {
+		return
+	}
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
@@ -232,6 +242,9 @@ func (p *PagePool) Release(page any) {
 
 // Close destroys all pooled pages and prevents further acquisitions.
 func (p *PagePool) Close() error {
+	if p == nil {
+		return nil
+	}
 	p.mu.Lock()
 	p.closed = true
 	p.mu.Unlock()
@@ -258,6 +271,9 @@ func (p *PagePool) Close() error {
 
 // Stats returns pool usage statistics.
 func (p *PagePool) Stats() PagePoolStats {
+	if p == nil {
+		return PagePoolStats{}
+	}
 	created := p.created.Load()
 	acquired := p.acquired.Load()
 	released := p.released.Load()
@@ -288,23 +304,35 @@ type PagePoolStats struct {
 
 // Busy returns the number of pages currently checked out.
 func (p *PagePool) Busy() int64 {
+	if p == nil {
+		return 0
+	}
 	return p.acquired.Load() - p.released.Load()
 }
 
 // Free returns the number of idle pages available for immediate acquisition.
 func (p *PagePool) Free() int64 {
+	if p == nil {
+		return 0
+	}
 	return int64(len(p.pages))
 }
 
 // Total returns the total number of pages that have been created and not
 // yet destroyed.
 func (p *PagePool) Total() int64 {
+	if p == nil {
+		return 0
+	}
 	return p.created.Load()
 }
 
 // WarmUp pre-creates n pages in the pool. This reduces latency for the first
 // n Acquire calls. Returns the number of pages successfully created.
 func (p *PagePool) WarmUp(n int) int {
+	if p == nil {
+		return 0
+	}
 	if n > p.maxSize {
 		n = p.maxSize
 	}
@@ -350,6 +378,9 @@ func (p *PagePool) WarmUp(n int) int {
 
 // AcquireWithTimeout is a convenience wrapper around Acquire with a timeout.
 func (p *PagePool) AcquireWithTimeout(timeout time.Duration) (any, error) {
+	if p == nil {
+		return nil, errors.New("pagepool: nil pool")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return p.Acquire(ctx)

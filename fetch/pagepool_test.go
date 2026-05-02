@@ -277,6 +277,88 @@ func TestPagePool_CloseUnblocksAcquireWithError(t *testing.T) {
 	}
 }
 
+// ── Nil-receiver safety tests (v0.0.21) ─────────────────────────────────────
+//
+// Each *PagePool method must be safe to call on a nil receiver. This covers
+// the race window where restart() nil-s f.pool while a goroutine in navigate()
+// still holds a copy of the old pointer (see .dev-squad/v0.0.21-rca.md).
+
+// TestPagePool_Release_NilReceiver verifies Release does not panic on a nil pool.
+func TestPagePool_Release_NilReceiver(t *testing.T) {
+	var p *fetch.PagePool
+	p.Release("page") // must not panic
+}
+
+// TestPagePool_Acquire_NilReceiver verifies Acquire returns an error on a nil pool.
+func TestPagePool_Acquire_NilReceiver(t *testing.T) {
+	var p *fetch.PagePool
+	_, err := p.Acquire(context.Background())
+	if err == nil {
+		t.Error("expected error from Acquire on nil pool, got nil")
+	}
+}
+
+// TestPagePool_Close_NilReceiver verifies Close returns nil on a nil pool.
+func TestPagePool_Close_NilReceiver(t *testing.T) {
+	var p *fetch.PagePool
+	if err := p.Close(); err != nil {
+		t.Errorf("Close on nil pool: want nil, got %v", err)
+	}
+}
+
+// TestPagePool_Stats_NilReceiver verifies Stats returns zero value on a nil pool.
+func TestPagePool_Stats_NilReceiver(t *testing.T) {
+	var p *fetch.PagePool
+	stats := p.Stats()
+	if stats.MaxSize != 0 || stats.Created != 0 || stats.Acquired != 0 {
+		t.Errorf("Stats on nil pool: want zero PagePoolStats, got %+v", stats)
+	}
+}
+
+// TestPagePool_Busy_NilReceiver verifies Busy returns 0 on a nil pool.
+func TestPagePool_Busy_NilReceiver(t *testing.T) {
+	var p *fetch.PagePool
+	if got := p.Busy(); got != 0 {
+		t.Errorf("Busy on nil pool = %d, want 0", got)
+	}
+}
+
+// TestPagePool_Free_NilReceiver verifies Free returns 0 on a nil pool.
+func TestPagePool_Free_NilReceiver(t *testing.T) {
+	var p *fetch.PagePool
+	if got := p.Free(); got != 0 {
+		t.Errorf("Free on nil pool = %d, want 0", got)
+	}
+}
+
+// TestPagePool_Total_NilReceiver verifies Total returns 0 on a nil pool.
+func TestPagePool_Total_NilReceiver(t *testing.T) {
+	var p *fetch.PagePool
+	if got := p.Total(); got != 0 {
+		t.Errorf("Total on nil pool = %d, want 0", got)
+	}
+}
+
+// TestPagePool_WarmUp_NilReceiver verifies WarmUp returns 0 on a nil pool.
+func TestPagePool_WarmUp_NilReceiver(t *testing.T) {
+	var p *fetch.PagePool
+	if got := p.WarmUp(4); got != 0 {
+		t.Errorf("WarmUp on nil pool = %d, want 0", got)
+	}
+}
+
+// TestPagePool_AcquireWithTimeout_NilReceiver verifies AcquireWithTimeout
+// returns an error on a nil pool.
+func TestPagePool_AcquireWithTimeout_NilReceiver(t *testing.T) {
+	var p *fetch.PagePool
+	_, err := p.AcquireWithTimeout(100 * time.Millisecond)
+	if err == nil {
+		t.Error("expected error from AcquireWithTimeout on nil pool, got nil")
+	}
+}
+
+// ── End nil-receiver tests ────────────────────────────────────────────────────
+
 // TestPagePool_WarmUpConcurrentWithAcquire verifies that concurrent WarmUp
 // and Acquire calls do not exceed maxSize.
 func TestPagePool_WarmUpConcurrentWithAcquire(t *testing.T) {

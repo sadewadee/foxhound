@@ -2318,8 +2318,17 @@ func (f *CamoufoxFetcher) navigate(ctx context.Context, job *foxhound.Job) (*fox
 	// When a page pool is active, acquire a pre-warmed page+context instead of
 	// creating a fresh BrowserContext for every request. The pool resets cookies
 	// and navigates to about:blank between uses to prevent session bleed.
-	if f.pool != nil {
-		pooledAny, err := f.pool.Acquire(ctx)
+	//
+	// IMPORTANT: snapshot f.pool under f.mu before use. restart() nil-s f.pool
+	// while holding f.mu, so reading f.pool once under the lock and using the
+	// local copy eliminates the TOCTOU race that caused a nil-pointer SIGSEGV
+	// (v0.0.21 fix — see .dev-squad/v0.0.21-rca.md).
+	f.mu.Lock()
+	pool := f.pool
+	f.mu.Unlock()
+
+	if pool != nil {
+		pooledAny, err := pool.Acquire(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("fetch/camoufox: acquiring pooled page for %s: %w", job.URL, err)
 		}
@@ -2327,7 +2336,10 @@ func (f *CamoufoxFetcher) navigate(ctx context.Context, job *foxhound.Job) (*fox
 		bctx := page.Context()
 		resp, err := f.navigateWithPage(ctx, job, bctx, page)
 		// Always release back to pool; the pool's reset func will clean state.
-		f.pool.Release(page)
+		// If restart() closed and nil-ed f.pool between Acquire and here, pool
+		// is still a valid pointer to the now-closed pool. Release on a closed
+		// pool is safe — it destroys the page and returns immediately.
+		pool.Release(page)
 		return resp, err
 	}
 
