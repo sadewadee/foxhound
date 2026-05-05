@@ -8,9 +8,20 @@ package identity
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"strings"
+	"sync"
 )
+
+// noGeoConstraintWarnOnce ensures the "no geo constraint" warning fires at
+// most once per process. The warning fires when Generate is called without
+// any of WithCountry, WithProxy, WithGeoResolver, WithLocale, WithTimezone,
+// or WithGeo — meaning the resulting identity will pick a random locale
+// (87% en-US given the embedded profile distribution) regardless of the
+// proxy exit IP, which is a first-tier bot-detection signal when the
+// profile is paired with a non-US proxy.
+var noGeoConstraintWarnOnce sync.Once
 
 // Browser represents a supported browser type.
 type Browser string
@@ -161,6 +172,18 @@ func Generate(opts ...Option) *Profile {
 	}
 	for _, opt := range opts {
 		opt(cfg)
+	}
+
+	// Warn once per process if the caller provided no geo constraint at all.
+	// Without WithCountry / WithProxy / WithLocale / WithTimezone / WithGeo /
+	// WithGeoResolver, the identity falls back to whatever locale the random
+	// device profile carries — overwhelmingly en-US — which mismatches any
+	// non-US proxy exit IP and is a bot-detection signal.
+	if cfg.country == "" && cfg.proxyIP == "" && cfg.geoResolver == nil &&
+		cfg.locale == "" && cfg.tz == "" && cfg.lat == 0 && cfg.lng == 0 {
+		noGeoConstraintWarnOnce.Do(func() {
+			slog.Warn("identity: no geo constraint provided; locale will not match proxy exit IP — pass WithCountry(code) or WithProxy(ip) to Generate to align identity locale with proxy geo")
+		})
 	}
 
 	// Pick random OS if not specified

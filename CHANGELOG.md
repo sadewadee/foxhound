@@ -2,6 +2,60 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.23] — 2026-05-05
+
+### Anti-detection — small cleanups from comprehensive 24h production audit
+
+A comprehensive audit of three foxhound-based serp-scraper deployments (kurama,
+hachibi, kurawa) at 24h log granularity established that the dominant captcha
+driver is datacenter proxy IP reputation, not foxhound fingerprint correctness
+— time-of-day correlation showed the same fingerprint produces 0.5% captcha
+during US off-peak vs 98% during US peak hours. The full report is at
+`.dev-squad/serp-detection-audit-FULL.md`. Three small foxhound-side cleanups
+landed from that audit; deeper proxy/deployment work belongs to consumers.
+
+**`identity.Generate()` now warns once when called with no geo constraint.**
+Without `WithCountry` / `WithProxy` / `WithLocale` / `WithTimezone` / `WithGeo`
+/ `WithGeoResolver`, the identity falls back to whatever locale the random
+device profile carries — overwhelmingly en-US given the embedded profile
+distribution — which mismatches any non-US proxy exit IP and is a first-tier
+bot-detection signal. The warning fires at most once per process via a
+`sync.Once` so it is loud enough to notice but does not spam. No behaviour
+change beyond the new log line.
+
+**Deleted `identity/data/tls/firefox_148.0.json`.** The file was byte-identical
+to `firefox_135.0.json`. A consumer calling `WithJA3("firefox_148")` would
+have received Firefox 135.0 TLS data labelled as 148 — misleading. No code in
+the foxhound module referenced the file; removal is safe. If a real Firefox
+148 TLS preset is needed in the future it must be regenerated from a current
+ClientHello capture, not duplicated from 135.
+
+**Verified `WithCountry(code)` locale override path.** Audit raised concern
+that `WithCountry("CA")` might not select profiles with `en-CA` locale because
+the embedded device profiles only include 5 Linux locales. The concern is
+unfounded: `applyGeoToConfig` in `identity/geo.go` overrides `cfg.locale`,
+`cfg.tz`, `cfg.lat`, and `cfg.lng` from the geo table after random profile
+selection, so the final profile always gets the country-matched locale
+regardless of which device profile was drawn. Verified by new test
+`TestGenerateWithCountry_OverridesLocale` exercising 4 country codes × 20
+random profile draws each.
+
+**Tests added:** `TestGenerateNoGeoConstraint_DoesNotPanic` (new) and
+`TestGenerateWithCountry_OverridesLocale` (new) in
+`identity/identity_test.go`. All pass under `go test -race ./...` (19
+packages, 3 consecutive runs).
+
+**Migration:** Drop-in. The `slog.Warn` line is informational; if your code
+already passes `WithCountry` or `WithProxy` to `identity.Generate`, no warning
+fires. If you see the warning, your identities have a random locale — pass
+`WithCountry(code)` (preferred) or `WithProxy(ip)` to align with the proxy
+exit geo.
+
+**Out of scope (deferred):** Auto-detect proxy country from IP geolocation
+(`WithAutoGeoDetect()` opt-in) — non-trivial, requires network probe + cache
++ tzmap; planned for a later release. The warning shipped here is the
+minimal-viable instrumentation pending that work.
+
 ## [v0.0.22] — 2026-05-03
 
 ### Fixed — concurrency hardening for `CamoufoxFetcher` browser/context lifecycle

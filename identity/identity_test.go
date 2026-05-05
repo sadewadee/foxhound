@@ -483,3 +483,48 @@ func TestFallbackProfileReturnsValidData(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// v0.0.23 — no-geo-constraint warning is non-fatal and emits only once
+// ---------------------------------------------------------------------------
+
+// TestGenerateNoGeoConstraint_DoesNotPanic verifies that calling Generate with
+// no geo constraint at all (no WithCountry, no WithProxy, no WithLocale, etc.)
+// still returns a valid profile. The warning is informational only.
+func TestGenerateNoGeoConstraint_DoesNotPanic(t *testing.T) {
+	p := identity.Generate()
+	if p == nil {
+		t.Fatal("Generate() with no options returned nil")
+	}
+	if p.Locale == "" {
+		t.Error("Generate() should fall back to base profile locale even without geo constraint")
+	}
+}
+
+// TestGenerateWithCountry_OverridesLocale verifies that WithCountry forces the
+// final profile locale to match the country geo table, regardless of which
+// random device profile was selected. This is the audit's v0.0.23-3 finding:
+// the locale override path works correctly via applyGeoToConfig.
+func TestGenerateWithCountry_OverridesLocale(t *testing.T) {
+	for _, tc := range []struct {
+		country string
+		want    string
+	}{
+		{"CA", "en-CA"},
+		{"DE", "de-DE"},
+		{"ID", "id-ID"},
+		{"FR", "fr-FR"},
+	} {
+		t.Run(tc.country, func(t *testing.T) {
+			// Run several times to defeat random profile selection — every
+			// call must yield the country-matched locale.
+			for i := 0; i < 20; i++ {
+				p := identity.Generate(identity.WithCountry(tc.country))
+				if p.Locale != tc.want {
+					t.Errorf("WithCountry(%q) iter %d: locale=%q want %q",
+						tc.country, i, p.Locale, tc.want)
+				}
+			}
+		})
+	}
+}
