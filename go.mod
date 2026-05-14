@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/Noooste/azuretls-client v1.12.12
+	github.com/Noooste/utls v1.3.20
 	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/andybalholm/brotli v1.2.0
 	github.com/google/uuid v1.6.0
@@ -22,13 +23,12 @@ require (
 	github.com/Noooste/fhttp v1.0.15 // indirect
 	github.com/Noooste/go-socks4 v0.0.2 // indirect
 	github.com/Noooste/uquic-go v1.0.5 // indirect
-	github.com/Noooste/utls v1.3.20 // indirect
 	github.com/Noooste/websocket v1.0.3 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/bdandy/go-errors v1.2.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/cloudflare/circl v1.6.3 // indirect
+	github.com/cloudflare/circl v1.6.2 // indirect
 	github.com/deckarep/golang-set/v2 v2.8.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect

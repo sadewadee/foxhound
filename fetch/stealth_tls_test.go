@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	utls "github.com/Noooste/utls"
 	"github.com/sadewadee/foxhound/fetch"
 	"github.com/sadewadee/foxhound/fetch/presets"
 	"github.com/sadewadee/foxhound/identity"
@@ -380,4 +381,76 @@ func TestNewStealth_WithStrictTLSVerify_CoexistsWithIdentity(t *testing.T) {
 	if got := f.Session().Browser; got != "firefox" {
 		t.Errorf("session.Browser = %q, want %q after WithIdentity(firefox)", got, "firefox")
 	}
+}
+
+// TestNewStealth_ModifyConfig_SetsRenegotiateNever is a regression test for the
+// TLS renegotiation panic (issue #43 / foxhound-serp-scraper#22).
+//
+// Root cause: Noooste/utls v1.3.x panics when a server sends a HelloRequest
+// mid-connection (TLS 1.2 renegotiation) with:
+//
+//	"tls: LoadSessionCoordinator.onEnterLoadSessionCheck failed:
+//	 session is set and locked, no call to loadSession is allowed"
+//
+// The fix sets session.ModifyConfig to apply utls.RenegotiateNever to every
+// tls.Config before the handshake. This causes handleRenegotiation() to return
+// alertNoRenegotiation before reaching the locked sessionController.
+//
+// This test verifies:
+//  1. ModifyConfig is non-nil on every new session (regression guard).
+//  2. Calling ModifyConfig sets Renegotiation = RenegotiateNever (fix verified).
+//  3. RenegotiateNever is preserved even when WithStrictTLSVerify() overrides
+//     InsecureSkipVerify (options do not interfere with the renegotiation fix).
+//
+// No network required — introspects the session field directly.
+func TestNewStealth_ModifyConfig_SetsRenegotiateNever(t *testing.T) {
+	t.Run("default session has ModifyConfig", func(t *testing.T) {
+		f := fetch.NewStealth()
+		defer f.Close()
+		if f.Session().ModifyConfig == nil {
+			t.Fatal("ModifyConfig must be non-nil: renegotiation panic fix requires it (issue #43)")
+		}
+		cfg := &utls.Config{}
+		if err := f.Session().ModifyConfig(cfg); err != nil {
+			t.Fatalf("ModifyConfig returned unexpected error: %v", err)
+		}
+		if cfg.Renegotiation != utls.RenegotiateNever {
+			t.Errorf("Renegotiation = %v, want RenegotiateNever (%v)", cfg.Renegotiation, utls.RenegotiateNever)
+		}
+	})
+
+	t.Run("WithStrictTLSVerify does not remove ModifyConfig", func(t *testing.T) {
+		f := fetch.NewStealth(fetch.WithStrictTLSVerify())
+		defer f.Close()
+		if f.Session().ModifyConfig == nil {
+			t.Fatal("ModifyConfig must survive WithStrictTLSVerify (issue #43)")
+		}
+		cfg := &utls.Config{}
+		if err := f.Session().ModifyConfig(cfg); err != nil {
+			t.Fatalf("ModifyConfig returned unexpected error: %v", err)
+		}
+		if cfg.Renegotiation != utls.RenegotiateNever {
+			t.Errorf("Renegotiation = %v, want RenegotiateNever after WithStrictTLSVerify", cfg.Renegotiation)
+		}
+		// WithStrictTLSVerify must still flip InsecureSkipVerify — both fixes coexist.
+		if f.Session().InsecureSkipVerify {
+			t.Error("WithStrictTLSVerify must still set InsecureSkipVerify=false alongside renegotiation fix")
+		}
+	})
+
+	t.Run("WithIdentity does not remove ModifyConfig", func(t *testing.T) {
+		p := identity.Generate(identity.WithBrowser(identity.BrowserFirefox))
+		f := fetch.NewStealth(fetch.WithIdentity(p))
+		defer f.Close()
+		if f.Session().ModifyConfig == nil {
+			t.Fatal("ModifyConfig must survive WithIdentity (issue #43)")
+		}
+		cfg := &utls.Config{}
+		if err := f.Session().ModifyConfig(cfg); err != nil {
+			t.Fatalf("ModifyConfig returned unexpected error: %v", err)
+		}
+		if cfg.Renegotiation != utls.RenegotiateNever {
+			t.Errorf("Renegotiation = %v, want RenegotiateNever after WithIdentity", cfg.Renegotiation)
+		}
+	})
 }

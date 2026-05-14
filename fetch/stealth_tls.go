@@ -36,6 +36,7 @@ import (
 	"time"
 
 	azuretls "github.com/Noooste/azuretls-client"
+	utls "github.com/Noooste/utls"
 	foxhound "github.com/sadewadee/foxhound"
 	"github.com/sadewadee/foxhound/identity"
 )
@@ -266,6 +267,31 @@ func NewStealth(opts ...StealthOption) *StealthFetcher {
 	// on multi-edge CDN targets (Bing, Google, Cloudflare) where cert SPKI
 	// differs per edge. See trade-off comment above NewStealth.
 	sess.InsecureSkipVerify = true
+
+	// Disable TLS renegotiation to prevent a panic in Noooste/utls v1.3.x.
+	//
+	// When a server sends a HelloRequest mid-connection (TLS 1.2 renegotiation),
+	// utls calls clientHandshake → loadSession → sessionController.onEnterLoadSessionCheck.
+	// If the sessionController is already locked from the initial handshake, it
+	// panics with: "tls: LoadSessionCoordinator.onEnterLoadSessionCheck failed:
+	// session is set and locked, no call to loadSession is allowed".
+	//
+	// Setting RenegotiateNever causes handleRenegotiation to return
+	// alertNoRenegotiation immediately — the server retries or falls back without
+	// the panic. This is safe: TLS 1.3 never renegotiates; only legacy TLS 1.2
+	// servers request it, and most tolerate refusal gracefully.
+	//
+	// The azuretls Session.ModifyConfig hook applies this setting to the tls.Config
+	// before every TLS handshake. The ClientHello still includes
+	// RenegotiationInfoExtension (fingerprint unchanged) — ModifyConfig only affects
+	// what happens if a renegotiation is attempted after the handshake completes.
+	//
+	// See: https://github.com/sadewadee/foxhound/issues/43
+	// See: https://github.com/sadewadee/foxhound-serp-scraper/issues/22
+	sess.ModifyConfig = func(config *utls.Config) error {
+		config.Renegotiation = utls.RenegotiateNever
+		return nil
+	}
 
 	f := &StealthFetcher{session: sess}
 	for _, opt := range opts {

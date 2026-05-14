@@ -2,6 +2,54 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.24] — 2026-05-14
+
+### Fix — TLS renegotiation panic under captcha-heavy concurrent load
+
+**Root cause.** `Noooste/utls v1.3.20` (a stale fork of `refraction-networking/utls`)
+panics when a server sends a TLS 1.2 HelloRequest mid-connection. The panic is
+`tls: LoadSessionCoordinator.onEnterLoadSessionCheck failed: session is set and
+locked, no call to loadSession is allowed`, triggered via:
+`handleRenegotiation → clientHandshake → loadSession → sessionController.onEnterLoadSessionCheck`.
+On heavily-captchaed targets the panic surfaced at 11/hour across 7 production
+workers (throughput dropped from 17K → 4.2K emails/hour in the reference
+deployment at foxhound-serp-scraper#22).
+
+**Fix.** `NewStealth` now sets `session.ModifyConfig` to apply
+`utls.RenegotiateNever` to every `tls.Config` before the TLS handshake.
+`handleRenegotiation` returns `alertNoRenegotiation` at the first line and
+the panic site is never reached. The ClientHello still includes
+`RenegotiationInfoExtension` (fingerprint unchanged); `ModifyConfig` only
+affects the post-handshake renegotiation path.
+
+This is safe: TLS 1.3 does not support renegotiation; only legacy TLS 1.2
+servers issue HelloRequest, and the vast majority tolerate a
+`alertNoRenegotiation` response gracefully (no connection drop).
+
+**No replace directive.** `replace github.com/Noooste/utls => github.com/refraction-networking/utls`
+was evaluated first but is blocked by a structural constraint: both
+`Noooste/utls` and `refraction-networking/utls` exist as independent module
+paths in the transitive dep graph (`refraction-networking/utls` pulled by
+`gaukas/clienthellod`), and Go's MVS forbids pointing one path at another when
+the target uses `internal/` subpackages (cross-prefix internal import rejected
+at build time). The `ModifyConfig` approach fixes the panic without replacing
+the module.
+
+**`go.mod` change.** `github.com/Noooste/utls v1.3.20` promoted from
+`// indirect` to direct (now imported explicitly in `fetch/stealth_tls.go` for
+the `RenegotiateNever` constant). No new dependencies introduced.
+
+**Regression test added.** `TestNewStealth_ModifyConfig_SetsRenegotiateNever`
+in `fetch/stealth_tls_test.go` verifies that `ModifyConfig` is non-nil,
+correctly sets `Renegotiation = RenegotiateNever`, and survives
+`WithStrictTLSVerify` and `WithIdentity` without interference. Three
+sub-cases, race-clean.
+
+All 19 packages pass under `go test -tags tls -race ./...`.
+
+See: https://github.com/sadewadee/foxhound/issues/43
+See: https://github.com/sadewadee/foxhound-serp-scraper/issues/22
+
 ## [v0.0.23] — 2026-05-05
 
 ### Anti-detection — small cleanups from comprehensive 24h production audit
