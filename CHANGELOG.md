@@ -2,6 +2,93 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.25] — 2026-05-17
+
+### Anti-detection — three targeted fingerprint fixes
+
+#### Fix 1 — WebRTC mDNS obfuscation
+
+**Problem.** Camoufox's browser preset was not setting
+`media.peerconnection.ice.obfuscate_host_addresses`. Modern Firefox defaults this
+preference to `true`, which hides the local network IP (`192.168.x.x`) behind a
+`<uuid>.local` mDNS address in WebRTC ICE candidate SDP. Without the pref,
+a passive observer can extract the LAN IP from SDP — a known fingerprinting
+vector used by several anti-bot platforms.
+
+**Fix.** `identity.Profile.BuildCamoufoxConfig()` now unconditionally injects
+`"media.peerconnection.ice.obfuscate_host_addresses": true` into the CAMOU_CONFIG
+JSON blob. Camoufox reads this at launch and applies it at the Firefox C++ level.
+
+**Verification.** `browserleaks.com/webrtc` local IP field should now show
+`<uuid>.local` instead of a private IP when Camoufox is the active fetcher.
+
+#### Fix 2 — Locale-policy decoupling (`WithLocalePolicy`)
+
+**Problem.** Anti-detection principle #6 ("proxy geo must match identity
+locale/timezone") is correct for human-like coherence — a real user behind a
+Russian proxy sends `Accept-Language: ru-RU`. However, when scraping
+English-language content (search engine queries, English news, etc.) with a
+non-English-speaking proxy, the locale-query mismatch is itself a bot-detection
+signal: real Russian users don't send English email-PII search queries.
+
+**Fix.** A new `identity.LocalePolicy` type with `WithLocalePolicy(policy)` option
+decouples locale from proxy geo for callers who need it:
+
+```go
+// Always en-US regardless of proxy geo — for English-content scraping.
+id := identity.Generate(
+    identity.WithCountry("RU"),
+    identity.WithLocalePolicy(identity.LocalePolicyEnglishDefault),
+)
+// id.Locale == "en-US", id.Timezone == "Europe/Moscow"
+// Physical location stays coherent; language preference is overridden.
+```
+
+**Default behaviour is unchanged.** The zero value (`LocalePolicyProxyGeo`) keeps
+the existing geo-matched behaviour for all existing callers. Only opt-in use of
+`LocalePolicyEnglishDefault` changes locale assignment.
+
+**Precedence.** An explicit `WithLocale(locale, langs...)` call always wins over
+any locale policy.
+
+**Constants:**
+
+| Constant | Behaviour |
+|---|---|
+| `LocalePolicyProxyGeo` (default) | locale/languages derived from proxy geo — existing behaviour |
+| `LocalePolicyEnglishDefault` | locale forced to `en-US`, languages to `["en-US","en"]`; timezone/geo still proxy-matched |
+
+#### Fix 3 — PerimeterX press-and-hold solver
+
+**Problem.** Certain targets serve a PerimeterX "Robot or human?" challenge that
+requires holding a button (`mousedown → hold 1–3s → mouseup`) rather than
+clicking a checkbox. Without native handling, the challenge page is returned as
+the fetch result.
+
+**Fix.** Three new pieces:
+
+1. `captcha.CaptchaPerimeterX` — new `CaptchaType` constant; `captcha.Detect()`
+   now identifies PX challenge pages by the `px-captcha` DOM element and the
+   "press and hold … human" text pattern.
+
+2. `behavior.PressHoldDuration()` — returns a Weibull-sampled hold duration
+   (k=2.0, λ=1.5, clamped to [0.8, 4.0]s) matching observed human interaction
+   timing. `behavior.PressHoldApproach(start, end)` generates a Bézier-curve
+   mouse trajectory to the button centre.
+
+3. `captcha.SolvePerimeterX(ctx, page)` (playwright build tag) — locates the PX
+   button using known selectors, replays the Bézier approach trajectory, holds
+   the mouse button for the sampled duration, then releases.
+
+**NopeCHA path is untouched.** The press-hold solver runs **before** NopeCHA. If
+the gesture clears the challenge, NopeCHA never fires. If the gesture fails,
+NopeCHA fires as the normal fallback.
+
+**Wire-up.** `fetch.CamoufoxFetcher.navigateWithPage` calls `handlePerimeterX`
+immediately before the NopeCHA/manual-captcha block.
+
+All 19 packages pass `go test -tags tls -race -count=1 ./...`.
+
 ## [v0.0.24] — 2026-05-14
 
 ### Fix — TLS renegotiation panic under captcha-heavy concurrent load

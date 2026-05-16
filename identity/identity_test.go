@@ -501,6 +501,82 @@ func TestGenerateNoGeoConstraint_DoesNotPanic(t *testing.T) {
 	}
 }
 
+// --- Fix 1: WebRTC mDNS obfuscation ---
+
+// TestBuildCamoufoxConfig_WebRTCMDNSPref verifies that BuildCamoufoxConfig
+// includes the Firefox pref that enables mDNS obfuscation for WebRTC ICE
+// candidates, hiding the LAN IP behind a <uuid>.local address.
+func TestBuildCamoufoxConfig_WebRTCMDNSPref(t *testing.T) {
+	p := identity.Generate(identity.WithBrowser(identity.BrowserFirefox), identity.WithOS(identity.OSWindows))
+	cfg := p.BuildCamoufoxConfig()
+	val, ok := cfg["media.peerconnection.ice.obfuscate_host_addresses"]
+	if !ok {
+		t.Fatal("BuildCamoufoxConfig: missing key 'media.peerconnection.ice.obfuscate_host_addresses'")
+	}
+	b, ok := val.(bool)
+	if !ok {
+		t.Fatalf("expected bool, got %T (%v)", val, val)
+	}
+	if !b {
+		t.Error("expected true, got false")
+	}
+}
+
+// --- Fix 2: LocalePolicy ---
+
+// TestLocalePolicy_EnglishDefault_WithCountryRU verifies that
+// LocalePolicyEnglishDefault forces en-US/["en-US","en"] even when the country
+// constraint would otherwise resolve to a Russian locale.
+func TestLocalePolicy_EnglishDefault_WithCountryRU(t *testing.T) {
+	for i := 0; i < 30; i++ {
+		p := identity.Generate(
+			identity.WithCountry("RU"),
+			identity.WithLocalePolicy(identity.LocalePolicyEnglishDefault),
+		)
+		if p.Locale != "en-US" {
+			t.Errorf("iter %d: Locale=%q, want en-US", i, p.Locale)
+		}
+		if len(p.Languages) == 0 || p.Languages[0] != "en-US" {
+			t.Errorf("iter %d: Languages=%v, want [en-US en]", i, p.Languages)
+		}
+	}
+}
+
+// TestLocalePolicy_EnglishDefault_NoGeoConstraint verifies behaviour when no
+// geo constraint is set (should still override to en-US).
+func TestLocalePolicy_EnglishDefault_NoGeoConstraint(t *testing.T) {
+	p := identity.Generate(
+		identity.WithLocalePolicy(identity.LocalePolicyEnglishDefault),
+	)
+	if p.Locale != "en-US" {
+		t.Errorf("Locale=%q, want en-US", p.Locale)
+	}
+}
+
+// TestLocalePolicy_ExplicitLocaleWins verifies that an explicit WithLocale call
+// takes precedence over LocalePolicyEnglishDefault.
+func TestLocalePolicy_ExplicitLocaleWins(t *testing.T) {
+	p := identity.Generate(
+		identity.WithCountry("JP"),
+		identity.WithLocale("ja-JP", "ja-JP", "ja"),
+		identity.WithLocalePolicy(identity.LocalePolicyEnglishDefault),
+	)
+	if p.Locale != "ja-JP" {
+		t.Errorf("Locale=%q, want ja-JP (explicit WithLocale must win over policy)", p.Locale)
+	}
+}
+
+// TestLocalePolicy_ProxyGeo_DefaultPreserved verifies that the default
+// (LocalePolicyProxyGeo, zero value) still matches proxy geo — existing
+// behaviour must not change.
+func TestLocalePolicy_ProxyGeo_DefaultPreserved(t *testing.T) {
+	// No WithLocalePolicy call → default is ProxyGeo.
+	p := identity.Generate(identity.WithCountry("DE"))
+	if p.Locale != "de-DE" {
+		t.Errorf("Locale=%q, want de-DE (ProxyGeo default must be preserved)", p.Locale)
+	}
+}
+
 // TestGenerateWithCountry_OverridesLocale verifies that WithCountry forces the
 // final profile locale to match the country geo table, regardless of which
 // random device profile was selected. This is the audit's v0.0.23-3 finding:

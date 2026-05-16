@@ -176,3 +176,42 @@ func TestDetectNilBodyReturnsNone(t *testing.T) {
 		t.Errorf("expected CaptchaNone for nil body, got %q", got.Type)
 	}
 }
+
+// --- PerimeterX detection tests ---
+
+func TestDetectPerimeterX_PxCaptchaElement(t *testing.T) {
+	// Minimal HTML matching the px-captcha element signature used on Walmart.
+	body := `<html><body>
+		<div id="px-captcha-wrapper">
+			<div id="px-captcha"></div>
+		</div>
+	</body></html>`
+	got := captcha.Detect(resp(body))
+	if got.Type != captcha.CaptchaPerimeterX {
+		t.Errorf("expected CaptchaPerimeterX, got %q", got.Type)
+	}
+}
+
+func TestDetectPerimeterX_PressAndHoldText(t *testing.T) {
+	// Some PX variants use "press and hold" instruction text without the
+	// px-captcha element ID (A/B test variants observed in production).
+	body := `<html><body>
+		<div class="challenge-body">
+			<p>Press and hold the button until you confirm you are human</p>
+			<button class="challenge-button">Hold me</button>
+		</div>
+	</body></html>`
+	got := captcha.Detect(resp(body))
+	if got.Type != captcha.CaptchaPerimeterX {
+		t.Errorf("expected CaptchaPerimeterX for press-and-hold text, got %q", got.Type)
+	}
+}
+
+func TestDetectPerimeterX_NegativeCase(t *testing.T) {
+	// A normal page that happens to contain "press" but not the full pattern.
+	body := `<html><body><p>Press enter to continue.</p></body></html>`
+	got := captcha.Detect(resp(body))
+	if got.Type == captcha.CaptchaPerimeterX {
+		t.Errorf("false positive: expected no PerimeterX, got CaptchaPerimeterX")
+	}
+}

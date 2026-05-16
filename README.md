@@ -6,7 +6,7 @@
   <strong>Go Scraping Framework with Native Camoufox Anti-Detection</strong>
 </p>
 
-# Foxhound v0.0.24
+# Foxhound v0.0.25
 
 High-performance Go scraping framework with native Camoufox anti-detection, dual-mode fetching, and 13-layer middleware.
 
@@ -286,6 +286,22 @@ f := fetch.NewStealth(
 ```
 
 Without `-tags tls` these options compile but log an error at startup — the underlying `net/http` transport cannot customise the TLS ClientHello.
+
+### Locale policy for English-content scraping (v0.0.25)
+
+By default, foxhound matches the identity locale to the proxy exit IP (anti-detection principle #6). When scraping English-language content through a proxy in a non-English-speaking country, the locale-query mismatch is itself a detection signal. Use `LocalePolicyEnglishDefault` to force `en-US` while keeping timezone and geo coordinates proxy-matched:
+
+```go
+id := identity.Generate(
+    identity.WithCountry("RU"),   // timezone=Europe/Moscow, geo=Moscow
+    identity.WithLocalePolicy(identity.LocalePolicyEnglishDefault), // locale=en-US
+)
+// Accept-Language: en-US,en;q=0.5  (regardless of proxy country)
+// navigator.language = "en-US"
+// Timezone = "Europe/Moscow"       (unchanged — physical location is coherent)
+```
+
+An explicit `WithLocale(locale, langs...)` call always takes precedence over any policy.
 
 ## Real Scraping Results
 

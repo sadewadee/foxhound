@@ -23,6 +23,8 @@ const (
 	CaptchaHCaptcha CaptchaType = "hcaptcha"
 	// CaptchaGeeTest is a GeeTest challenge.
 	CaptchaGeeTest CaptchaType = "geetest"
+	// CaptchaPerimeterX is a PerimeterX press-and-hold challenge ("Robot or human?").
+	CaptchaPerimeterX CaptchaType = "perimeter_x"
 	// CaptchaUnknown is an unrecognised CAPTCHA challenge.
 	CaptchaUnknown CaptchaType = "unknown"
 	// CaptchaSoftBlock is a 200 OK response whose body signals "access denied".
@@ -91,6 +93,9 @@ func Detect(resp *foxhound.Response) *DetectResult {
 
 	case isGeeTest(lower):
 		result.Type = CaptchaGeeTest
+
+	case isPerimeterX(lower):
+		result.Type = CaptchaPerimeterX
 	}
 
 	// Return early when a known CAPTCHA widget was already identified.
@@ -183,6 +188,14 @@ func isJSChallenge(lower string) bool {
 	return strings.Contains(lower, "browser verification") ||
 		strings.Contains(lower, "security challenge") ||
 		(strings.Contains(lower, "akamai") && strings.Contains(lower, "challenge"))
+}
+
+// isPerimeterX returns true when the page is a PerimeterX "Robot or human?"
+// press-and-hold challenge. PX challenge pages contain either the px-captcha
+// element or the characteristic "press and hold" instruction text.
+func isPerimeterX(lower string) bool {
+	return strings.Contains(lower, "px-captcha") ||
+		(strings.Contains(lower, "press and hold") && strings.Contains(lower, "human"))
 }
 
 // extractSiteKey attempts to pull the value of data-sitekey from the page body.

@@ -85,20 +85,49 @@ type Profile struct {
 	CamoufoxEnv map[string]string `json:"camoufox_env,omitempty"`
 }
 
+// LocalePolicy controls how the Locale and Languages fields are set relative
+// to proxy geo resolution.
+type LocalePolicy int
+
+const (
+	// LocalePolicyProxyGeo (default) — locale and languages are derived from
+	// the proxy exit IP or country constraint, matching geo-based anti-detection
+	// principle #6. This is the existing behavior; it is not changed.
+	LocalePolicyProxyGeo LocalePolicy = iota
+
+	// LocalePolicyEnglishDefault — locale is forced to "en-US" and languages
+	// to ["en-US", "en"] regardless of proxy geo. Use this when scraping
+	// English-language content (SERP, English news, etc.) through a proxy in a
+	// non-English-speaking country. Timezone and geo coordinates are still
+	// derived from the proxy geo (physical location stays coherent; only
+	// language preference is overridden).
+	//
+	// Example:
+	//
+	//   id := identity.Generate(
+	//       identity.WithCountry("RU"),
+	//       identity.WithLocalePolicy(identity.LocalePolicyEnglishDefault),
+	//   )
+	//   // id.Locale == "en-US", id.Timezone == "Europe/Moscow"
+	LocalePolicyEnglishDefault
+)
+
 // Option is a functional option for configuring identity generation.
 type Option func(*generateConfig)
 
 type generateConfig struct {
-	browser     Browser
-	os          OS
-	proxyIP     string
-	country     string
-	lat         float64
-	lng         float64
-	tz          string
-	locale      string
-	langs       []string
-	geoResolver GeoResolver
+	browser        Browser
+	os             OS
+	proxyIP        string
+	country        string
+	lat            float64
+	lng            float64
+	tz             string
+	locale         string
+	langs          []string
+	geoResolver    GeoResolver
+	localePolicy   LocalePolicy
+	localeExplicit bool // true only when set via WithLocale; geo-derived locale does NOT set this
 }
 
 // WithBrowser constrains identity generation to a specific browser.
@@ -161,6 +190,21 @@ func WithLocale(locale string, langs ...string) Option {
 	return func(c *generateConfig) {
 		c.locale = locale
 		c.langs = langs
+		c.localeExplicit = true // distinguishes from geo-derived locale in applyGeoToConfig
+	}
+}
+
+// WithLocalePolicy sets the locale assignment policy for the generated identity.
+//
+// The default policy is LocalePolicyProxyGeo (locale matches proxy IP geo —
+// existing behavior, unchanged). Pass LocalePolicyEnglishDefault when scraping
+// English-language content through proxies in non-English-speaking countries to
+// avoid locale-query mismatch detection.
+//
+// Note: an explicit WithLocale call takes precedence over any locale policy.
+func WithLocalePolicy(policy LocalePolicy) Option {
+	return func(c *generateConfig) {
+		c.localePolicy = policy
 	}
 }
 
@@ -255,6 +299,15 @@ func Generate(opts ...Option) *Profile {
 	} else {
 		p.Lat = base.Lat
 		p.Lng = base.Lng
+	}
+
+	// Apply locale policy AFTER geo-based resolution so that timezone and
+	// geo coordinates remain proxy-matched. An explicit WithLocale call
+	// (cfg.localeExplicit == true) takes precedence over any policy; a locale
+	// derived by applyGeoToConfig (geo match) does not.
+	if cfg.localePolicy == LocalePolicyEnglishDefault && !cfg.localeExplicit {
+		p.Locale = "en-US"
+		p.Languages = []string{"en-US", "en"}
 	}
 
 	// Build Camoufox environment vars
@@ -411,6 +464,11 @@ func (p *Profile) BuildCamoufoxConfig() map[string]any {
 		config["geolocation:latitude"] = p.Lat
 		config["geolocation:longitude"] = p.Lng
 	}
+
+	// WebRTC mDNS obfuscation — hide LAN IP (192.168.x.x) behind
+	// <uuid>.local in ICE candidate SDP. Modern Firefox defaults this to
+	// true but Camoufox's preset may omit or override it.
+	config["media.peerconnection.ice.obfuscate_host_addresses"] = true
 
 	// DO NOT add:
 	// - webGl:* (BrowserForge generates realistic WebGL params automatically)

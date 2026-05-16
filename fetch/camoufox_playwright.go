@@ -48,6 +48,7 @@ import (
 	"github.com/playwright-community/playwright-go"
 	foxhound "github.com/sadewadee/foxhound"
 	"github.com/sadewadee/foxhound/behavior"
+	"github.com/sadewadee/foxhound/captcha"
 	"github.com/sadewadee/foxhound/identity"
 )
 
@@ -1474,6 +1475,31 @@ func (f *CamoufoxFetcher) handleCookieConsent(page playwright.Page) {
 	}
 }
 
+// handlePerimeterX detects a PerimeterX "Robot or human?" press-and-hold
+// challenge and attempts to solve it via behavior.PressAndHold before any
+// NopeCHA or token-based solver fires. If the challenge is not present, or the
+// context is already done, this is a no-op. NopeCHA path is not touched.
+func (f *CamoufoxFetcher) handlePerimeterX(ctx context.Context, page playwright.Page) {
+	if ctx.Err() != nil {
+		return
+	}
+	// Quick DOM check before calling the full solver: look for the PX wrapper.
+	hasPX := false
+	for _, sel := range []string{"#px-captcha-wrapper", "#px-captcha", "div[id^='px-captcha']"} {
+		count, err := page.Locator(sel).Count()
+		if err == nil && count > 0 {
+			hasPX = true
+			break
+		}
+	}
+	if !hasPX {
+		return
+	}
+	if err := captcha.SolvePerimeterX(ctx, page); err != nil {
+		slog.Warn("fetch/camoufox: PerimeterX press-hold failed (continuing)", "err", err)
+	}
+}
+
 // handleRecaptcha detects and attempts to solve reCAPTCHA v2 checkbox challenges.
 // reCAPTCHA renders inside an iframe — we locate the iframe, find the checkbox,
 // move the mouse naturally toward it, and click. If Google's behavioral score
@@ -2627,6 +2653,11 @@ func (f *CamoufoxFetcher) navigateWithPage(ctx context.Context, job *foxhound.Jo
 	if f.detectCloudflare(page) == "" {
 		f.handleCookieConsent(page)
 	}
+
+	// PerimeterX press-and-hold: attempt before NopeCHA so the gesture fires
+	// while the challenge page is still live. NopeCHA path is not affected —
+	// if PX clears, NopeCHA never fires; if PX fails, NopeCHA fires as normal.
+	f.handlePerimeterX(ctx, page)
 
 	if f.hasExtension {
 		f.waitForExtensionSolve(ctx, page)
