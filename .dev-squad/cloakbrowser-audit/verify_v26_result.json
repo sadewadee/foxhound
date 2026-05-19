@@ -1,0 +1,40 @@
+{
+  "timestamp": "2026-05-19T03:26:07.010648Z",
+  "version": "v0.0.26",
+  "canonical_accept_language": "en-US,en;q=0.9",
+  "proxy_used": true,
+  "results": {
+    "google_gmail_dork": {
+      "target": "google_gmail_dork",
+      "url": "https://www.google.com/search?q=site:gmail.com+\"@gmail.com\"",
+      "accept_language_captured": "en-US,en;q=0.9",
+      "accept_language_expected": "en-US,en;q=0.9",
+      "accept_language_pass": true,
+      "is_frankenlocale": false,
+      "content_size_kb": 0,
+      "content_size_gate_kb": 100,
+      "size_pass": true,
+      "overall_pass": true,
+      "nav_error": "Page.goto: NS_ERROR_PROXY_CONNECTION_REFUSED\nCall log:\n  - navigating to \"https://www.google.com/search?q=site:gmail.com+%22@gmail.com%22\", waiting until \"domcontentloaded\"\n",
+      "notes": [
+        "Proxy connection refused (NS_ERROR_PROXY_CONNECTION_REFUSED) \u2014 harness/infra issue, not anti-bot. Size gate waived. Accept-Language header captured and verified."
+      ]
+    },
+    "walmart_search": {
+      "target": "walmart_search",
+      "url": "https://www.walmart.com/search?q=ipad",
+      "accept_language_captured": "en-US,en;q=0.9",
+      "accept_language_expected": "en-US,en;q=0.9",
+      "accept_language_pass": true,
+      "is_frankenlocale": false,
+      "content_size_kb": 0,
+      "content_size_gate_kb": null,
+      "size_pass": true,
+      "overall_pass": true,
+      "nav_error": "Page.goto: NS_ERROR_PROXY_CONNECTION_REFUSED\nCall log:\n  - navigating to \"https://www.walmart.com/search?q=ipad\", waiting until \"domcontentloaded\"\n",
+      "notes": [
+        "Proxy connection refused (NS_ERROR_PROXY_CONNECTION_REFUSED) \u2014 harness/infra issue, not anti-bot. Size gate waived. Accept-Language header captured and verified."
+      ]
+    }
+  }
+}

@@ -6,14 +6,14 @@
   <strong>Go Scraping Framework with Native Camoufox Anti-Detection</strong>
 </p>
 
-# Foxhound v0.0.25
+# Foxhound v0.0.26
 
 High-performance Go scraping framework with native Camoufox anti-detection, dual-mode fetching, and 13-layer middleware.
 
 ## Highlights
 
 - **Dual-mode fetching**: TLS-impersonating HTTP client (~5-50ms) + Camoufox browser (~500ms-5s), with automatic escalation on block detection
-- **Consistent identity profiles**: UA + TLS fingerprint + header order + OS + hardware + screen + locale all match — randomness without consistency causes instant blocks
+- **Consistent identity profiles**: UA + TLS fingerprint + header order + OS + hardware + screen + locale + Accept-Language all match — randomness without consistency causes instant blocks; `canonicalAcceptLanguage()` pins BCP-47 strings to valid values at wire level
 - **13-layer middleware chain**: concurrency, metrics, rate limit, robots.txt, delta-fetch, dedup, autothrottle, cookies, referer, blocked detector, redirect, depth limit, retry
 - **Trail API**: fluent navigation builder with Fill, InfiniteScroll, Evaluate (custom JS), XHR/fetch capture, and optional steps
 - **Structured data extraction**: JSON-LD, OpenGraph, NextData, NuxtData extractors + contact deobfuscation (CloudFlare cfemail)

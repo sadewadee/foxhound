@@ -2,6 +2,60 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.26] — 2026-05-19
+
+### Anti-detection — fix Accept-Language frankenlocale bot signature
+
+**Problem.** Camoufox's `geoip=True` mode resolves the proxy IP to a country and
+then combines it with the random identity profile's primary language, producing
+malformed BCP-47 strings like `en-DE` (English-in-Germany) or `fr-DE`
+(French-in-Germany). No real browser user produces these locale tags. Anti-bot
+vendors (including Google's pre-WAF filter and PerimeterX) detect them trivially —
+Phase 6 and 6b HAR captures confirmed `en-DE,en;q=0.5` and `fr-DE,fr;q=0.5`
+as the primary discriminator flagging Camoufox on both Google email dorks and
+Walmart search.
+
+**Fix.** `identity.Profile.BuildCamoufoxConfig()` now sets the
+`headers.Accept-Language` key in the CAMOU_CONFIG JSON blob using a new
+`canonicalAcceptLanguage()` function. This explicitly pins the browser's
+Accept-Language HTTP header to a valid BCP-47 string derived from the identity
+profile's `Languages` field (which is already correctly geo-resolved by
+`applyGeoToConfig`), overriding whatever Camoufox's own geoip logic would produce.
+
+**Canonical Accept-Language values** by proxy geo:
+
+| Country | Identity Languages | Accept-Language emitted |
+|---|---|---|
+| DE (German) | `["de-DE","de"]` | `de-DE,de;q=0.9,en;q=0.5` |
+| US (English) | `["en-US","en"]` | `en-US,en;q=0.9` |
+| FR (French) | `["fr-FR","fr"]` | `fr-FR,fr;q=0.9,en;q=0.5` |
+| NL (Dutch+EN) | `["nl-NL","nl","en"]` | `nl-NL,nl;q=0.9,en;q=0.8` |
+
+Non-English primaries receive English as fallback (`en;q=0.5`) unless the profile
+already lists an English tag (e.g. NL has `en` in its list already — no duplicate).
+
+**`LocalePolicyEnglishDefault` interaction.** When `WithLocalePolicy(LocalePolicyEnglishDefault)`
+is active, the profile's `Languages` is already set to `["en-US","en"]` before
+`BuildCamoufoxConfig()` runs. `canonicalAcceptLanguage()` therefore emits
+`en-US,en;q=0.9` automatically — no extra code path needed.
+
+**CAMOU_CONFIG key note.** The Camoufox config key for the Accept-Language HTTP
+header is `headers.Accept-Language` (with the `headers.` prefix), per Camoufox's
+dot-path property schema. The bare `Accept-Language` form is not valid in the
+config dict.
+
+**Verification.** Phase 6 re-run (Google email dork) confirmed `accept-language:
+en-US,en;q=0.9` at the wire level — no frankenlocale. Camoufox now passes the
+Google gmail-dork target that was previously blocked by a "Suspicious traffic"
+wall (Phase 3 finding). Phase 6b re-run (Walmart) confirmed `accept-language:
+en-US,en;q=0.9` — also clean. All 22 packages pass `go test -race -count=1 ./...`.
+
+**Known open gap.** PerimeterX press-hold challenges (Walmart-class targets) remain
+blocked. The Accept-Language frankenlocale fix is necessary but not sufficient for
+PerimeterX — additional behavioral signals (mouse trajectory microtimings, session
+warmup, browser-engine-level fingerprints) are required. This gap predates v0.0.26
+(confirmed in Phase 5 during v0.0.25 work) and is tracked for future investigation.
+
 ## [v0.0.25] — 2026-05-17
 
 ### Anti-detection — three targeted fingerprint fixes

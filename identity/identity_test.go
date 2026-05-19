@@ -577,6 +577,128 @@ func TestLocalePolicy_ProxyGeo_DefaultPreserved(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// v0.0.26 — Accept-Language frankenlocale fix
+// ---------------------------------------------------------------------------
+
+// TestBuildCamoufoxConfig_AcceptLanguagePresent verifies that BuildCamoufoxConfig
+// always emits the "headers.Accept-Language" key in the CAMOU_CONFIG blob. This key
+// pins the browser's Accept-Language header to a valid BCP-47 string, preventing
+// Camoufox's geoip=True from producing frankenlocale values like "en-DE".
+// The key uses the "headers." prefix per Camoufox's dot-path config schema.
+func TestBuildCamoufoxConfig_AcceptLanguagePresent(t *testing.T) {
+	p := identity.Generate(identity.WithBrowser(identity.BrowserFirefox), identity.WithOS(identity.OSWindows))
+	cfg := p.BuildCamoufoxConfig()
+	val, ok := cfg["headers.Accept-Language"]
+	if !ok {
+		t.Fatal("BuildCamoufoxConfig: missing key 'headers.Accept-Language' — Camoufox's geoip will produce frankenlocales without this")
+	}
+	s, ok := val.(string)
+	if !ok {
+		t.Fatalf("headers.Accept-Language: expected string, got %T (%v)", val, val)
+	}
+	if s == "" {
+		t.Error("Accept-Language is empty string")
+	}
+}
+
+// TestBuildCamoufoxConfig_AcceptLanguage_GermanProxy verifies that a German
+// proxy produces a valid German-primary Accept-Language (de-DE,de;q=0.9,...),
+// NOT a frankenlocale like "en-DE" or "fr-DE".
+func TestBuildCamoufoxConfig_AcceptLanguage_GermanProxy(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		p := identity.Generate(identity.WithCountry("DE"))
+		cfg := p.BuildCamoufoxConfig()
+		al, _ := cfg["headers.Accept-Language"].(string)
+		// Must start with "de-DE" — the geo table entry for DE.
+		if !strings.HasPrefix(al, "de-DE") {
+			t.Errorf("iter %d: Accept-Language=%q — want prefix 'de-DE' for German proxy; frankenlocale detected", i, al)
+		}
+		// Must NOT contain "-DE" after a non-"de" language prefix (the frankenlocale pattern).
+		// e.g. "en-DE" or "fr-DE" would match this — those are the bug patterns.
+		// We check that every ",<lang>-DE" segment (if any) is "de-DE".
+		if strings.Contains(al, "en-DE") || strings.Contains(al, "fr-DE") {
+			t.Errorf("iter %d: Accept-Language=%q — contains frankenlocale", i, al)
+		}
+	}
+}
+
+// TestBuildCamoufoxConfig_AcceptLanguage_USProxy verifies that a US proxy
+// produces "en-US,en;q=0.9" (or similar English-primary string).
+func TestBuildCamoufoxConfig_AcceptLanguage_USProxy(t *testing.T) {
+	for i := 0; i < 10; i++ {
+		p := identity.Generate(identity.WithCountry("US"))
+		cfg := p.BuildCamoufoxConfig()
+		al, _ := cfg["headers.Accept-Language"].(string)
+		if !strings.HasPrefix(al, "en-US") {
+			t.Errorf("iter %d: Accept-Language=%q — want prefix 'en-US' for US proxy", i, al)
+		}
+	}
+}
+
+// TestBuildCamoufoxConfig_AcceptLanguage_LocalePolicyEnglishDefault verifies
+// that LocalePolicyEnglishDefault produces "en-US,en;q=0.9" in Accept-Language
+// even when the proxy is in a non-English country. This is the critical case:
+// scraping English-language SERPs through a German proxy should send English
+// Accept-Language, not German.
+func TestBuildCamoufoxConfig_AcceptLanguage_LocalePolicyEnglishDefault(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		p := identity.Generate(
+			identity.WithCountry("DE"),
+			identity.WithLocalePolicy(identity.LocalePolicyEnglishDefault),
+		)
+		cfg := p.BuildCamoufoxConfig()
+		al, _ := cfg["headers.Accept-Language"].(string)
+		if !strings.HasPrefix(al, "en-US") {
+			t.Errorf("iter %d: Accept-Language=%q — LocalePolicyEnglishDefault must produce en-US prefix, got %q", i, al, al)
+		}
+		// Must not contain any German tag.
+		if strings.Contains(al, "de") {
+			t.Errorf("iter %d: Accept-Language=%q — must not contain German tags when LocalePolicyEnglishDefault is active", i, al)
+		}
+	}
+}
+
+// TestBuildCamoufoxConfig_AcceptLanguage_NoFrankenlocale runs a table-driven
+// check across several common country codes, verifying that Accept-Language
+// always starts with the country's primary language, never with a different
+// language joined to that country code.
+func TestBuildCamoufoxConfig_AcceptLanguage_NoFrankenlocale(t *testing.T) {
+	testCases := []struct {
+		country     string
+		wantPrefix  string
+		forbidInfix string // empty means no infix check
+	}{
+		{"DE", "de-DE", "en-DE"},
+		{"FR", "fr-FR", "en-FR"},
+		{"JP", "ja-JP", "en-JP"},
+		{"KR", "ko-KR", "en-KR"},
+		{"RU", "ru-RU", "en-RU"},
+		{"BR", "pt-BR", "en-BR"},
+		{"IT", "it-IT", "en-IT"},
+		{"ES", "es-ES", "en-ES"},
+		{"US", "en-US", ""},
+		{"GB", "en-GB", ""},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.country, func(t *testing.T) {
+			for i := 0; i < 10; i++ {
+				p := identity.Generate(identity.WithCountry(tc.country))
+				cfg := p.BuildCamoufoxConfig()
+				al, _ := cfg["headers.Accept-Language"].(string)
+				if !strings.HasPrefix(al, tc.wantPrefix) {
+					t.Errorf("iter %d: country=%s Accept-Language=%q want prefix %q",
+						i, tc.country, al, tc.wantPrefix)
+				}
+				if tc.forbidInfix != "" && strings.Contains(al, tc.forbidInfix) {
+					t.Errorf("iter %d: country=%s Accept-Language=%q contains forbidden frankenlocale %q",
+						i, tc.country, al, tc.forbidInfix)
+				}
+			}
+		})
+	}
+}
+
 // TestGenerateWithCountry_OverridesLocale verifies that WithCountry forces the
 // final profile locale to match the country geo table, regardless of which
 // random device profile was selected. This is the audit's v0.0.23-3 finding:

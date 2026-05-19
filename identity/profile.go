@@ -470,6 +470,23 @@ func (p *Profile) BuildCamoufoxConfig() map[string]any {
 	// true but Camoufox's preset may omit or override it.
 	config["media.peerconnection.ice.obfuscate_host_addresses"] = true
 
+	// Accept-Language HTTP header — explicitly pin to a valid BCP-47 string
+	// derived from the identity's Languages field.
+	//
+	// This is CRITICAL: Camoufox's geoip=True resolves the proxy IP's country
+	// and joins it with the random identity profile's primary language, producing
+	// frankenlocale strings like "en-DE" or "fr-DE" (English/French-in-Germany).
+	// No real browser user has this. Anti-bot vendors (Google pre-WAF,
+	// PerimeterX) detect it trivially. By pinning Accept-Language here,
+	// Camoufox uses our correct value instead of its geoip-derived one.
+	// (Source: Phase 6 + 6b HAR capture confirming en-DE/fr-DE as root cause.)
+	//
+	// Key is "headers.Accept-Language" (with "headers." prefix) per Camoufox's
+	// dot-path config schema. The reference_camoufox.md memory listed it as
+	// just "Accept-Language" — that was incomplete; the Python wrapper schema
+	// uses the "headers." prefix (confirmed via camoufox.utils._load_properties).
+	config["headers.Accept-Language"] = canonicalAcceptLanguage(p.Languages)
+
 	// DO NOT add:
 	// - webGl:* (BrowserForge generates realistic WebGL params automatically)
 	// - fonts (Camoufox bundles 200-600 OS-specific fonts automatically)
@@ -508,6 +525,72 @@ func extractRegion(locale string) string {
 		return parts[1]
 	}
 	return ""
+}
+
+// canonicalAcceptLanguage builds a valid BCP-47 Accept-Language header value
+// from the profile's Languages list, using Firefox-accurate quality factors.
+//
+// This function is the single source of truth for the Accept-Language that
+// Camoufox will send. It MUST NOT produce frankenlocale strings like "en-DE"
+// (English-in-Germany) — those are the primary bot-detection signal exploited
+// by Google's pre-WAF filter and PerimeterX (confirmed in Phase 6 + 6b HAR
+// captures). Each entry in langs must be an independently valid BCP-47 tag
+// (e.g. "de-DE", "de", "en") — they are used verbatim, not joined with unrelated
+// country codes.
+//
+// Rules:
+//   - Empty langs → "en-US,en;q=0.9" (safe default)
+//   - Single tag  → returned as-is
+//   - English-primary list (all langs start with "en") → use Firefox's q=0.9
+//     pattern without an extra English fallback
+//   - Non-English primary → use q=0.9/0.8 for language entries, then append
+//     "en;q=0.5" as English fallback (mirrors real Firefox behaviour for most
+//     non-English users)
+func canonicalAcceptLanguage(langs []string) string {
+	if len(langs) == 0 {
+		return "en-US,en;q=0.9"
+	}
+	if len(langs) == 1 {
+		return langs[0]
+	}
+
+	// Determine whether the primary language is English.
+	primaryIsEnglish := strings.HasPrefix(strings.ToLower(langs[0]), "en")
+
+	// Check if the list already contains an English fallback tag.
+	hasEnglishFallback := false
+	for _, l := range langs {
+		if strings.HasPrefix(strings.ToLower(l), "en") {
+			hasEnglishFallback = true
+			break
+		}
+	}
+
+	// Build the quality-factor string for the caller-supplied entries.
+	// Firefox quality factors (multi-language, n>=2):
+	//   [0]: no q (implicit q=1.0)
+	//   [1]: q=0.9
+	//   [2]: q=0.8
+	//   [3]: q=0.7
+	//   …
+	var b strings.Builder
+	b.WriteString(langs[0])
+	qFactor := 0.9
+	for _, lang := range langs[1:] {
+		fmt.Fprintf(&b, ",%s;q=%.1f", lang, qFactor)
+		qFactor -= 0.1
+		if qFactor < 0.1 {
+			qFactor = 0.1
+		}
+	}
+
+	// Append "en;q=0.5" for non-English primaries that don't already include
+	// any English tag. Most non-English Firefox users carry English as fallback.
+	if !primaryIsEnglish && !hasEnglishFallback {
+		fmt.Fprintf(&b, ",en;q=0.5")
+	}
+
+	return b.String()
 }
 
 // BuildCamoufoxEnv marshals the Camoufox config to JSON and chunks it into
