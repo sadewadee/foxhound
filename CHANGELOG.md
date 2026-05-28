@@ -2,6 +2,57 @@
 
 All notable changes to foxhound are documented in this file.
 
+## [v0.0.27] — 2026-05-28
+
+### Bug fix — TLS renegotiation panic (issue #43) actually fixed this time
+
+**Problem.** The v0.0.24 fix for the `Noooste/utls v1.3.20` renegotiation panic
+(`tls: LoadSessionCoordinator.onEnterLoadSessionCheck failed: session is set and
+locked`) was a **no-op**. v0.0.24 set `session.ModifyConfig` to force
+`utls.RenegotiateNever`, but azuretls applies `ModifyConfig` (`connection.go:113`)
+*before* it stamps the ClientHello preset (`ApplyPreset`, `connection.go:139`).
+During `ApplyPreset`, `RenegotiationInfoExtension.writeToUConn`
+(utls `u_tls_extensions.go:1687`) executes `uc.config.Renegotiation = e.Renegotiation`,
+overwriting our value with the Firefox preset's hardcoded `RenegotiateOnceAsClient`
+(azuretls `profiles.go:467`). The effective `config.Renegotiation` was therefore
+`RenegotiateOnceAsClient` **with or without** the v0.0.24 fix. On the first
+server-initiated renegotiation (`handshakes == 1`), `handleRenegotiation`
+(utls `conn.go:1287`) does not bail for `RenegotiateOnceAsClient`, so it proceeds
+to `clientHandshake → loadSession` and panics. The panic fires in fhttp's
+`(*persistConn).readLoop` — a library-spawned goroutine foxhound cannot
+`recover()` — so it crashes the process. v0.0.25 and v0.0.26 never touched
+renegotiation, so v0.0.26 shipped the same no-op. Confirmed in production: a
+deployment on v0.0.24 kept panicking on concurrent enrich load with the identical
+stack. The v0.0.24 regression test passed only because it exercised `ModifyConfig`
+on a bare `&utls.Config{}` and never ran `ApplyPreset`.
+
+**Fix.** `NewStealth` now wraps `session.GetClientHelloSpec` to set every
+`RenegotiationInfoExtension.Renegotiation` in the returned spec to
+`utls.RenegotiateNever` — the value `ApplyPreset` actually reads, so it survives.
+The wrapper is installed after the JA3 option handling, so it covers the default
+Firefox preset, custom `WithJA3` specs, and all three azuretls TLS dial paths
+(`connection.go:121`, `pinner.go:132`, `proxy.go:502`) which all read
+`GetClientHelloSpec` — so proxied connections (foxhound's norm) are covered too.
+The old `ModifyConfig` block is retained as consistent defense-in-depth.
+
+**Fingerprint unchanged.** The `Renegotiation` enum is internal-only and is never
+marshaled into the ClientHello — `RenegotiationInfoExtension.Read()` emits the
+extension bytes unconditionally, independent of the enum, and the custom-hello
+marshaller (`MarshalClientHelloNoECH`) builds from the extension list, not from
+`SecureRenegotiationSupported`. Verified at the wire level: the `renegotiation_info`
+extension body is byte-identical (`ff01000100`) before and after; JA3 unchanged.
+
+**Verification.** New regression test
+`TestNewStealth_GetClientHelloSpec_ForcesRenegotiateNever` asserts the spec's
+extension carries `RenegotiateNever` for both the default and JA3 paths — proven
+to fail when the wrapper is removed (unlike the v0.0.24 test, which guarded the
+wrong path). `go test -tags tls -race ./fetch/` passes. The true validation
+remains production: the panic only surfaces under concurrent TLS-1.2-renegotiation
+load.
+
+**Scope note.** TLS 1.3 never renegotiates, so HTTP/3 (`GetClientHelloSpecHTTP3`)
+is correctly out of scope.
+
 ## [v0.0.26] — 2026-05-19
 
 ### Anti-detection — fix Accept-Language frankenlocale bot signature

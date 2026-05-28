@@ -268,23 +268,24 @@ func NewStealth(opts ...StealthOption) *StealthFetcher {
 	// differs per edge. See trade-off comment above NewStealth.
 	sess.InsecureSkipVerify = true
 
-	// Disable TLS renegotiation to prevent a panic in Noooste/utls v1.3.x.
+	// Defense-in-depth: set RenegotiateNever on the raw tls.Config as well.
+	//
+	// NOTE: This ModifyConfig block alone is NOT sufficient to prevent the panic
+	// (it was the v0.0.24 fix and shipped as a NO-OP). azuretls calls ModifyConfig
+	// first, but ApplyPreset runs afterward and RenegotiationInfoExtension.writeToUConn
+	// (u_tls_extensions.go:1687) overwrites config.Renegotiation with the value from
+	// the spec (RenegotiateOnceAsClient for the Firefox preset). The REAL fix is the
+	// GetClientHelloSpec wrapper installed below (after the JA3 option handling),
+	// which patches the extension value inside the spec before ApplyPreset reads it.
+	//
+	// This ModifyConfig block is retained so that both the spec and the raw Config
+	// agree on RenegotiateNever, providing a consistent double layer.
 	//
 	// When a server sends a HelloRequest mid-connection (TLS 1.2 renegotiation),
-	// utls calls clientHandshake → loadSession → sessionController.onEnterLoadSessionCheck.
-	// If the sessionController is already locked from the initial handshake, it
-	// panics with: "tls: LoadSessionCoordinator.onEnterLoadSessionCheck failed:
-	// session is set and locked, no call to loadSession is allowed".
-	//
-	// Setting RenegotiateNever causes handleRenegotiation to return
-	// alertNoRenegotiation immediately — the server retries or falls back without
-	// the panic. This is safe: TLS 1.3 never renegotiates; only legacy TLS 1.2
-	// servers request it, and most tolerate refusal gracefully.
-	//
-	// The azuretls Session.ModifyConfig hook applies this setting to the tls.Config
-	// before every TLS handshake. The ClientHello still includes
-	// RenegotiationInfoExtension (fingerprint unchanged) — ModifyConfig only affects
-	// what happens if a renegotiation is attempted after the handshake completes.
+	// utls handleRenegotiation returns alertNoRenegotiation immediately under
+	// RenegotiateNever — the panic in sessionController.onEnterLoadSessionCheck
+	// is never reached. TLS 1.3 never renegotiates; only legacy TLS 1.2 servers
+	// request it, and most tolerate refusal gracefully.
 	//
 	// See: https://github.com/sadewadee/foxhound/issues/43
 	// See: https://github.com/sadewadee/foxhound-serp-scraper/issues/22
@@ -326,6 +327,50 @@ func NewStealth(opts ...StealthOption) *StealthFetcher {
 			f.pendingJA3 = ""
 		}
 	}
+
+	// Force RenegotiateNever at the ClientHello-spec level.
+	//
+	// The v0.0.24 fix (ModifyConfig alone) is insufficient. azuretls calls
+	// ApplyPreset AFTER ModifyConfig, and RenegotiationInfoExtension.writeToUConn
+	// (u_tls_extensions.go:1687) does uc.config.Renegotiation = e.Renegotiation —
+	// overwriting config.Renegotiation with RenegotiateOnceAsClient (the Firefox
+	// preset value). The final Renegotiation is therefore RenegotiateOnceAsClient
+	// regardless of what ModifyConfig set.
+	//
+	// Patching the extension value inside the spec is the only value that survives
+	// ApplyPreset. This wrapper applies to the default browser preset, to any
+	// custom JA3 spec set by WithJA3 (which sets GetClientHelloSpec in ja3.go:132),
+	// and to all three connection builders (connection.go, pinner.go, proxy.go)
+	// that all read GetClientHelloSpec before calling ApplyPreset.
+	//
+	// The ModifyConfig block above is retained as defense-in-depth: with the spec
+	// patched both values are now consistent, and ModifyConfig alone was the
+	// intended-but-broken fix.
+	//
+	// Fingerprint safety: Renegotiation is internal-only and NOT marshaled into
+	// ClientHello bytes. RenegotiationInfoExtension.Read() emits the extension
+	// unconditionally regardless of the enum value, so JA3 is unchanged.
+	//
+	// See: https://github.com/sadewadee/foxhound/issues/43
+	{
+		base := f.session.GetClientHelloSpec
+		if base == nil {
+			browser := f.session.Browser
+			base = azuretls.GetBrowserClientHelloFunc(browser)
+		}
+		f.session.GetClientHelloSpec = func() *utls.ClientHelloSpec {
+			spec := base()
+			if spec != nil {
+				for _, ext := range spec.Extensions {
+					if r, ok := ext.(*utls.RenegotiationInfoExtension); ok {
+						r.Renegotiation = utls.RenegotiateNever
+					}
+				}
+			}
+			return spec
+		}
+	}
+
 	if f.pendingHTTP2 != "" {
 		if err := f.session.ApplyHTTP2(f.pendingHTTP2); err != nil {
 			slog.Error("fetch/stealth: invalid HTTP/2 fingerprint, falling back to default",

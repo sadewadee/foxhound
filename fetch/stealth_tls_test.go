@@ -285,9 +285,14 @@ func TestTLSStealthFetcher_JA3PoolPicks(t *testing.T) {
 
 // TestWithIdentity_FirefoxSetsBrowser verifies that a Firefox identity
 // configures session.Browser="firefox" so azuretls's built-in Firefox
-// ClientHelloSpec is used at request time. We deliberately do NOT auto-apply
-// any captured JA3 — the built-in spec tracks current Firefox releases more
-// reliably than hand-captured strings (see issue #41 commentary).
+// ClientHelloSpec is used as the base for the ClientHello. We deliberately do NOT
+// auto-apply any captured JA3 — the built-in spec tracks current Firefox releases
+// more reliably than hand-captured strings (see issue #41 commentary).
+//
+// Note: since v0.0.27, GetClientHelloSpec is always non-nil after NewStealth —
+// it wraps the browser's built-in spec with a RenegotiateNever patch (issue #43 fix).
+// The old invariant "GetClientHelloSpec == nil means built-in" no longer holds.
+// Rely on session.Browser to determine which base spec is used.
 func TestWithIdentity_FirefoxSetsBrowser(t *testing.T) {
 	p := identity.Generate(identity.WithBrowser(identity.BrowserFirefox))
 	f := fetch.NewStealth(fetch.WithIdentity(p))
@@ -296,10 +301,10 @@ func TestWithIdentity_FirefoxSetsBrowser(t *testing.T) {
 	if got := f.Session().Browser; got != "firefox" {
 		t.Errorf("session.Browser = %q, want %q", got, "firefox")
 	}
-	// GetClientHelloSpec must be nil — azuretls's built-in
-	// GetLastFirefoxVersion handles ClientHello at request time.
-	if f.Session().GetClientHelloSpec != nil {
-		t.Error("session.GetClientHelloSpec is non-nil; WithIdentity must not auto-apply a captured JA3")
+	// GetClientHelloSpec is always non-nil after NewStealth (renegotiation wrapper).
+	// Verify the wrapper is installed and returns a valid spec.
+	if f.Session().GetClientHelloSpec == nil {
+		t.Error("session.GetClientHelloSpec must not be nil (renegotiation wrapper for issue #43 not installed)")
 	}
 	// HTTP2Transport must be nil — never call ApplyHTTP2 from WithIdentity.
 	if f.Session().HTTP2Transport != nil {
@@ -325,7 +330,9 @@ func TestWithIdentity_ExplicitJA3StillWorks(t *testing.T) {
 
 // TestWithIdentity_ChromeSetsBrowser verifies non-Firefox identity paths
 // also configure session.Browser correctly so azuretls picks the matching
-// built-in ClientHello.
+// built-in ClientHello as the base spec.
+//
+// Note: since v0.0.27, GetClientHelloSpec is always non-nil (renegotiation wrapper).
 func TestWithIdentity_ChromeSetsBrowser(t *testing.T) {
 	p := identity.Generate(identity.WithBrowser(identity.BrowserChrome))
 	f := fetch.NewStealth(fetch.WithIdentity(p))
@@ -334,8 +341,9 @@ func TestWithIdentity_ChromeSetsBrowser(t *testing.T) {
 	if got := f.Session().Browser; got != "chrome" {
 		t.Errorf("session.Browser = %q, want %q", got, "chrome")
 	}
-	if f.Session().GetClientHelloSpec != nil {
-		t.Error("session.GetClientHelloSpec must be nil; rely on azuretls built-in spec")
+	// GetClientHelloSpec is always non-nil (renegotiation wrapper for issue #43).
+	if f.Session().GetClientHelloSpec == nil {
+		t.Error("session.GetClientHelloSpec must not be nil (renegotiation wrapper for issue #43 not installed)")
 	}
 }
 
@@ -381,6 +389,95 @@ func TestNewStealth_WithStrictTLSVerify_CoexistsWithIdentity(t *testing.T) {
 	if got := f.Session().Browser; got != "firefox" {
 		t.Errorf("session.Browser = %q, want %q after WithIdentity(firefox)", got, "firefox")
 	}
+}
+
+// TestNewStealth_GetClientHelloSpec_ForcesRenegotiateNever is the definitive
+// regression test for the TLS renegotiation panic (issue #43).
+//
+// The v0.0.24 fix (ModifyConfig alone) was a NO-OP. The real overwrite path:
+//
+//  1. connection.go calls s.ModifyConfig(&config) → sets config.Renegotiation=RenegotiateNever
+//  2. connection.go calls ApplyPreset(specs) which iterates extensions calling writeToUConn.
+//  3. RenegotiationInfoExtension.writeToUConn (u_tls_extensions.go:1687) does
+//     uc.config.Renegotiation = e.Renegotiation (= RenegotiateOnceAsClient in Firefox spec).
+//  4. Final value is RenegotiateOnceAsClient — ModifyConfig's work is overwritten.
+//
+// The real fix: wrap GetClientHelloSpec so the RenegotiationInfoExtension inside
+// the spec has Renegotiation=RenegotiateNever BEFORE ApplyPreset reads it.
+// This test exercises the actual mechanism ApplyPreset reads.
+//
+// Run: go test -tags tls ./fetch/...
+func TestNewStealth_GetClientHelloSpec_ForcesRenegotiateNever(t *testing.T) {
+	t.Run("default session spec has RenegotiateNever", func(t *testing.T) {
+		f := fetch.NewStealth()
+		defer f.Close()
+
+		specFn := f.Session().GetClientHelloSpec
+		if specFn == nil {
+			t.Fatal("GetClientHelloSpec must be non-nil after NewStealth: spec wrapper was not installed (real fix for issue #43 missing)")
+		}
+
+		spec := specFn()
+		if spec == nil {
+			t.Fatal("GetClientHelloSpec() returned nil spec")
+		}
+
+		var found bool
+		for _, ext := range spec.Extensions {
+			r, ok := ext.(*utls.RenegotiationInfoExtension)
+			if !ok {
+				continue
+			}
+			found = true
+			if r.Renegotiation != utls.RenegotiateNever {
+				t.Errorf("RenegotiationInfoExtension.Renegotiation = %v, want RenegotiateNever (%v) — ModifyConfig alone is insufficient; spec-level patch required (issue #43)",
+					r.Renegotiation, utls.RenegotiateNever)
+			}
+		}
+		if !found {
+			t.Fatal("RenegotiationInfoExtension not found in ClientHelloSpec.Extensions — cannot verify renegotiation fix")
+		}
+	})
+
+	t.Run("JA3 path spec also has RenegotiateNever", func(t *testing.T) {
+		// WithJA3 calls ApplyJa3 which sets session.GetClientHelloSpec to a
+		// closure over the custom spec. Our wrapper must still force RenegotiateNever
+		// on top of that custom spec.
+		b := presets.FirefoxLatest()
+		f := fetch.NewStealth(
+			fetch.WithIdentity(identity.Generate(identity.WithBrowser(identity.BrowserFirefox))),
+			fetch.WithJA3(b.JA3),
+		)
+		defer f.Close()
+
+		specFn := f.Session().GetClientHelloSpec
+		if specFn == nil {
+			t.Fatal("GetClientHelloSpec must be non-nil when WithJA3 is used")
+		}
+
+		spec := specFn()
+		if spec == nil {
+			t.Fatal("GetClientHelloSpec() returned nil spec after WithJA3")
+		}
+
+		var found bool
+		for _, ext := range spec.Extensions {
+			r, ok := ext.(*utls.RenegotiationInfoExtension)
+			if !ok {
+				continue
+			}
+			found = true
+			if r.Renegotiation != utls.RenegotiateNever {
+				t.Errorf("JA3 path: RenegotiationInfoExtension.Renegotiation = %v, want RenegotiateNever (%v) — spec wrapper must cover JA3 path too",
+					r.Renegotiation, utls.RenegotiateNever)
+			}
+		}
+		if !found {
+			// JA3-derived specs may or may not include RenegotiationInfoExtension
+			// depending on the captured ClientHello. Log rather than fail if absent.
+			t.Log("RenegotiationInfoExtension not present in JA3-derived spec (OK if the captured ClientHello omitted it)")
+		}
+	})
 }
 
 // TestNewStealth_ModifyConfig_SetsRenegotiateNever is a regression test for the
