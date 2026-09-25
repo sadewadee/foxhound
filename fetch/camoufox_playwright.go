@@ -2391,8 +2391,9 @@ func (f *CamoufoxFetcher) navigate(ctx context.Context, job *foxhound.Job) (*fox
 		resp, err := f.navigateWithPage(ctx, job, bctx, page)
 		// Always release back to pool; the pool's reset func will clean state.
 		// If restart() closed and nil-ed f.pool between Acquire and here, pool
-		// is still a valid pointer to the now-closed pool. Release on a closed
-		// pool is safe — it destroys the page and returns immediately.
+		// is still a valid pointer to the now-closed pool. Release handles
+		// that: it re-checks p.closed under the pool lock and destroys the
+		// page instead of returning it to the closed channel.
 		pool.Release(page)
 		return resp, err
 	}

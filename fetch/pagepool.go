@@ -226,9 +226,31 @@ func (p *PagePool) Release(page any) {
 	p.released.Add(1)
 
 	// Try to return to pool, drop if full.
+	//
+	// p.mu is held across the check and the send so Close can never run its
+	// close(p.pages) between them. Checking closed and then sending outside
+	// the lock is a check-then-act gap: a Close that interleaves in between
+	// leaves this send writing to a closed channel, which panics (observed in
+	// prod as `panic: send on closed channel` from navigate's Release).
+	// The send is non-blocking (select/default), so holding the mutex costs
+	// nothing; the reset and destroy paths above stay outside this lock.
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		if p.destroy != nil {
+			_ = p.destroy(page)
+		}
+		p.usageMu.Lock()
+		delete(p.usageCount, page)
+		p.usageMu.Unlock()
+		p.created.Add(-1)
+		return
+	}
 	select {
 	case p.pages <- page:
+		p.mu.Unlock()
 	default:
+		p.mu.Unlock()
 		slog.Warn("pagepool: pool full, destroying extra page")
 		if p.destroy != nil {
 			_ = p.destroy(page)
@@ -241,15 +263,24 @@ func (p *PagePool) Release(page any) {
 }
 
 // Close destroys all pooled pages and prevents further acquisitions.
+// It is idempotent: calling it more than once is a no-op after the first
+// call, so a restart racing an explicit Close cannot panic with
+// "close of closed channel".
 func (p *PagePool) Close() error {
 	if p == nil {
 		return nil
 	}
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil
+	}
 	p.closed = true
-	p.mu.Unlock()
-
+	// close(p.pages) under p.mu: every Release that could still send holds
+	// p.mu across its check-and-send, so holding it here guarantees no sender
+	// is in flight while the channel is closed.
 	close(p.pages)
+	p.mu.Unlock()
 	for page := range p.pages {
 		if p.destroy != nil {
 			_ = p.destroy(page)
@@ -361,10 +392,27 @@ func (p *PagePool) WarmUp(n int) int {
 			slog.Warn("pagepool: warmup create failed", "err", err, "created_so_far", created)
 			break
 		}
+		// Same rule as Release: hold p.mu across the closed-check and the
+		// non-blocking send, so a concurrent Close cannot close the channel in
+		// between. If the pool closed while create() was running (e.g. a
+		// fetcher restart during warm-up), destroy the page, roll the claimed
+		// slot back, and stop warming — the pool is going away.
+		p.mu.Lock()
+		if p.closed {
+			p.mu.Unlock()
+			if p.destroy != nil {
+				_ = p.destroy(page)
+			}
+			p.created.Add(-1)
+			slog.Debug("pagepool: warmup stopped, pool closed", "created_so_far", created)
+			break
+		}
 		select {
 		case p.pages <- page:
+			p.mu.Unlock()
 			created++
 		default:
+			p.mu.Unlock()
 			if p.destroy != nil {
 				_ = p.destroy(page)
 			}
