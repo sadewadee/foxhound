@@ -23,6 +23,49 @@ func newRacePool(maxSize int) (*fetch.PagePool, *atomic.Int64) {
 	return pool, &destroyed
 }
 
+// TestPagePool_WarmUpDuringClose is the regression test for the WarmUp twin
+// of the Release race: WarmUp created pages and then sent them on p.pages
+// without holding p.mu and without checking p.closed. A Close landing between
+// a create() and its send (e.g. a fetcher restart while WarmUp is still
+// filling a fresh pool) panicked with `send on closed channel`. The slow
+// create widens that window so the old code fails reliably.
+//
+// On the fixed code WarmUp holds p.mu across the closed-check and the
+// non-blocking send — mirroring Release — and stops warming once the pool is
+// closed, so nothing panics regardless of interleaving.
+func TestPagePool_WarmUpDuringClose(t *testing.T) {
+	const iterations = 80
+
+	for round := 0; round < iterations; round++ {
+		var destroyed atomic.Int64
+		pool := fetch.NewPagePool(8,
+			func() (any, error) {
+				// Slow enough for the concurrent Close to land between this
+				// create and the send that follows it.
+				time.Sleep(time.Millisecond)
+				return "page", nil
+			},
+			func(any) error { destroyed.Add(1); return nil },
+			fetch.WithPageReset(func(any) error { return nil }),
+		)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pool.WarmUp(8)
+		}()
+
+		// Close while WarmUp is still creating pages.
+		_ = pool.Close()
+		wg.Wait()
+
+		if got := destroyed.Load(); got == 0 {
+			t.Fatalf("round %d: nothing was destroyed — WarmUp made no progress against the closer", round)
+		}
+	}
+}
+
 // TestPagePool_ReleaseDuringClose is the regression test for the production
 // panic `panic: send on closed channel` (serp-scraper enrich worker,
 // 2026-09-25, stack: PagePool.Release ← CamoufoxFetcher.navigate).

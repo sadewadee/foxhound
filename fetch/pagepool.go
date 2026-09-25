@@ -392,10 +392,27 @@ func (p *PagePool) WarmUp(n int) int {
 			slog.Warn("pagepool: warmup create failed", "err", err, "created_so_far", created)
 			break
 		}
+		// Same rule as Release: hold p.mu across the closed-check and the
+		// non-blocking send, so a concurrent Close cannot close the channel in
+		// between. If the pool closed while create() was running (e.g. a
+		// fetcher restart during warm-up), destroy the page, roll the claimed
+		// slot back, and stop warming — the pool is going away.
+		p.mu.Lock()
+		if p.closed {
+			p.mu.Unlock()
+			if p.destroy != nil {
+				_ = p.destroy(page)
+			}
+			p.created.Add(-1)
+			slog.Debug("pagepool: warmup stopped, pool closed", "created_so_far", created)
+			break
+		}
 		select {
 		case p.pages <- page:
+			p.mu.Unlock()
 			created++
 		default:
+			p.mu.Unlock()
 			if p.destroy != nil {
 				_ = p.destroy(page)
 			}
